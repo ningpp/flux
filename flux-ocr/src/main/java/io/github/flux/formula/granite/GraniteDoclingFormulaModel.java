@@ -1,0 +1,209 @@
+package io.github.flux.formula.granite;
+
+import ai.djl.huggingface.tokenizers.HuggingFaceTokenizer;
+import ai.djl.ndarray.NDArray;
+import ai.djl.ndarray.NDArrays;
+import ai.djl.ndarray.NDList;
+import ai.djl.ndarray.NDManager;
+import ai.djl.ndarray.index.NDIndex;
+import ai.djl.ndarray.types.DataType;
+import ai.djl.ndarray.types.Shape;
+import ai.onnxruntime.OnnxJavaType;
+import ai.onnxruntime.OrtEnvironment;
+import io.github.flux.core.BatchPredictor;
+import io.github.flux.core.FormulaRecognitionResult;
+import io.github.flux.core.PreProcessResult;
+import io.github.flux.exception.FluxException;
+import io.github.flux.util.ArrayUtil;
+import io.github.flux.util.IOUtil;
+import io.github.flux.util.ImageUtil;
+import org.opencv.core.Mat;
+
+import java.io.File;
+import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+
+public class GraniteDoclingFormulaModel extends BatchPredictor<PreProcessResult, FormulaRecognitionResult> {
+
+    public static final Set<String> MODEL_NAMES = Set.of(
+            "granite-docling-258M"
+    );
+
+    private final GraniteDoclingEncoderModel encoderModel;
+    private final GraniteDoclingEmbedModel embedModel;
+    private final GraniteDoclingDecoderModel decoderModel;
+    private final HuggingFaceTokenizer tokenizer;
+    private final int maxLength;
+
+    public GraniteDoclingFormulaModel(final String modelRootDir,
+                                      final String modelName,
+                                      final int gpuIndex,
+                                      final OrtEnvironment env,
+                                      final int maxLength) {
+        if (!MODEL_NAMES.contains(modelName)) {
+            throw new FluxException("not supported nougat latex model: " + modelName);
+        }
+
+        this.maxLength = maxLength;
+        final String modelDir = modelRootDir + File.separator + modelName;
+        try {
+            this.encoderModel = new GraniteDoclingEncoderModel(new File(modelDir, "vision_encoder.onnx").getAbsolutePath(),
+                    gpuIndex, env);
+            this.embedModel = new GraniteDoclingEmbedModel(new File(modelDir, "embed_tokens.onnx").getAbsolutePath(),
+                    gpuIndex, env);
+            this.tokenizer = HuggingFaceTokenizer.newInstance(Paths.get(modelDir));
+            this.decoderModel = new GraniteDoclingDecoderModel(
+                    new File(
+                            modelDir,
+                            //"decoder_model_merged_fp16.onnx"
+                            "decoder_model_merged.onnx"
+                    ).getAbsolutePath(),
+                    gpuIndex,
+                    env,
+                    OnnxJavaType.FLOAT
+            );
+        } catch (Exception e) {
+            throw new FluxException(e);
+        }
+    }
+
+    @Override
+    public List<FormulaRecognitionResult> doBatchPredict(List<PreProcessResult> mats, NDManager manager, Map<String, Object> extraParameters) {
+        List<FormulaRecognitionResult> results = new ArrayList<>();
+        for (PreProcessResult ppr : mats) {
+            results.add(_predict(ppr.mat(), manager));
+        }
+        return results;
+    }
+
+    @Override
+    public PreProcessResult processRgb(Mat rgbMat, NDManager manager) {
+        return new PreProcessResult(rgbMat, null);
+    }
+
+    private FormulaRecognitionResult _predict(Mat image, NDManager manager) {
+        try {
+            long image_token_id = 100270;
+            long eos_token_id = 100257;
+            int num_hidden_layers = 30;
+            int num_key_value_heads = 3;
+            int head_dim = 64;
+
+            Map<String, NDArray> past_key_values = new HashMap<>();
+            for (String kv : new String[]{"key", "value"}) {
+                for (int layer = 0; layer < num_hidden_layers; layer++) {
+                    past_key_values.put(String.format(Locale.ROOT,
+                                    "past_key_values.%d.%s", layer, kv),
+                            manager.zeros(new Shape(1, num_key_value_heads, 0, head_dim), DataType.FLOAT32));
+                }
+            }
+
+            NDArray imgNdArray = ImageUtil.toNDArrayUint8(image, manager);
+            String requestText = Idefics3Processor.apply_chat_template("Convert formula to LaTeX.");
+            // cost ~40ms
+            Idefics3PreProcessResult preResult = Idefics3ImageProcessor.process(tokenizer, requestText, imgNdArray, manager);
+            long[] input_ids_long = preResult.input_ids();
+            NDArray input_ids = manager.create(input_ids_long, new Shape(1, input_ids_long.length));
+            long[] attention_mask_long = preResult.attention_mask();
+
+            float[][][] image_feature_floats = encoderModel.predict(preResult.pixel_values(), preResult.pixel_attention_mask());
+
+            NDArray attention_mask = manager.create(attention_mask_long, new Shape(1, attention_mask_long.length));
+            long[] generated_tokens = new long[]{};
+            for (int i = 0; i < maxLength; i++) {
+                float[][][] inputs_embed_floats = embedModel.predict(input_ids);
+                NDArray image_features = ArrayUtil.toNDArray(manager, image_feature_floats);
+                NDArray inputs_embeds = ArrayUtil.toNDArray(manager, inputs_embed_floats);
+                if (i == 0) {
+                    mergeTextAndVisionEmbeddings(input_ids, image_token_id,
+                            inputs_embeds, image_features);
+                }
+
+                inputs_embeds = inputs_embeds.toType(DataType.FLOAT32, false);
+                attention_mask = attention_mask.toType(DataType.INT64, false);
+                GraniteDoclingDecodeResult decodeResult = decoderModel.predict(inputs_embeds, attention_mask,
+                        past_key_values);
+                float[][][] logits_floats = decodeResult.logits();
+                Map<String, float[][][][]> present_key_values = decodeResult.present_key_values();
+
+                past_key_values.forEach((_, pkv) -> IOUtil.close(pkv));
+                for (int layer = 0; layer < num_hidden_layers; layer++) {
+                    for (String kv : new String[]{"key", "value"}) {
+                        float[][][][] present_floats = present_key_values.get(String.format(Locale.ROOT,
+                                "present.%d.%s", layer, kv));
+                        past_key_values.put(String.format(Locale.ROOT,
+                                        "past_key_values.%d.%s", layer, kv),
+                                ArrayUtil.toNDArray(manager, present_floats));
+                    }
+                }
+
+                NDArray logits = ArrayUtil.toNDArray(manager, logits_floats);
+
+                NDArray lastLogits = logits.get(new NDIndex(":, -1, :"));
+                IOUtil.close(logits);
+                NDArray inputIds = lastLogits.argMax(-1);
+                IOUtil.close(lastLogits);
+                NDArray next_tokens = inputIds.expandDims(1);
+                IOUtil.close(inputIds);
+                input_ids = next_tokens;
+                NDArray ones = manager.ones(new Shape(1, 1), attention_mask.getDataType());
+                IOUtil.close(lastLogits);
+                attention_mask = NDArrays.concat(new NDList(attention_mask, ones), -1);
+                long[] nextTokenIds = next_tokens.toLongArray();
+                generated_tokens = ArrayUtil.concat(generated_tokens, nextTokenIds);
+                if (input_ids.eq(eos_token_id).all().getBoolean()) {
+                    break;
+                }
+            }
+
+            image.release();
+            past_key_values.forEach((_, pkv) -> IOUtil.close(pkv));
+            IOUtil.close(imgNdArray);
+            IOUtil.close(input_ids);
+            IOUtil.close(attention_mask);
+            return new FormulaRecognitionResult(List.of(tokenizer.decode(generated_tokens, true)), generated_tokens, -1);
+        } catch (Exception e) {
+            throw new FluxException(e);
+        }
+    }
+
+    private void mergeTextAndVisionEmbeddings(NDArray inputIds, long imageTokenId,
+                                              NDArray inputsEmbeds, NDArray imageFeatures) {
+
+        // 1. 生成 mask: (1, seqLen)
+        NDArray mask = inputIds.eq(imageTokenId);  // boolean mask
+
+        // 2. 找到 True 的位置索引
+        NDArray positions = mask.nonzero();  // shape: (num_patches, 2)
+        NDArray tokenPositions = positions.get(":, 1");  // 取第二列（序列维度）
+
+        // 3. reshape image features 确保形状匹配
+        NDArray reshapedImageFeatures = imageFeatures.reshape(-1, inputsEmbeds.getShape().get(2));
+
+        // 4. 替换 embedding
+        for (int i = 0; i < tokenPositions.size(); i++) {
+            long pos = tokenPositions.getLong(i);
+            NDIndex idx = new NDIndex("0," + pos + ",:");
+            inputsEmbeds.set(idx, reshapedImageFeatures.get(i));
+        }
+
+        IOUtil.close(tokenPositions);
+        IOUtil.close(positions);
+        IOUtil.close(mask);
+        IOUtil.close(inputIds);
+    }
+
+    @Override
+    public void close() throws Exception {
+        IOUtil.close(encoderModel);
+        IOUtil.close(decoderModel);
+        IOUtil.close(embedModel);
+        IOUtil.close(tokenizer);
+    }
+
+}

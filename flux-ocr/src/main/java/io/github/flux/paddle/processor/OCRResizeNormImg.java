@@ -1,0 +1,191 @@
+package io.github.flux.paddle.processor;
+
+import org.opencv.core.Core;
+import org.opencv.core.CvType;
+import org.opencv.core.Mat;
+import org.opencv.core.Rect;
+import org.opencv.core.Scalar;
+import org.opencv.core.Size;
+import org.opencv.imgproc.Imgproc;
+
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * Gemini 2.5 Pro
+ */
+public class OCRResizeNormImg implements ImageProcessor {
+
+    private final int[] recImageShape;
+    private final int[] inputShape;
+    private final int maxImgW;
+
+    public OCRResizeNormImg() {
+        this(new int[]{3, 48, 320}, null);
+    }
+
+    public OCRResizeNormImg(int[] recImageShape, int[] inputShape) {
+        this.recImageShape = recImageShape;
+        this.inputShape = inputShape;
+        this.maxImgW = 3200;
+    }
+
+    /**
+     * Resizes and normalizes the image.
+     * @param img The input image as a Mat.
+     * @param maxWhRatio The maximum width to height ratio.
+     * @return The processed image as a Mat.
+     */
+    public Mat resizeNormImg(Mat img, double maxWhRatio) {
+        int imgC = recImageShape[0];
+        int imgH = recImageShape[1];
+        int imgW = recImageShape[2];
+
+        if (img.channels() != imgC) {
+            throw new IllegalArgumentException("Input image channels must be " + imgC);
+        }
+
+        imgW = (int) (imgH * maxWhRatio);
+
+        Mat resizedImage = new Mat();
+        int resizedW;
+
+        if (imgW > this.maxImgW) {
+            Imgproc.resize(img, resizedImage, new Size(this.maxImgW, imgH));
+            resizedW = this.maxImgW;
+            imgW = this.maxImgW;
+        } else {
+            int h = img.rows();
+            int w = img.cols();
+            double ratio = w / (double) h;
+            if (Math.ceil(imgH * ratio) > imgW) {
+                resizedW = imgW;
+            } else {
+                resizedW = (int) Math.ceil(imgH * ratio);
+            }
+            Imgproc.resize(img, resizedImage, new Size(resizedW, imgH));
+        }
+
+        // Convert to float32
+        resizedImage.convertTo(resizedImage, CvType.CV_32F);
+
+        // Transpose from HWC to CHW
+        List<Mat> channels = new ArrayList<>();
+        Core.split(resizedImage, channels);
+        Mat transposed = new Mat();
+        Core.merge(channels, transposed);
+        // The actual transpose of axes (like numpy.transpose(2,0,1)) is complex.
+        // A common way for deep learning is to split channels and then process.
+        // For normalization, we can do it before splitting.
+
+        // Normalization: (image / 255.0 - 0.5) / 0.5
+        resizedImage.convertTo(resizedImage, CvType.CV_32F, 1.0 / 255.0);
+        Core.subtract(resizedImage, new Scalar(0.5, 0.5, 0.5), resizedImage);
+        Core.divide(resizedImage, new Scalar(0.5, 0.5, 0.5), resizedImage);
+
+        // Create padding image
+        Mat paddingIm = Mat.zeros(imgH, imgW, CvType.CV_32FC3);
+        Mat roi = new Mat(paddingIm, new Rect(0, 0, resizedW, imgH));
+        resizedImage.copyTo(roi);
+
+        // Transpose for the final CHW layout if needed by the model
+        // This creates a single Mat with data in CHW order.
+        Mat finalImage = new Mat(imgH, imgW, CvType.CV_32FC3);
+        float[] finalImageData = new float[imgC * imgH * imgW];
+        float[] paddingImData = new float[imgH * imgW * imgC];
+        paddingIm.get(0, 0, paddingImData);
+
+        int offset = 0;
+        for (int c = 0; c < imgC; c++) {
+            for (int h = 0; h < imgH; h++) {
+                for (int w = 0; w < imgW; w++) {
+                    finalImageData[offset++] = paddingImData[(h * imgW + w) * imgC + c];
+                }
+            }
+        }
+        finalImage.put(0, 0, finalImageData);
+
+        for (Mat mat : channels) {
+            mat.release();
+        }
+        transposed.release();
+        resizedImage.release();
+        roi.release();
+        paddingIm.release();
+        resizedImage.release();
+        img.release();
+
+        // Reshape to (C, H, W)
+        return finalImage;
+    }
+
+    @Override
+    public Mat process(Mat img) {
+        if (this.inputShape == null) {
+            return resize(img);
+        } else {
+            return staticResize(img);
+        }
+    }
+
+    /**
+     * Dynamic resizing based on image aspect ratio.
+     * @param img The input image.
+     * @return The resized and normalized image.
+     */
+    public Mat resize(Mat img) {
+        int imgH = recImageShape[1];
+        int imgW = recImageShape[2];
+
+        double maxWhRatio = (double) imgW / imgH;
+        int h = img.rows();
+        int w = img.cols();
+        double whRatio = w * 1.0 / h;
+        maxWhRatio = Math.max(maxWhRatio, whRatio);
+
+        return resizeNormImg(img, maxWhRatio);
+    }
+
+    /**
+     * Static resizing to a fixed shape.
+     * @param img The input image.
+     * @return The resized and normalized image.
+     */
+    public Mat staticResize(Mat img) {
+        int imgC = inputShape[0];
+        int imgH = inputShape[1];
+        int imgW = inputShape[2];
+
+        Mat resizedImage = new Mat();
+        Imgproc.resize(img, resizedImage, new Size(imgW, imgH));
+
+        // Normalization
+        resizedImage.convertTo(resizedImage, CvType.CV_32F, 1.0 / 255.0);
+        Core.subtract(resizedImage, new Scalar(0.5, 0.5, 0.5), resizedImage);
+        Core.divide(resizedImage, new Scalar(0.5, 0.5, 0.5), resizedImage);
+
+        // Transpose from HWC to CHW if needed
+        Mat finalImage = new Mat(imgC * imgH * imgW, 1, CvType.CV_32F);
+        float[] finalImageData = new float[imgC * imgH * imgW];
+        float[] resizedImageData = new float[imgH * imgW * imgC];
+        resizedImage.get(0, 0, resizedImageData);
+
+        int offset = 0;
+        for (int c = 0; c < imgC; c++) {
+            for (int h = 0; h < imgH; h++) {
+                for (int w = 0; w < imgW; w++) {
+                    finalImageData[offset++] = resizedImageData[(h * imgW + w) * imgC + c];
+                }
+            }
+        }
+        finalImage.put(0, 0, finalImageData);
+
+        Mat result = finalImage.reshape(1, new int[]{imgC, imgH, imgW});
+
+        resizedImage.release();
+        finalImage.release();
+        img.release();
+        return result;
+    }
+
+}
