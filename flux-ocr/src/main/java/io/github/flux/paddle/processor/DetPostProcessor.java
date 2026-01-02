@@ -8,6 +8,7 @@ import ai.djl.ndarray.types.DataType;
 import ai.djl.ndarray.types.Shape;
 import io.github.flux.core.ObjectDetectionResult;
 import io.github.flux.exception.FluxException;
+import io.github.flux.util.ArrayUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -179,6 +180,17 @@ public class DetPostProcessor {
             return List.of();
         }
 
+        if (currentBoxes.getShape().get(1) == 8) {
+            currentBoxes = sortBoxes(manager, currentBoxes);
+        }
+        /*
+        if boxes.shape[1] == 8:
+            # Sort boxes by their order
+            sorted_idx = np.lexsort((-boxes[:, 7], boxes[:, 6]))
+            sorted_boxes = boxes[sorted_idx]
+            boxes = sorted_boxes[:, :6]
+         */
+
         // Unclip boxes
         if (layoutUnclipRatio != null) {
             currentBoxes = unclipBoxes(currentBoxes, layoutUnclipRatio);
@@ -196,6 +208,52 @@ public class DetPostProcessor {
             throw new FluxException(
                     "The shape of boxes should be 6 or 10, instead of " + boxShape);
         }
+    }
+
+    /*
+     # Sort boxes by their order
+     */
+    private static NDArray sortBoxes(NDManager manager, NDArray boxes) {
+        Shape shape = boxes.getShape();
+        if (shape.get(1) != 8) {
+            return boxes;
+        }
+
+        int n = (int) shape.get(0);
+
+        // 转成 Java 数组
+        float[][] boxArr = ArrayUtil.convertToFloatArray(boxes);
+
+        // 构造索引数组
+        Integer[] indices = new Integer[n];
+        for (int i = 0; i < n; i++) {
+            indices[i] = i;
+        }
+
+        // 等价于 np.lexsort((-boxes[:,7], boxes[:,6]))
+        Arrays.sort(indices, new Comparator<Integer>() {
+            @Override
+            public int compare(Integer i1, Integer i2) {
+                // 先按第 6 列升序
+                int cmp = Float.compare(boxArr[i1][6], boxArr[i2][6]);
+                if (cmp != 0) {
+                    return cmp;
+                }
+                // 再按第 7 列降序
+                return Float.compare(boxArr[i2][7], boxArr[i1][7]);
+            }
+        });
+
+        // 排序并裁剪到前 6 列
+        float[][] sorted = new float[n][6];
+        for (int i = 0; i < n; i++) {
+            int idx = indices[i];
+            System.arraycopy(boxArr[idx], 0, sorted[i], 0, 6);
+        }
+
+        boxes.close();
+        // 转回 NDArray
+        return manager.create(sorted);
     }
 
     /**

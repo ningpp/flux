@@ -115,6 +115,33 @@ public final class ArrayUtil {
     }
 
     /**
+     * Convert NDArray to float[][] directly
+     */
+    public static float[][] convertToFloatArray(NDArray ndArray) {
+        // Get the shape of the NDArray
+        Shape shape = ndArray.getShape();
+
+        // Ensure it's 2D
+        if (shape.dimension() != 2) {
+            throw new IllegalArgumentException("NDArray must be 2D for long[][] conversion");
+        }
+
+        // Convert to float array (flattened)
+        float[] flatArray = ndArray.toFloatArray();
+
+        // Reshape to 2D
+        int rows = (int) shape.get(0);
+        int cols = (int) shape.get(1);
+
+        float[][] result = new float[rows][cols];
+        for (int i = 0; i < rows; i++) {
+            System.arraycopy(flatArray, i * cols, result[i], 0, cols);
+        }
+
+        return result;
+    }
+
+    /**
      * Convert NDArray to long[][] directly
      */
     public static long[][] convertToLongArray(NDArray ndArray) {

@@ -23,6 +23,7 @@ import java.util.Map;
 public class PaddleLayoutModel extends BatchPredictor<ProcessedMat, List<ObjectDetectionResult>> {
 
     public static final List<String> MODEL_NAMES = List.of(
+            "PP-DocLayoutV2",
             "PP-DocLayout_plus-L",
             "PP-DocLayout-L",
             "PP-DocLayout-M",
@@ -71,6 +72,34 @@ public class PaddleLayoutModel extends BatchPredictor<ProcessedMat, List<ObjectD
             "aside_text"
     );
 
+    private static final List<String> V2_LABELS = List.of(
+            "abstract",
+            "algorithm",
+            "aside_text",
+            "chart",
+            "content",
+            "display_formula",
+            "doc_title",
+            "figure_title",
+            "footer",
+            "footer_image",
+            "footnote",
+            "formula_number",
+            "header",
+            "header_image",
+            "image",
+            "inline_formula",
+            "number",
+            "paragraph_title",
+            "reference",
+            "reference_content",
+            "seal",
+            "table",
+            "text",
+            "vertical_text",
+            "vision_footnote"
+    );
+
     private final PaddleObjectDetectionPredictor predictor;
 
     public PaddleLayoutModel(final String modelDir,
@@ -108,6 +137,10 @@ public class PaddleLayoutModel extends BatchPredictor<ProcessedMat, List<ObjectD
             resizeSize = 640;
             normalize = new Normalize(1.0 / 255.0, new double[]{0, 0, 0}, new double[]{1, 1, 1});
             detPostProcessor = new DetPostProcessor(PP_LABELS_17);
+        } else if ("PP-DocLayoutV2".equals(modelName)) {
+            resizeSize = 800;
+            normalize = new Normalize(1.0 / 255.0, new double[]{0, 0, 0}, new double[]{1, 1, 1});
+            detPostProcessor = new DetPostProcessor(V2_LABELS);
         } else {
             throw new FluxException("Not Support Model: " + modelName);
         }
