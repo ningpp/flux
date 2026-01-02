@@ -250,6 +250,20 @@ public final class ArrayUtil {
         return flat;
     }
 
+    public static float[] flat(float[][] data) {
+        int d1 = data.length;
+        int d2 = data[0].length;
+        float[] flat = new float[d1 * d2];
+        int idx = 0;
+        for (int i = 0; i < d1; i++) {
+            for (int j = 0; j < d2; j++) {
+                flat[idx++] = data[i][j];
+            }
+        }
+        // 创建并 reshape
+        return flat;
+    }
+
     public static NDArray toNDArray(NDManager manager, float[][][][] data) {
         int d1 = data.length;
         int d2 = data[0].length;

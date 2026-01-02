@@ -6,9 +6,9 @@ import io.github.flux.core.BatchPredictor;
 import io.github.flux.core.ObjectDetectionResult;
 import io.github.flux.core.ProcessedMat;
 import io.github.flux.exception.FluxException;
-import io.github.flux.paddle.processor.ImageProcessor;
 import io.github.flux.paddle.predictor.PaddleObjectDetectionPredictor;
 import io.github.flux.paddle.processor.DetPostProcessor;
+import io.github.flux.paddle.processor.ImageProcessor;
 import io.github.flux.paddle.processor.Normalize;
 import io.github.flux.paddle.processor.ObjectDetectionResize;
 import io.github.flux.paddle.processor.ResizeForObjectDect;
@@ -16,7 +16,6 @@ import io.github.flux.paddle.processor.ToCHWImage;
 import org.opencv.core.Mat;
 import org.opencv.imgproc.Imgproc;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -158,11 +157,7 @@ public class PaddleLayoutModel extends BatchPredictor<ProcessedMat, List<ObjectD
 
     @Override
     public List<List<ObjectDetectionResult>> doBatchPredict(List<ProcessedMat> mats, NDManager manager, Map<String, Object> extraParameters) {
-        List<List<ObjectDetectionResult>> all = new ArrayList<>();
-        for (ProcessedMat mat : mats) {
-            all.add(predictor.predict(mat, manager, true));
-        }
-        return all;
+        return predictor.predict(mats, manager, true);
     }
 
     @Override
