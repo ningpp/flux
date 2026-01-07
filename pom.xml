@@ -85,6 +85,7 @@
         <jna.version>5.18.1</jna.version>
         <onnxruntime.version>1.23.2</onnxruntime.version>
         <bytedeco-opencv.version>4.11.0-1.5.12</bytedeco-opencv.version>
+        <ph-fonts.version>6.1.0</ph-fonts.version>
         <snakeyaml.version>2.4</snakeyaml.version>
         <maven-clean-plugin.version>3.4.0</maven-clean-plugin.version>
         <maven-compiler-plugin.version>3.13.0</maven-compiler-plugin.version>
@@ -165,6 +166,11 @@
                 <groupId>org.bytedeco</groupId>
                 <artifactId>opencv-platform</artifactId>
                 <version>${bytedeco-opencv.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.helger.font</groupId>
+                <artifactId>ph-fonts-open-sans</artifactId>
+                <version>${ph-fonts.version}</version>
             </dependency>
             <dependency>
                 <groupId>org.yaml</groupId>

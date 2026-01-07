@@ -80,6 +80,11 @@
             <artifactId>opencv-platform</artifactId>
         </dependency>
         <dependency>
+            <groupId>com.helger.font</groupId>
+            <artifactId>ph-fonts-open-sans</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
             <groupId>org.yaml</groupId>
             <artifactId>snakeyaml</artifactId>
         </dependency>

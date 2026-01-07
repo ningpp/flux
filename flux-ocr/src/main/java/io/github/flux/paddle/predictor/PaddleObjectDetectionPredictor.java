@@ -170,10 +170,16 @@ public class PaddleObjectDetectionPredictor extends BatchPredictor<ProcessedMat,
             float[][] pred_boxes = (float[][]) pred_boxes_value.getValue();
 
             NDArray boxes = manager.create(pred_boxes);
+            long[] inferResultShape = boxes.getShape().getShape();
+            NDArray reshaped = boxes.reshape(images.size(), inferResultShape[0]/images.size(), inferResultShape[1]);
+            NDArray[] results = new NDArray[images.size()];
+            for (int i = 0; i < images.size(); i++) {
+                results[i] = reshaped.get(i);
+            }
 
             List<List<ObjectDetectionResult>> postProcessResults = new ArrayList<>();
             for (int i = 0; i < images.size(); i++) {
-                postProcessResults.add(postProcessor.process(boxes,
+                postProcessResults.add(postProcessor.process(results[i],
                         new long[]{
                                 resizeResults.get(i).ori_img_size()[0],
                                 resizeResults.get(i).ori_img_size()[1]
@@ -183,8 +189,10 @@ public class PaddleObjectDetectionPredictor extends BatchPredictor<ProcessedMat,
                         null,
                         null
                 ));
+                IOUtil.close(results[i]);
             }
 
+            IOUtil.close(reshaped);
             boxes.close();
             OnnxUtil.closeTensors(inputs);
             onnxResult.close();
