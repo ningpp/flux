@@ -3,8 +3,12 @@ package io.github.flux.util;
 import ai.djl.ndarray.NDArray;
 import ai.djl.ndarray.NDManager;
 import ai.djl.ndarray.types.Shape;
+import ai.onnxruntime.OnnxTensor;
+import ai.onnxruntime.OrtEnvironment;
+import ai.onnxruntime.OrtException;
 import com.google.gson.Gson;
 
+import java.nio.FloatBuffer;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -231,6 +235,50 @@ public final class ArrayUtil {
         System.arraycopy(array1, 0, result, 0, array1.length);
         System.arraycopy(array2, 0, result, array1.length, array2.length);
         return result;
+    }
+
+    public static OnnxTensor createOnnxTensor(float[][][][][] data, OrtEnvironment env) throws OrtException {
+        int d1 = data.length;
+        int d2 = data[0].length;
+        int d3 = data[0][0].length;
+        int d4 = data[0][0][0].length;
+        int d5 = data[0][0][0][0].length;
+        return OnnxTensor.createTensor(env, FloatBuffer.wrap(flat(data)), new long[] {d1, d2, d3, d4, d5});
+    }
+
+    public static float[] flat(float[][][][][] data) {
+        int d1 = data.length;
+        int d2 = data[0].length;
+        int d3 = data[0][0].length;
+        int d4 = data[0][0][0].length;
+        int d5 = data[0][0][0][0].length;
+        float[] flat = new float[d1 * d2 * d3 * d4 * d5];
+        int idx = 0;
+        for (int i = 0; i < d1; i++) {
+            for (int j = 0; j < d2; j++) {
+                for (int k = 0; k < d3; k++) {
+                    for (int l = 0; l < d4; l++) {
+                        for (int m = 0; m < d5; m++) {
+                            flat[idx++] = data[i][j][k][l][m];
+                        }
+                    }
+                }
+            }
+        }
+        // 创建并 reshape
+        return flat;
+    }
+
+    public static float[][][][] createZeros(int i, int j, int k, int m) {
+        return new float[Math.max(i, 1)][Math.max(j, 1)][Math.max(k, 1)][Math.max(m, 1)];
+    }
+
+    public static OnnxTensor createOnnxTensor(float[][][][] data, OrtEnvironment env) throws OrtException {
+        int d1 = data.length;
+        int d2 = data[0].length;
+        int d3 = data[0][0].length;
+        int d4 = data[0][0][0].length;
+        return OnnxTensor.createTensor(env, FloatBuffer.wrap(flat(data)), new long[] {d1, d2, d3, d4});
     }
 
     public static float[] flat(float[][][] data) {

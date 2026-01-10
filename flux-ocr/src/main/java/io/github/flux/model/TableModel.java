@@ -10,6 +10,8 @@ import io.github.flux.core.TableResult;
 import io.github.flux.dolphin.ByteDanceDolphinElementModel;
 import io.github.flux.dolphin.ByteDanceDolphinTableModel;
 import io.github.flux.exception.FluxException;
+import io.github.flux.unirec.UnirecPredictor;
+import io.github.flux.unirec.UnirecTableModel;
 import io.github.flux.util.CollectionUtil;
 import io.github.flux.util.IOUtil;
 import org.opencv.core.Mat;
@@ -23,7 +25,8 @@ public class TableModel extends BatchPredictor<PreProcessResult, TableResult> {
     private final BatchPredictor<PreProcessResult, TableResult> predictor;
 
     public static final Set<String> MODEL_NAMES = CollectionUtil.distinct(List.of(
-            ByteDanceDolphinElementModel.MODEL_NAMES
+            ByteDanceDolphinElementModel.MODEL_NAMES,
+            UnirecPredictor.MODEL_NAMES
     ));
 
     public TableModel(ModelParam param) {
@@ -34,11 +37,13 @@ public class TableModel extends BatchPredictor<PreProcessResult, TableResult> {
                       final String modelName,
                       final int gpuIndex,
                       final OrtEnvironment env) {
-        if (!MODEL_NAMES.contains(modelName)) {
+        if (ByteDanceDolphinElementModel.MODEL_NAMES.contains(modelName)) {
+            this.predictor = new ByteDanceDolphinTableModel(modelRootDir, modelName, gpuIndex, env, OnnxJavaType.FLOAT);
+        } else if (UnirecPredictor.MODEL_NAMES.contains(modelName)) {
+            this.predictor = new UnirecTableModel(new UnirecPredictor(modelRootDir, modelName, gpuIndex, env));
+        } else {
             throw new FluxException("not supported table model: " + modelName);
         }
-
-        this.predictor = new ByteDanceDolphinTableModel(modelRootDir, modelName, gpuIndex, env, OnnxJavaType.FLOAT);
     }
 
 

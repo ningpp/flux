@@ -12,6 +12,8 @@ import io.github.flux.dolphin.ByteDanceDolphinFormulaModel;
 import io.github.flux.exception.FluxException;
 import io.github.flux.formula.paddle.PaddleFormulaRecognitionPredictor;
 import io.github.flux.formula.pix2text.Pix2TextFormulaRecognitionPredictor;
+import io.github.flux.unirec.UnirecFormulaModel;
+import io.github.flux.unirec.UnirecPredictor;
 import io.github.flux.util.CollectionUtil;
 import io.github.flux.util.IOUtil;
 import org.opencv.core.Mat;
@@ -27,7 +29,8 @@ public class FormulaRecognitionModel extends BatchPredictor<PreProcessResult, Fo
     public static final Set<String> MODEL_NAMES = CollectionUtil.distinct(List.of(
             ByteDanceDolphinElementModel.MODEL_NAMES,
             PaddleFormulaRecognitionPredictor.MODEL_NAMES,
-            Pix2TextFormulaRecognitionPredictor.MODEL_NAMES
+            Pix2TextFormulaRecognitionPredictor.MODEL_NAMES,
+            UnirecPredictor.MODEL_NAMES
     ));
 
     public FormulaRecognitionModel(ModelParam param) {
@@ -38,16 +41,16 @@ public class FormulaRecognitionModel extends BatchPredictor<PreProcessResult, Fo
                                    final String modelName,
                                    final int gpuIndex,
                                    final OrtEnvironment env) {
-        if (!MODEL_NAMES.contains(modelName)) {
-            throw new FluxException("not supported formula model: " + modelName);
-        }
-
         if (ByteDanceDolphinElementModel.MODEL_NAMES.contains(modelName)) {
             this.predictor = new ByteDanceDolphinFormulaModel(modelRootDir, modelName, gpuIndex, env, OnnxJavaType.FLOAT);
         } else if (PaddleFormulaRecognitionPredictor.MODEL_NAMES.contains(modelName)) {
             this.predictor = new PaddleFormulaRecognitionPredictor(modelRootDir, modelName, gpuIndex, env);
-        } else {
+        } else if (Pix2TextFormulaRecognitionPredictor.MODEL_NAMES.contains(modelName)) {
             this.predictor = new Pix2TextFormulaRecognitionPredictor(modelRootDir, modelName, gpuIndex, env);
+        } else if (UnirecPredictor.MODEL_NAMES.contains(modelName)) {
+            this.predictor = new UnirecFormulaModel(new UnirecPredictor(modelRootDir, modelName, gpuIndex, env));
+        } else {
+            throw new FluxException("not supported formula model: " + modelName);
         }
     }
 
