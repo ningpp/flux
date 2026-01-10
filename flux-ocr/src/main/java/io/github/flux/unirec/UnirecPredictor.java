@@ -21,7 +21,7 @@ import ai.djl.ndarray.NDManager;
 import ai.onnxruntime.OrtEnvironment;
 import io.github.flux.core.BatchPredictor;
 import io.github.flux.core.PreProcessResult;
-import io.github.flux.dolphin.DolphinElementResult;
+import io.github.flux.core.TextResult;
 import io.github.flux.exception.FluxException;
 import io.github.flux.util.IOUtil;
 import org.opencv.core.Mat;
@@ -31,7 +31,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-public class UnirecPredictor extends BatchPredictor<PreProcessResult, DolphinElementResult> {
+public class UnirecPredictor extends BatchPredictor<PreProcessResult, TextResult> {
 
     public static final List<String> MODEL_NAMES = List.of(
             "unirec-0.1b"
@@ -56,8 +56,8 @@ public class UnirecPredictor extends BatchPredictor<PreProcessResult, DolphinEle
     }
 
     @Override
-    public List<DolphinElementResult> doBatchPredict(List<PreProcessResult> mats, NDManager manager, Map<String, Object> extraParameters) {
-        List<DolphinElementResult> results = new ArrayList<>(mats.size());
+    public List<TextResult> doBatchPredict(List<PreProcessResult> mats, NDManager manager, Map<String, Object> extraParameters) {
+        List<TextResult> results = new ArrayList<>(mats.size());
         for (PreProcessResult ppr : mats) {
             UnirecEncoderModelPredictResult encodeResult = encoderModel.predict(ppr, manager);
             results.add(decoderModel.predict(encodeResult));

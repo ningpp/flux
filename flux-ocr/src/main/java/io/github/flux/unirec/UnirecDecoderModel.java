@@ -25,7 +25,7 @@ import ai.onnxruntime.OrtSession.Result;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import io.github.flux.dolphin.DolphinElementResult;
+import io.github.flux.core.TextResult;
 import io.github.flux.exception.FluxException;
 import io.github.flux.util.ArrayUtil;
 import org.apache.commons.lang3.tuple.Pair;
@@ -86,7 +86,7 @@ public class UnirecDecoderModel implements AutoCloseable {
         }
     }
 
-    public DolphinElementResult predict(UnirecEncoderModelPredictResult encodeResult) {
+    public TextResult predict(UnirecEncoderModelPredictResult encodeResult) {
         try {
             int num_decoder_layers = 6;
             int num_heads = 6;
@@ -131,7 +131,7 @@ public class UnirecDecoderModel implements AutoCloseable {
             }
             long[] ids = new long[generatedTokens];
             System.arraycopy(generated_ids, 0, ids, 0, generatedTokens);
-            return new DolphinElementResult(clean_special_tokens(decodeTokenIds(ids)), ids, -1f);
+            return new TextResult(clean_special_tokens(decodeTokenIds(ids)), ids, -1f);
         } catch (Exception e) {
             throw new FluxException(e);
         }

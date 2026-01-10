@@ -6,6 +6,7 @@ import ai.onnxruntime.OnnxJavaType;
 import ai.onnxruntime.OrtEnvironment;
 import io.github.flux.core.BatchPredictor;
 import io.github.flux.core.PreProcessResult;
+import io.github.flux.core.TextResult;
 import io.github.flux.exception.FluxException;
 import io.github.flux.util.IOUtil;
 import org.opencv.core.Mat;
@@ -16,7 +17,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-public class ByteDanceDolphinElementModel extends BatchPredictor<PreProcessResult, DolphinElementResult> {
+public class ByteDanceDolphinElementModel extends BatchPredictor<PreProcessResult, TextResult> {
 
     public static final Set<String> MODEL_NAMES = Set.of(
             "Dolphin",
@@ -65,7 +66,7 @@ public class ByteDanceDolphinElementModel extends BatchPredictor<PreProcessResul
     }
 
     @Override
-    public List<DolphinElementResult> doBatchPredict(List<PreProcessResult> images, NDManager manager, Map<String, Object> extraParameters) {
+    public List<TextResult> doBatchPredict(List<PreProcessResult> images, NDManager manager, Map<String, Object> extraParameters) {
         String prompt = String.valueOf(extraParameters.getOrDefault("prompt", "Read text in the image."));
         try {
             String task_prompt = "<s>" + prompt + " <Answer/>";

@@ -10,6 +10,7 @@ import ai.onnxruntime.OnnxValue;
 import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtException;
 import ai.onnxruntime.OrtSession;
+import io.github.flux.core.TextResult;
 import io.github.flux.exception.FluxException;
 import io.github.flux.util.ArrayUtil;
 import io.github.flux.util.IOUtil;
@@ -70,7 +71,7 @@ public class DolphinDecoderModel implements AutoCloseable {
         }
     }
 
-    public List<DolphinElementResult> predict(String prompt, float[][][] encodeResultFloats, long[] decoder_input_ids, NDManager manager) throws OrtException {
+    public List<TextResult> predict(String prompt, float[][][] encodeResultFloats, long[] decoder_input_ids, NDManager manager) throws OrtException {
         int batchSize = encodeResultFloats.length;
         long[][] inputIds = new long[batchSize][];
         for (int i = 0; i < encodeResultFloats.length; i++) {
@@ -142,14 +143,14 @@ public class DolphinDecoderModel implements AutoCloseable {
         }
 
         IOUtil.close(encoder_hidden_states_tensor);
-        List<DolphinElementResult> results = new ArrayList<>();
+        List<TextResult> results = new ArrayList<>();
         for (long[] tokens : generated_tokens) {
             String text = tokenizer.decode(tokens, skipSpecialTokens);
             String noPromptText = text.replace(prompt, "").replace("<pad>", "").replace("</s>", "").strip();
             if (noPromptText.startsWith("$$") && noPromptText.endsWith("$$")) {
                 noPromptText = noPromptText.substring(2, noPromptText.length()-2);
             }
-            results.add(new DolphinElementResult(noPromptText, tokens, -1));
+            results.add(new TextResult(noPromptText, tokens, -1));
         }
         return results;
     }
