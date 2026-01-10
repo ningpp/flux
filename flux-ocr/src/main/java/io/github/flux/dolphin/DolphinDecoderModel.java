@@ -146,6 +146,9 @@ public class DolphinDecoderModel implements AutoCloseable {
         for (long[] tokens : generated_tokens) {
             String text = tokenizer.decode(tokens, skipSpecialTokens);
             String noPromptText = text.replace(prompt, "").replace("<pad>", "").replace("</s>", "").strip();
+            if (noPromptText.startsWith("$$") && noPromptText.endsWith("$$")) {
+                noPromptText = noPromptText.substring(2, noPromptText.length()-2);
+            }
             results.add(new DolphinElementResult(noPromptText, tokens, -1));
         }
         return results;
