@@ -72,6 +72,7 @@ public class UnirecEncoderModel implements AutoCloseable {
             float[][][][][] cross_v = (float[][][][][]) result.get(2).getValue();
             IOUtil.close(result);
             IOUtil.close(onnxInput);
+            IOUtil.close(ndList);
             return new UnirecEncoderModelPredictResult(hidden_states, cross_k, cross_v);
         } catch (Exception e) {
             throw new FluxException(e);
