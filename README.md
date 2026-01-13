@@ -7,6 +7,16 @@ Do not use in production.
 [![License](https://img.shields.io/badge/License-Apache%202-blue.svg)](LICENSE)
 
 
+## **Special Thanks**
+1. [PaddlePaddle/PaddleX](https://github.com/PaddlePaddle/PaddleX)
+2. [Topdu/OpenOCR](https://github.com/Topdu/OpenOCR)
+3. [breezedeus/Pix2Text](https://github.com/breezedeus/Pix2Text)
+4. [NormXU/nougat-latex-ocr](https://github.com/NormXU/nougat-latex-ocr)
+5. [huggingface/transformers](https://github.com/huggingface/transformers)
+6. [bytedance/Dolphin](https://github.com/bytedance/Dolphin/blob/v1.5)
+7. [docling-project/docling](https://github.com/docling-project/docling)
+
+
 ### Support Model Category
 | Model Category      | Status |
 |:--------------------|:------:|
