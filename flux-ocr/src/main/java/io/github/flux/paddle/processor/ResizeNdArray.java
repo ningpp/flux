@@ -21,6 +21,7 @@ import ai.djl.modality.cv.Image;
 import ai.djl.modality.cv.Image.Interpolation;
 import ai.djl.ndarray.NDArray;
 import io.github.flux.bytedeco.OpenCVImageFactory;
+import io.github.flux.util.IOUtil;
 import io.github.flux.util.ImageUtil;
 import org.opencv.core.Mat;
 import org.opencv.core.Size;
@@ -66,7 +67,11 @@ public class ResizeNdArray {
                 resized, new Size(width, height),
                 1, 1, interp);
         // 这个和Python的结果不一样ai.djl.modality.cv.util.NDImageUtils.resize(img, rescaledWidth, rescaledHeight, interp)
-        return ImageUtil.toNDArray(resized, img.getManager(), null);
+        NDArray ndArray = ImageUtil.toNDArray(resized, img.getManager(), null);
+        IOUtil.close((Mat) cv2Img.getWrappedImage());
+        IOUtil.close(resized);
+        IOUtil.close(img);
+        return ndArray;
     }
 
 }

@@ -17,6 +17,7 @@
  */
 package io.github.flux.paddle.processor;
 
+import io.github.flux.util.IOUtil;
 import org.opencv.core.Core;
 import org.opencv.core.CvType;
 import org.opencv.core.Mat;
@@ -43,17 +44,18 @@ public class ToCHWImage implements ImageProcessor {
         float[] chwData = new float[3 * channelSize];
 
         for (int c = 0; c < 3; c++) {
-            Mat channel = channels.get(c); // shape: 224×224
+            Mat channel = channels.get(c);
             float[] channelData = new float[channelSize];
             channel.get(0, 0, channelData);
             System.arraycopy(channelData, 0, chwData, c * channelSize, channelSize);
-            channel.release();
+            IOUtil.close(channel);
         }
 
-        // Create output Mat: size [3, 224, 224]
         Mat chw = new Mat(height, width, CvType.CV_32FC3);
         chw.put(0, 0, chwData);
 
+        IOUtil.close(channels);
+        IOUtil.close(img);
         return chw;
     }
 

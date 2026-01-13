@@ -22,7 +22,7 @@ import ai.onnxruntime.OnnxValue;
 import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtSession;
 import io.github.flux.core.ClassificationResult;
-import io.github.flux.core.TopkProcessor;
+import io.github.flux.paddle.processor.TopkProcessor;
 import io.github.flux.core.TopkResult;
 import io.github.flux.exception.FluxException;
 import io.github.flux.paddle.processor.ImageProcessor;

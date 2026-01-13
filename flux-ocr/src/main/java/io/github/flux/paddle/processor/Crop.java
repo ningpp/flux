@@ -17,6 +17,7 @@
  */
 package io.github.flux.paddle.processor;
 
+import io.github.flux.util.IOUtil;
 import org.opencv.core.Mat;
 import org.opencv.core.Range;
 
@@ -80,7 +81,9 @@ public class Crop implements ImageProcessor {
         Range colRange = new Range(x1, x2);
 
         // Extract the submatrix using the ranges
-        return img.submat(rowRange, colRange);
+        Mat result = img.submat(rowRange, colRange);
+        IOUtil.close(img);
+        return result;
     }
 
     /** 简单校验：保证 size 长度为 2、且均为正数 */
