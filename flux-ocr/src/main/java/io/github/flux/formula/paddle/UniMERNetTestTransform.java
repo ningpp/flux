@@ -21,6 +21,7 @@ import ai.djl.ndarray.NDArray;
 import ai.djl.ndarray.NDManager;
 import ai.djl.ndarray.types.DataType;
 import ai.djl.ndarray.types.Shape;
+import io.github.flux.core.MatManager;
 import io.github.flux.paddle.processor.ImageProcessor;
 import org.opencv.core.Core;
 import org.opencv.core.CvType;
@@ -57,17 +58,18 @@ public class UniMERNetTestTransform implements ImageProcessor {
     /**
      * Transforms a single image for UniMERNet testing.
      *
-     * @param img The input image as an OpenCV Mat object.
+     * @param matManager
+     * @param img        The input image as an OpenCV Mat object.
      * @return The transformed image as an OpenCV Mat object.
      */
     @Override
-    public Mat process(Mat img) {
+    public Mat process(MatManager matManager, Mat img) {
         // --- 1. Normalization ---
         // Corresponds to Python: img = (img.astype("float32") * scale - mean) / std
 
         // Convert image from 8-bit integer (0-255) to 32-bit float (0.0-1.0)
         // This handles both `astype("float32")` and `* scale` where scale is 1/255.0
-        Mat floatImg = new Mat();
+        Mat floatImg = matManager.newMat();
         img.convertTo(floatImg, CvType.CV_32F, 1.0 / 255.0);
 
         // Define mean and std. In OpenCV, we can use Scalar for per-channel operations.
@@ -80,7 +82,7 @@ public class UniMERNetTestTransform implements ImageProcessor {
 
         // --- 2. Convert to Grayscale ---
         // Corresponds to Python: cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        Mat grayscaleImage = new Mat();
+        Mat grayscaleImage = matManager.newMat();
         Imgproc.cvtColor(floatImg, grayscaleImage, Imgproc.COLOR_BGR2GRAY);
 
         // The np.squeeze step is not needed in Java, as cvtColor to GRAY
@@ -95,7 +97,7 @@ public class UniMERNetTestTransform implements ImageProcessor {
         }
 
         // Merge the list of channels back into a multi-channel Mat
-        Mat mergedImage = new Mat();
+        Mat mergedImage = matManager.newMat();
         Core.merge(channels, mergedImage);
 
         /*

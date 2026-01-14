@@ -5,6 +5,7 @@ import ai.djl.ndarray.NDArray;
 import ai.djl.ndarray.NDManager;
 import ai.djl.ndarray.types.DataType;
 import ai.djl.ndarray.types.Shape;
+import io.github.flux.core.MatManager;
 import org.opencv.core.Core;
 import org.opencv.core.CvType;
 import org.opencv.core.Mat;
@@ -34,10 +35,10 @@ public final class ImageUtil {
     private ImageUtil() {
     }
 
-    public static Mat crop(Mat src, int startx, int starty, int endx, int endy) {
+    public static Mat crop(MatManager matManager, Mat src, int startx, int starty, int endx, int endy) {
         // 定义矩形区域
         Rect roi = new Rect(startx, starty, endx - startx, endy - starty);
-        Mat mat = new Mat(src, roi);
+        Mat mat = matManager.newMat(src, roi);
 
         Mat result = mat.clone();
         IOUtil.close(mat);
@@ -52,7 +53,7 @@ public final class ImageUtil {
      * @param points  an N×2 int array of points defining the shape to crop
      * @return the cropped image as an NDArray
      */
-    public static Mat getMinAreaRectCrop(NDManager manager, Mat mat, int[][] points) {
+    public static Mat getMinAreaRectCrop(MatManager matManager, NDManager manager, Mat mat, int[][] points) {
         if (points.length != 4 || points[0].length != 2) {
             throw new IllegalArgumentException("points must be an N×2 array with N>=3");
         }
@@ -93,10 +94,10 @@ public final class ImageUtil {
         }
 
         // 8) Delegate to your rotate‐crop routine
-        return getRotateCropImage(mat, boxInt);
+        return getRotateCropImage(matManager, mat, boxInt);
     }
 
-    public static Mat getRotateCropImage(Mat mat, int[][] points) {
+    public static Mat getRotateCropImage(MatManager matManager, Mat mat, int[][] points) {
         if (points.length != 4 || points[0].length != 2) {
             throw new IllegalArgumentException("points must be 4×2");
         }
@@ -125,7 +126,7 @@ public final class ImageUtil {
                 new Point(0, cropH)
         );
         Mat M = Imgproc.getPerspectiveTransform(srcMat, dstMat);
-        Mat warped = new Mat();
+        Mat warped = matManager.newMat();
         Imgproc.warpPerspective(
                 mat, warped, M,
                 new Size(cropW, cropH),
@@ -139,37 +140,37 @@ public final class ImageUtil {
 
         // Rotate if tall
         if ((double) warped.rows() / warped.cols() >= 1.5) {
-            return rotate90Degree(warped);
+            return rotate90Degree(matManager, warped);
         }
 
         return warped;
     }
 
     // Method using OpenCV
-    public static Mat rotate90Degree(Mat srcImg) {
-        Mat dstImg = new Mat();
+    public static Mat rotate90Degree(MatManager matManager, Mat srcImg) {
+        Mat dstImg = matManager.newMat();
         // Rotate 90 degrees counterclockwise (equivalent to np.rot90)
         Core.rotate(srcImg, dstImg, Core.ROTATE_90_COUNTERCLOCKWISE);
         srcImg.release();
         return dstImg;
     }
 
-    public static Mat bgrToRgb(Mat bgrImg) {
-        Mat rgbImg = new Mat();
+    public static Mat bgrToRgb(MatManager matManager, Mat bgrImg) {
+        Mat rgbImg = matManager.newMat();
         Imgproc.cvtColor(bgrImg, rgbImg, Imgproc.COLOR_BGR2RGB);
         bgrImg.release();
         return rgbImg;
     }
 
-    public static Mat readToRgb(String image) {
+    public static Mat readToRgb(MatManager matManager, String image) {
         Mat bgrImg = Imgcodecs.imread(image, Imgcodecs.IMREAD_COLOR_BGR);
-        Mat rgbImg = new Mat();
+        Mat rgbImg = matManager.newMat();
         Imgproc.cvtColor(bgrImg, rgbImg, Imgproc.COLOR_BGR2RGB);
         bgrImg.release();
         return rgbImg;
     }
 
-    public static Mat rotateImage(Mat image, double angle) {
+    public static Mat rotateImage(MatManager matManager, Mat image, double angle) {
         if (angle < 0 || angle >= 360) {
             throw new IllegalArgumentException("`angle` should be in range [0, 360)");
         }
@@ -209,7 +210,7 @@ public final class ImageUtil {
         Size dstSize = new Size(newW, newH);
 
         // Perform the rotation
-        Mat rotated = new Mat();
+        Mat rotated = matManager.newMat();
         Imgproc.warpAffine(
                 image,
                 rotated,
@@ -264,26 +265,26 @@ public final class ImageUtil {
         return image;
     }
 
-    public static Mat bufferedImageToMat(BufferedImage image) {
+    public static Mat bufferedImageToMat(MatManager matManager, BufferedImage image) {
         int width = image.getWidth();
         int height = image.getHeight();
         Mat mat;
 
         switch (image.getType()) {
             case BufferedImage.TYPE_BYTE_GRAY:
-                mat = new Mat(height, width, CvType.CV_8UC1);
+                mat = matManager.newMat(height, width, CvType.CV_8UC1);
                 byte[] grayData = ((DataBufferByte) image.getRaster().getDataBuffer()).getData();
                 mat.put(0, 0, grayData);
                 break;
 
             case BufferedImage.TYPE_3BYTE_BGR:
-                mat = new Mat(height, width, CvType.CV_8UC3);
+                mat = matManager.newMat(height, width, CvType.CV_8UC3);
                 byte[] bgrData = ((DataBufferByte) image.getRaster().getDataBuffer()).getData();
                 mat.put(0, 0, bgrData);
                 break;
 
             case BufferedImage.TYPE_4BYTE_ABGR:
-                mat = new Mat(height, width, CvType.CV_8UC4);
+                mat = matManager.newMat(height, width, CvType.CV_8UC4);
                 byte[] abgrData = ((DataBufferByte) image.getRaster().getDataBuffer()).getData();
                 mat.put(0, 0, abgrData);
                 break;
@@ -294,17 +295,17 @@ public final class ImageUtil {
                 Graphics2D g = converted.createGraphics();
                 g.drawImage(image, 0, 0, null);
                 g.dispose();
-                return bufferedImageToMat(converted);
+                return bufferedImageToMat(matManager, converted);
         }
 
         return mat;
     }
 
-    public static Mat normalize(Mat image, Scalar mean, Scalar std) {
-        Mat normalizedImage = new Mat();
+    public static Mat normalize(MatManager matManager, Mat image, Scalar mean, Scalar std) {
+        Mat normalizedImage = matManager.newMat();
 
         // Subtract mean: (image - mean)
-        Mat meanSubtracted = new Mat();
+        Mat meanSubtracted = matManager.newMat();
         Core.subtract(image, mean, meanSubtracted);
 
         // Divide by std: (image - mean) / std
@@ -319,7 +320,7 @@ public final class ImageUtil {
      * Alternative method with custom padding color
      */
     // TODO 这不太对
-    public static Mat padImageToSize(Mat image, int targetWidth, int targetHeight, Scalar paddingColor) {
+    public static Mat padImageToSize(MatManager matManager, Mat image, int targetWidth, int targetHeight, Scalar paddingColor) {
         int currentWidth = image.cols();
         int currentHeight = image.rows();
 
@@ -329,7 +330,7 @@ public final class ImageUtil {
             return image;
         }
 
-        Mat paddedImage = new Mat();
+        Mat paddedImage = matManager.newMat();
 
         Core.copyMakeBorder(
                 image,
@@ -354,8 +355,8 @@ public final class ImageUtil {
      * @param fill   The pixel fill value (a color value). Default is 0 (black).
      * @return A new image with the specified border.
      */
-    public static Mat expand(Mat image, int border, Scalar fill) {
-        return expand(image, border, border, border, border, fill);
+    public static Mat expand(MatManager matManager, Mat image, int border, Scalar fill) {
+        return expand(matManager, image, border, border, border, border, fill);
     }
 
     /**
@@ -366,13 +367,13 @@ public final class ImageUtil {
      * @param fill       The pixel fill value (a color value). Default is 0 (black).
      * @return A new image with the specified border.
      */
-    public static Mat expand(Mat image, int[] border, Scalar fill) {
+    public static Mat expand(MatManager matManager, Mat image, int[] border, Scalar fill) {
         if (border.length != 2) {
             throw new IllegalArgumentException("Border array must have 2 elements for horizontal and vertical padding.");
         }
         int horizontal = border[0];
         int vertical = border[1];
-        return expand(image, vertical, horizontal, vertical, horizontal, fill);
+        return expand(matManager, image, vertical, horizontal, vertical, horizontal, fill);
     }
 
     /**
@@ -383,16 +384,16 @@ public final class ImageUtil {
      * @param fill       The pixel fill value (a color value). Default is 0 (black).
      * @return A new image with the specified border.
      */
-    public static Mat expand(Mat image, int[] border, Scalar fill, boolean isLRTB) {
+    public static Mat expand(MatManager matManager, Mat image, int[] border, Scalar fill, boolean isLRTB) {
         if (border.length != 4) {
             throw new IllegalArgumentException("Border array must have 4 elements for top, bottom, left, right padding.");
         }
         // The python version uses (left, top, right, bottom)
         // OpenCV's copyMakeBorder uses (top, bottom, left, right)
         if (isLRTB) {
-            return expand(image, border[1], border[3], border[0], border[2], fill);
+            return expand(matManager, image, border[1], border[3], border[0], border[2], fill);
         } else {
-            return expand(image, border[0], border[1], border[2], border[3], fill);
+            return expand(matManager, image, border[0], border[1], border[2], border[3], fill);
         }
     }
 
@@ -407,8 +408,8 @@ public final class ImageUtil {
      * @param fill   The color of the border.
      * @return A new Mat object with the added border.
      */
-    private static Mat expand(Mat image, int top, int bottom, int left, int right, Scalar fill) {
-        Mat dest = new Mat();
+    private static Mat expand(MatManager matManager, Mat image, int top, int bottom, int left, int right, Scalar fill) {
+        Mat dest = matManager.newMat();
         Core.copyMakeBorder(image, dest, top, bottom, left, right, Core.BORDER_CONSTANT, fill);
         return dest;
     }
@@ -427,15 +428,15 @@ public final class ImageUtil {
         return manager.create(FloatBuffer.wrap(buf), shape, DataType.FLOAT32);
     }
 
-    public static NDArray toChannalNDArrayFloat(Mat mat, NDManager manager) {
+    public static NDArray toChannalNDArrayFloat(MatManager matManager, Mat mat, NDManager manager) {
         float[] buf = new float[mat.height() * mat.width() * mat.channels()];
         mat.get(0, 0, buf);
         Shape shape = new Shape(mat.channels(), mat.height(), mat.width());
         return manager.create(FloatBuffer.wrap(buf), shape, DataType.FLOAT32);
     }
 
-    public static NDArray toNDArrayFloat(Mat image, NDManager manager, Image.Flag flag) {
-        Mat mat = new Mat();
+    public static NDArray toNDArrayFloat(MatManager matManager, Mat image, NDManager manager, Image.Flag flag) {
+        Mat mat = matManager.newMat();
         if (flag == Image.Flag.GRAYSCALE) {
             Imgproc.cvtColor(image, mat, Imgproc.COLOR_BGR2GRAY);
         } else {
@@ -447,8 +448,8 @@ public final class ImageUtil {
         return manager.create(FloatBuffer.wrap(buf), shape, DataType.FLOAT32);
     }
 
-    public static NDArray toNDArray(Mat image, NDManager manager, Image.Flag flag) {
-        Mat mat = new Mat();
+    public static NDArray toNDArray(MatManager matManager, Mat image, NDManager manager, Image.Flag flag) {
+        Mat mat = matManager.newMat();
         if (flag == Image.Flag.GRAYSCALE) {
             Imgproc.cvtColor(image, mat, Imgproc.COLOR_BGR2GRAY);
         } else {

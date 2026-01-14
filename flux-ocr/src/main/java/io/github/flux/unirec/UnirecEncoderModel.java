@@ -25,6 +25,7 @@ import ai.onnxruntime.OnnxTensor;
 import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtSession;
 import ai.onnxruntime.OrtSession.Result;
+import io.github.flux.core.MatManager;
 import io.github.flux.core.PreProcessResult;
 import io.github.flux.exception.FluxException;
 import io.github.flux.util.IOUtil;
@@ -57,10 +58,10 @@ public class UnirecEncoderModel implements AutoCloseable {
         }
     }
 
-    public UnirecEncoderModelPredictResult predict(PreProcessResult ppr, NDManager ndManager) {
+    public UnirecEncoderModelPredictResult predict(PreProcessResult ppr, MatManager matManager, NDManager ndManager) {
         try {
             NDList ndList = new NDList();
-            ndList.add(ImageUtil.toChannalNDArrayFloat(ppr.mat(), ndManager));
+            ndList.add(ImageUtil.toChannalNDArrayFloat(matManager, ppr.mat(), ndManager));
             NDArray inputNdArray = NDArrays.stack(ndList);
             IOUtil.close(ppr.mat());
             long[] shape = inputNdArray.getShape().getShape();

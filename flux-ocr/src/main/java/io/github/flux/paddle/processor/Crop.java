@@ -17,6 +17,7 @@
  */
 package io.github.flux.paddle.processor;
 
+import io.github.flux.core.MatManager;
 import io.github.flux.util.IOUtil;
 import org.opencv.core.Mat;
 import org.opencv.core.Range;
@@ -50,7 +51,7 @@ public class Crop implements ImageProcessor {
 
     /** 对单张 HWC 格式的 NDArray 做裁剪 */
     @Override
-    public Mat process(Mat img) {
+    public Mat process(MatManager matManager, Mat img) {
         // 假设输入是 [height, width, channel]
         int h = img.rows();
         int w = img.cols();

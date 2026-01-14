@@ -18,6 +18,7 @@
 package io.github.flux.paddle.processor;
 
 import ai.djl.modality.cv.Image;
+import io.github.flux.core.MatManager;
 import io.github.flux.exception.FluxException;
 import org.opencv.core.Core;
 import org.opencv.core.Mat;
@@ -62,14 +63,14 @@ public class DetResize {
         }
     }
 
-    public List<DetResizeResultV2> process(List<Mat> imgs) {
-        return process(imgs, null, null, null);
+    public List<DetResizeResultV2> process(MatManager matManager, List<Mat> imgs) {
+        return process(matManager, imgs, null, null, null);
     }
 
-    public List<DetResizeResultV2> process(List<Mat> imgs, Integer limitSideLen, LimitType limitType, Integer maxSideLimit) {
+    public List<DetResizeResultV2> process(MatManager matManager, List<Mat> imgs, Integer limitSideLen, LimitType limitType, Integer maxSideLimit) {
         var res = new ArrayList<DetResizeResultV2>();
         for (var img : imgs) {
-            var resized = detResize(img, limitSideLen, limitType, maxSideLimit);
+            var resized = detResize(matManager, img, limitSideLen, limitType, maxSideLimit);
             res.add(resized);
             if (img != resized.resizeImg()) {
                 img.release();
@@ -78,30 +79,30 @@ public class DetResize {
         return res;
     }
 
-    private DetResizeResultV2 detResize(Mat img, Integer limitSideLen, LimitType limitType, Integer maxSideLimit) {
+    private DetResizeResultV2 detResize(MatManager matManager, Mat img, Integer limitSideLen, LimitType limitType, Integer maxSideLimit) {
         int msLimit = maxSideLimit == null ? this.maxSideLimit : maxSideLimit;
-        return resize(img, limitSideLen, limitType, msLimit);
+        return resize(matManager, img, limitSideLen, limitType, msLimit);
     }
 
-    private DetResizeResultV2 resize(Mat ximg, Integer limitSideLen, LimitType limitType, int maxSideLimit) {
+    private DetResizeResultV2 resize(MatManager matManager, Mat ximg, Integer limitSideLen, LimitType limitType, int maxSideLimit) {
         int srcH = ximg.rows();
         int srcW = ximg.cols();
         Mat img;
         if (srcH + srcW < 64) {
-            img = imagePadding(ximg, 0);
+            img = imagePadding(matManager, ximg, 0);
         } else {
             img = ximg;
         }
 
         DetResizeResultV2 result;
         if (resizeType == 0) {
-            result = resizeImageType0(img, limitSideLen, limitType, maxSideLimit);
+            result = resizeImageType0(matManager, img, limitSideLen, limitType, maxSideLimit);
         } else if (resizeType == 2) {
-            result = resizeImageType2(img, resizeLong);
+            result = resizeImageType2(matManager, img, resizeLong);
         } else if (resizeType == 3) {
-            result = resizeImageType3(img, new int[0]);
+            result = resizeImageType3(matManager, img, new int[0]);
         } else {
-            result = resizeImageType1(img);
+            result = resizeImageType1(matManager, img);
         }
         if (ximg != img) {
             ximg.release();
@@ -111,7 +112,7 @@ public class DetResize {
                 new double[]{srcH, srcW, result.imgShape()[0], result.imgShape()[1]});
     }
 
-    public DetResizeResultV2 resizeImageType0(Mat img, Integer requestLimitSideLen, LimitType limitType, int maxSideLimit) {
+    public DetResizeResultV2 resizeImageType0(MatManager matManager, Mat img, Integer requestLimitSideLen, LimitType limitType, int maxSideLimit) {
         // img shape [h, w, c]
         int h = img.rows();
         int w = img.cols();
@@ -142,7 +143,7 @@ public class DetResize {
         double ratioW = (double) resizeW / w;
 
         Image.Interpolation interpolation = interp == null ? Image.Interpolation.BILINEAR : interp;
-        Mat resizedImg = new Resize(resizeW, resizeH, interpolation).process(img);
+        Mat resizedImg = new Resize(resizeW, resizeH, interpolation).process(matManager, img);
         img.release();
 
         return new DetResizeResultV2(resizedImg, new double[]{ratioH, ratioW});
@@ -176,7 +177,7 @@ public class DetResize {
         return ratio;
     }
 
-    public DetResizeResultV2 resizeImageType1(Mat img) {
+    public DetResizeResultV2 resizeImageType1(MatManager matManager, Mat img) {
         if (imageShape == null || imageShape.length < 2) {
             throw new FluxException("illeage imageShape: " + Arrays.toString(imageShape));
         }
@@ -193,7 +194,7 @@ public class DetResize {
         double ratioH = (double) resizeH / oriH;
         double ratioW = (double) resizeW / oriW;
 
-        Mat resizedImg = new Resize(resizeW, resizeH, Image.Interpolation.BILINEAR).process(img);
+        Mat resizedImg = new Resize(resizeW, resizeH, Image.Interpolation.BILINEAR).process(matManager, img);
         img.release();
 
         return new DetResizeResultV2(resizedImg, new double[]{ratioH, ratioW});
@@ -201,7 +202,7 @@ public class DetResize {
 
     private static final int MAX_STRIDE = 128;
 
-    public static DetResizeResultV2 resizeImageType2(Mat img, int resizeLong) {
+    public static DetResizeResultV2 resizeImageType2(MatManager matManager, Mat img, int resizeLong) {
         // inputShape: (h, w, c)
         int h = img.rows();
         int w = img.cols();
@@ -229,7 +230,7 @@ public class DetResize {
             return new DetResizeResultV2(img, new double[]{1.0, 1.0});
         }
 
-        Mat resizedImg = new Resize(resizeW, resizeH, Image.Interpolation.BILINEAR).process(img);
+        Mat resizedImg = new Resize(resizeW, resizeH, Image.Interpolation.BILINEAR).process(matManager, img);
         img.release();
 
         // Calculate aspect ratios
@@ -239,7 +240,7 @@ public class DetResize {
     }
 
 
-    public static DetResizeResultV2 resizeImageType3(Mat img, int[] inputShape) {
+    public static DetResizeResultV2 resizeImageType3(MatManager matManager, Mat img, int[] inputShape) {
         // inputShape: (c, h, w)
         int resizeH = inputShape[1];
         int resizeW = inputShape[2];
@@ -254,12 +255,12 @@ public class DetResize {
         double ratioH = (double) resizeH / oriH;
         double ratioW = (double) resizeW / oriW;
 
-        Mat resizedImg = new Resize(resizeW, resizeH, Image.Interpolation.BILINEAR).process(img);
+        Mat resizedImg = new Resize(resizeW, resizeH, Image.Interpolation.BILINEAR).process(matManager, img);
         img.release();
         return new DetResizeResultV2(resizedImg, new double[]{ratioH, ratioW});
     }
 
-    public Mat imagePadding(Mat im, int value) {
+    public Mat imagePadding(MatManager matManager, Mat im, int value) {
         int h = im.rows();
         int w = im.cols();
         int maxH = Math.max(32, h);
@@ -267,12 +268,12 @@ public class DetResize {
 
         // Create a matrix of ones with the same type as the input image
         Mat ones = Mat.ones(maxH, maxW, im.type());
-        Mat imPad = new Mat();
+        Mat imPad = matManager.newMat();
         // Multiply by the scalar value to set all elements to the desired value
         Core.multiply(ones, new Scalar(value), imPad);
 
         // Define the ROI and copy the original image into it
-        Mat roi = new Mat(imPad, new Rect(0, 0, w, h));
+        Mat roi = matManager.newMat(imPad, new Rect(0, 0, w, h));
         im.copyTo(roi);
 
         ones.release();

@@ -17,6 +17,7 @@
  */
 package io.github.flux.paddle.processor;
 
+import io.github.flux.core.MatManager;
 import org.opencv.core.Core;
 import org.opencv.core.CvType;
 import org.opencv.core.Mat;
@@ -31,15 +32,15 @@ public class Rescale implements ImageProcessor {
     }
 
     @Override
-    public Mat process(Mat img) {
-        Mat float64MatScaled = new Mat();
+    public Mat process(MatManager matManager, Mat img) {
+        Mat float64MatScaled = matManager.newMat();
         img.convertTo(float64MatScaled, CvType.CV_64FC3);
         img.release();
-        Mat dest = new Mat();
+        Mat dest = matManager.newMat();
         Core.multiply(float64MatScaled, new Scalar(scale), dest);
         float64MatScaled.release();
 
-        Mat float32MatScaled = new Mat();
+        Mat float32MatScaled = matManager.newMat();
         dest.convertTo(float32MatScaled, CvType.CV_32FC3);
         dest.release();
         return float32MatScaled;

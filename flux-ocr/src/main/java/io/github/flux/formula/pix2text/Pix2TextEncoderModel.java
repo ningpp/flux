@@ -26,6 +26,7 @@ import ai.onnxruntime.OnnxValue;
 import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtException;
 import ai.onnxruntime.OrtSession;
+import io.github.flux.core.MatManager;
 import io.github.flux.exception.FluxException;
 import io.github.flux.util.IOUtil;
 import io.github.flux.util.OnnxUtil;
@@ -104,9 +105,9 @@ public class Pix2TextEncoderModel implements AutoCloseable {
         return encodeResultFloats;
     }
 
-    public  float[][][] predict(Mat srcImage, NDManager manager) {
+    public  float[][][] predict(MatManager matManager, Mat srcImage, NDManager manager) {
         try {
-            NDArray inputNdArray = preProcessor.process(srcImage, manager);
+            NDArray inputNdArray = preProcessor.process(matManager, srcImage, manager);
             NDArray expandResult = inputNdArray.expandDims(0);
             FloatBuffer dataBuffer = expandResult.toByteBuffer().asFloatBuffer();
             long[] shape = expandResult.getShape().getShape();

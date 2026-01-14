@@ -17,6 +17,7 @@
  */
 package io.github.flux.paddle.processor;
 
+import io.github.flux.core.MatManager;
 import io.github.flux.util.IOUtil;
 import org.opencv.core.Core;
 import org.opencv.core.CvType;
@@ -31,7 +32,7 @@ import java.util.List;
 public class ToCHWImage implements ImageProcessor {
 
     @Override
-    public Mat process(Mat img) {
+    public Mat process(MatManager matManager, Mat img) {
 
         // Split channels
         List<Mat> channels = new ArrayList<>();
@@ -51,11 +52,9 @@ public class ToCHWImage implements ImageProcessor {
             IOUtil.close(channel);
         }
 
-        Mat chw = new Mat(height, width, CvType.CV_32FC3);
+        Mat chw = matManager.newMat(height, width, CvType.CV_32FC3);
         chw.put(0, 0, chwData);
 
-        IOUtil.close(channels);
-        IOUtil.close(img);
         return chw;
     }
 

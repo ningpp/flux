@@ -17,6 +17,7 @@
  */
 package io.github.flux.paddle.processor;
 
+import io.github.flux.core.MatManager;
 import org.opencv.core.Core;
 import org.opencv.core.CvType;
 import org.opencv.core.Mat;
@@ -53,7 +54,7 @@ public class OCRResizeNormImg implements ImageProcessor {
      * @param maxWhRatio The maximum width to height ratio.
      * @return The processed image as a Mat.
      */
-    public Mat resizeNormImg(Mat img, double maxWhRatio) {
+    public Mat resizeNormImg(MatManager matManager, Mat img, double maxWhRatio) {
         int imgC = recImageShape[0];
         int imgH = recImageShape[1];
         int imgW = recImageShape[2];
@@ -64,7 +65,7 @@ public class OCRResizeNormImg implements ImageProcessor {
 
         imgW = (int) (imgH * maxWhRatio);
 
-        Mat resizedImage = new Mat();
+        Mat resizedImage = matManager.newMat();
         int resizedW;
 
         if (imgW > this.maxImgW) {
@@ -89,7 +90,7 @@ public class OCRResizeNormImg implements ImageProcessor {
         // Transpose from HWC to CHW
         List<Mat> channels = new ArrayList<>();
         Core.split(resizedImage, channels);
-        Mat transposed = new Mat();
+        Mat transposed = matManager.newMat();
         Core.merge(channels, transposed);
         // The actual transpose of axes (like numpy.transpose(2,0,1)) is complex.
         // A common way for deep learning is to split channels and then process.
@@ -102,12 +103,12 @@ public class OCRResizeNormImg implements ImageProcessor {
 
         // Create padding image
         Mat paddingIm = Mat.zeros(imgH, imgW, CvType.CV_32FC3);
-        Mat roi = new Mat(paddingIm, new Rect(0, 0, resizedW, imgH));
+        Mat roi = matManager.newMat(paddingIm, new Rect(0, 0, resizedW, imgH));
         resizedImage.copyTo(roi);
 
         // Transpose for the final CHW layout if needed by the model
         // This creates a single Mat with data in CHW order.
-        Mat finalImage = new Mat(imgH, imgW, CvType.CV_32FC3);
+        Mat finalImage = matManager.newMat(imgH, imgW, CvType.CV_32FC3);
         float[] finalImageData = new float[imgC * imgH * imgW];
         float[] paddingImData = new float[imgH * imgW * imgC];
         paddingIm.get(0, 0, paddingImData);
@@ -137,11 +138,11 @@ public class OCRResizeNormImg implements ImageProcessor {
     }
 
     @Override
-    public Mat process(Mat img) {
+    public Mat process(MatManager matManager, Mat img) {
         if (this.inputShape == null) {
-            return resize(img);
+            return resize(matManager, img);
         } else {
-            return staticResize(img);
+            return staticResize(matManager, img);
         }
     }
 
@@ -150,7 +151,7 @@ public class OCRResizeNormImg implements ImageProcessor {
      * @param img The input image.
      * @return The resized and normalized image.
      */
-    public Mat resize(Mat img) {
+    public Mat resize(MatManager matManager, Mat img) {
         int imgH = recImageShape[1];
         int imgW = recImageShape[2];
 
@@ -160,7 +161,7 @@ public class OCRResizeNormImg implements ImageProcessor {
         double whRatio = w * 1.0 / h;
         maxWhRatio = Math.max(maxWhRatio, whRatio);
 
-        return resizeNormImg(img, maxWhRatio);
+        return resizeNormImg(matManager, img, maxWhRatio);
     }
 
     /**
@@ -168,12 +169,12 @@ public class OCRResizeNormImg implements ImageProcessor {
      * @param img The input image.
      * @return The resized and normalized image.
      */
-    public Mat staticResize(Mat img) {
+    public Mat staticResize(MatManager matManager, Mat img) {
         int imgC = inputShape[0];
         int imgH = inputShape[1];
         int imgW = inputShape[2];
 
-        Mat resizedImage = new Mat();
+        Mat resizedImage = matManager.newMat();
         Imgproc.resize(img, resizedImage, new Size(imgW, imgH));
 
         // Normalization
@@ -182,7 +183,7 @@ public class OCRResizeNormImg implements ImageProcessor {
         Core.divide(resizedImage, new Scalar(0.5, 0.5, 0.5), resizedImage);
 
         // Transpose from HWC to CHW if needed
-        Mat finalImage = new Mat(imgC * imgH * imgW, 1, CvType.CV_32F);
+        Mat finalImage = matManager.newMat(imgC * imgH * imgW, 1, CvType.CV_32F);
         float[] finalImageData = new float[imgC * imgH * imgW];
         float[] resizedImageData = new float[imgH * imgW * imgC];
         resizedImage.get(0, 0, resizedImageData);

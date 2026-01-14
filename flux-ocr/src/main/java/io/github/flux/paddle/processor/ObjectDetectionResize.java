@@ -17,6 +17,7 @@
  */
 package io.github.flux.paddle.processor;
 
+import io.github.flux.core.MatManager;
 import io.github.flux.core.ObjectDetectionResizeResult;
 import org.opencv.core.Mat;
 
@@ -28,9 +29,9 @@ public class ObjectDetectionResize {
         this.resize = resize;
     }
 
-    public ObjectDetectionResizeResult process(Mat img) {
+    public ObjectDetectionResizeResult process(MatManager matManager, Mat img) {
         int[] ori_img_size = new int[] { img.cols(), img.rows() };
-        Mat result_img = resize.process(img);
+        Mat result_img = resize.process(matManager, img);
         int[] img_size = new int[] { result_img.cols(), result_img.rows() };
         double[] scale_factors = new double[] {
             img_size[0] / (double) ori_img_size[0],

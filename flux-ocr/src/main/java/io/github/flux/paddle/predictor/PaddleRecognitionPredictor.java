@@ -23,6 +23,7 @@ import ai.onnxruntime.OnnxTensor;
 import ai.onnxruntime.OnnxValue;
 import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtSession;
+import io.github.flux.core.MatManager;
 import io.github.flux.core.RecognitionResult;
 import io.github.flux.exception.FluxException;
 import io.github.flux.paddle.processor.CTCLabelDecode;
@@ -72,10 +73,10 @@ public class PaddleRecognitionPredictor implements AutoCloseable {
         }
     }
 
-    private List<Mat> transform(List<Mat> data, List<ImageProcessor> processors) {
+    private List<Mat> transform(List<Mat> data, MatManager matManager, List<ImageProcessor> processors) {
         List<Mat> arrays = data;
         for (ImageProcessor processor : processors) {
-            arrays = processor.process(arrays);
+            arrays = processor.process(matManager, arrays);
         }
         return arrays;
     }
@@ -85,10 +86,10 @@ public class PaddleRecognitionPredictor implements AutoCloseable {
         session.close();
     }
 
-    public List<List<RecognitionResult>> batchPredict(List<Mat> images, NDManager manager) {
+    public List<List<RecognitionResult>> batchPredict(List<Mat> images, MatManager matManager, NDManager manager) {
         try {
-            List<Mat> padedImages = padImageToSame(images);
-            List<Mat> transformedResults = transform(padedImages, preProcessors);
+            List<Mat> padedImages = padImageToSame(matManager, images);
+            List<Mat> transformedResults = transform(padedImages, matManager, preProcessors);
 
             int height = transformedResults.get(0).rows();
             int width = transformedResults.get(0).cols();
@@ -154,7 +155,7 @@ public class PaddleRecognitionPredictor implements AutoCloseable {
         }
     }
 
-    public static List<Mat> padImageToSame(List<Mat> images) {
+    public static List<Mat> padImageToSame(MatManager matManager, List<Mat> images) {
         int maxWidth = 0;
         int maxHeight = 0;
 
@@ -167,7 +168,7 @@ public class PaddleRecognitionPredictor implements AutoCloseable {
         Scalar paddingColor = new Scalar(255, 255, 255);
         List<Mat> results = new ArrayList<>(images.size());
         for (Mat image : images) {
-            Mat pad = ImageUtil.padImageToSize(image, maxWidth, maxHeight, paddingColor);
+            Mat pad = ImageUtil.padImageToSize(matManager, image, maxWidth, maxHeight, paddingColor);
             results.add(pad);
         }
         return results;

@@ -4,6 +4,7 @@ import ai.djl.ndarray.NDManager;
 import ai.onnxruntime.OnnxJavaType;
 import ai.onnxruntime.OrtEnvironment;
 import io.github.flux.core.BatchPredictor;
+import io.github.flux.core.MatManager;
 import io.github.flux.core.ModelParam;
 import io.github.flux.core.PreProcessResult;
 import io.github.flux.core.TableResult;
@@ -53,13 +54,13 @@ public class TableModel extends BatchPredictor<PreProcessResult, TableResult> {
     }
 
     @Override
-    public List<TableResult> doBatchPredict(List<PreProcessResult> pprs, NDManager manager, Map<String, Object> extraParameters) {
-        return predictor.doBatchPredict(pprs, manager, extraParameters);
+    public List<TableResult> doBatchPredict(List<PreProcessResult> pprs, MatManager matManager, NDManager manager, Map<String, Object> extraParameters) {
+        return predictor.doBatchPredict(pprs, matManager, manager, extraParameters);
     }
 
     @Override
-    public PreProcessResult processRgb(Mat rgbMat, NDManager manager) {
-        return predictor.processRgb(rgbMat, manager);
+    public PreProcessResult processRgb(MatManager matManager, Mat rgbMat, NDManager manager) {
+        return predictor.processRgb(matManager, rgbMat, manager);
     }
 
 }

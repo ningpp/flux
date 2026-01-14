@@ -17,6 +17,7 @@
  */
 package io.github.flux.dolphin;
 
+import io.github.flux.core.MatManager;
 import io.github.flux.paddle.processor.Rescale;
 import io.github.flux.paddle.processor.Resize;
 import io.github.flux.paddle.processor.ToCHWImage;
@@ -27,7 +28,7 @@ import org.opencv.core.Scalar;
 
 public class DolphinPreProcessor {
 
-    public Mat process(Mat rgbImg) {
+    public Mat process(MatManager matManager, Mat rgbImg) {
         int size = 896;
         int input_width = rgbImg.cols();
         int input_height = rgbImg.rows();
@@ -58,29 +59,21 @@ public class DolphinPreProcessor {
             imgSize[1] = new_long;
         }
 
-        Mat resizedImg = new Resize(imgSize[0], imgSize[1], 2).process(rgbImg);
-        rgbImg.release();
-        Mat thumbnailImg = thumbnail(resizedImg, size, size);
-        resizedImg.release();
+        Mat resizedImg = new Resize(imgSize[0], imgSize[1], 2).process(matManager, rgbImg);
+        Mat thumbnailImg = thumbnail(matManager, resizedImg, size, size);
 
-        Mat paddedImage = pad(thumbnailImg, size, size);
-        thumbnailImg.release();
+        Mat paddedImage = pad(matManager, thumbnailImg, size, size);
         double rescale_factor = 0.00392156862745098;
-        Mat rescaled = new Rescale(rescale_factor).process(paddedImage);
-        paddedImage.release();
+        Mat rescaled = new Rescale(rescale_factor).process(matManager, paddedImage);
 
-        Mat normalized = ImageUtil.normalize(rescaled,
+        Mat normalized = ImageUtil.normalize(matManager, rescaled,
                 new Scalar(0.485, 0.456, 0.406),
                 new Scalar(0.229, 0.224, 0.225));
-        rescaled.release();
 
-        Mat chw = new ToCHWImage().process(normalized);
-
-        normalized.release();
-        return chw;
+        return new ToCHWImage().process(matManager, normalized);
     }
 
-    private Mat pad(Mat img, int output_height, int output_width) {
+    private Mat pad(MatManager matManager, Mat img, int output_height, int output_width) {
         int input_width = img.cols();
         int input_height = img.rows();
         int delta_width = output_width - input_width;
@@ -91,10 +84,9 @@ public class DolphinPreProcessor {
         int pad_left = Math.floorDiv(delta_width, 2);
         int pad_bottom = delta_height - pad_top;
         int pad_right = delta_width - pad_left;
-        //padding = ((pad_top, pad_bottom), (pad_left, pad_right))
 
         Scalar paddingColor = new Scalar(255, 255, 255);
-        Mat paddedImage = new Mat();
+        Mat paddedImage = matManager.newMat();
         Core.copyMakeBorder(
                 img,
                 paddedImage,
@@ -105,11 +97,10 @@ public class DolphinPreProcessor {
                 Core.BORDER_CONSTANT,
                 paddingColor
         );
-        img.release();
         return paddedImage;
     }
 
-    private Mat thumbnail(Mat img, int output_height, int output_width) {
+    private Mat thumbnail(MatManager matManager, Mat img, int output_height, int output_width) {
         int input_width = img.cols();
         int input_height = img.rows();
         // We always resize to the smallest of either the input or output size.
@@ -126,8 +117,7 @@ public class DolphinPreProcessor {
         }
 
         // TODO reducing_gap=2.0
-        Mat resizedImg = new Resize(height, width, 2).process(img);
-        img.release();
+        Mat resizedImg = new Resize(height, width, 2).process(matManager, img);
         return resizedImg;
     }
 

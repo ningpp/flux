@@ -21,6 +21,7 @@ import ai.djl.ndarray.NDManager;
 import ai.onnxruntime.OnnxJavaType;
 import ai.onnxruntime.OrtEnvironment;
 import io.github.flux.core.BatchPredictor;
+import io.github.flux.core.MatManager;
 import io.github.flux.core.PreProcessResult;
 import io.github.flux.core.TableResult;
 import io.github.flux.util.IOUtil;
@@ -46,15 +47,15 @@ public class ByteDanceDolphinTableModel extends BatchPredictor<PreProcessResult,
     }
 
     @Override
-    public List<TableResult> doBatchPredict(List<PreProcessResult> mats, NDManager manager, Map<String, Object> extraParameters) {
+    public List<TableResult> doBatchPredict(List<PreProcessResult> mats, MatManager matManager, NDManager manager, Map<String, Object> extraParameters) {
         extraParameters.put("prompt", "Parse the table in the image.");
-        var elementResults = model.doBatchPredict(mats, manager, extraParameters);
+        var elementResults = model.doBatchPredict(mats, matManager, manager, extraParameters);
         return elementResults.stream().map(er -> new TableResult(er.text(), er.tokens())).toList();
     }
 
     @Override
-    public PreProcessResult processRgb(Mat rgbMat, NDManager manager) {
-        return model.processRgb(rgbMat, manager);
+    public PreProcessResult processRgb(MatManager matManager, Mat rgbMat, NDManager manager) {
+        return model.processRgb(matManager, rgbMat, manager);
     }
 
     @Override

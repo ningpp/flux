@@ -22,6 +22,7 @@ import ai.djl.ndarray.NDArrays;
 import ai.djl.ndarray.NDList;
 import ai.djl.ndarray.NDManager;
 import ai.djl.ndarray.types.Shape;
+import io.github.flux.core.MatManager;
 import io.github.flux.exception.FluxException;
 import io.github.flux.paddle.processor.ResizeNdArray;
 import org.opencv.core.CvType;
@@ -148,8 +149,8 @@ public class DeiTImageProcessor {
      * @param targetWidth  Target width
      * @return Resized image as NDArray
      */
-    public NDArray resize(NDArray image, int targetHeight, int targetWidth) {
-        return new ResizeNdArray(targetWidth, targetHeight, resampleMode).process(List.of(image)).get(0);
+    public NDArray resize(MatManager matManager, NDArray image, int targetHeight, int targetWidth) {
+        return new ResizeNdArray(targetWidth, targetHeight, resampleMode).process(matManager, List.of(image)).get(0);
     }
         /*
         public NDArray resize(NDArray image, int targetHeight, int targetWidth, NDManager manager) {
@@ -157,7 +158,7 @@ public class DeiTImageProcessor {
             Mat cvImage = ndArrayToMat(image);
 
             // Resize using OpenCV
-            Mat resized = new Mat();
+            Mat resized = matManager.newMat();
             Size newSize = new Size(targetWidth, targetHeight);
             Imgproc.resize(cvImage, resized, newSize, 0, 0, resampleMode);
 
@@ -221,8 +222,8 @@ public class DeiTImageProcessor {
      * @param manager NDManager for memory management
      * @return Preprocessed images as NDArray
      */
-    public NDArray preprocess(NDArray images, NDManager manager) {
-        return preprocess(images, manager, null);
+    public NDArray preprocess(NDArray images, MatManager matManager, NDManager manager) {
+        return preprocess(images, matManager, manager, null);
     }
 
     /**
@@ -233,7 +234,7 @@ public class DeiTImageProcessor {
      * @param config     Custom configuration (can be null to use defaults)
      * @return Preprocessed images as NDArray
      */
-    public NDArray preprocess(NDArray imgNdArray, NDManager manager, PreprocessConfig config) {
+    public NDArray preprocess(NDArray imgNdArray, MatManager matManager, NDManager manager, PreprocessConfig config) {
         // Use default config if none provided
         if (config == null) {
             config = new PreprocessConfig();
@@ -267,7 +268,7 @@ public class DeiTImageProcessor {
 
             // Apply transformations
             if (doResize) {
-                image = resize(image, size.get("height"), size.get("width"));
+                image = resize(matManager, image, size.get("height"), size.get("width"));
             }
 
             if (doCenterCrop) {
@@ -302,7 +303,7 @@ public class DeiTImageProcessor {
     /**
      * Convert NDArray to OpenCV Mat.
      */
-    private Mat ndArrayToMat(NDArray ndArray) {
+    private Mat ndArrayToMat(MatManager matManager, NDArray ndArray) {
         Shape shape = ndArray.getShape();
         int height = (int) shape.get(0);
         int width = (int) shape.get(1);
@@ -312,7 +313,7 @@ public class DeiTImageProcessor {
         float[] data = ndArray.toFloatArray();
 
         // Create Mat
-        Mat mat = new Mat(height, width, CvType.CV_32FC(channels));
+        Mat mat = matManager.newMat(height, width, CvType.CV_32FC(channels));
         mat.put(0, 0, data);
 
         return mat;

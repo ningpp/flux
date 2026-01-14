@@ -22,6 +22,7 @@ import ai.onnxruntime.OnnxJavaType;
 import ai.onnxruntime.OrtEnvironment;
 import io.github.flux.core.BatchPredictor;
 import io.github.flux.core.FormulaRecognitionResult;
+import io.github.flux.core.MatManager;
 import io.github.flux.core.PreProcessResult;
 import io.github.flux.util.IOUtil;
 import org.opencv.core.Mat;
@@ -46,15 +47,15 @@ public class ByteDanceDolphinFormulaModel extends BatchPredictor<PreProcessResul
     }
 
     @Override
-    public List<FormulaRecognitionResult> doBatchPredict(List<PreProcessResult> mats, NDManager manager, Map<String, Object> extraParameters) {
+    public List<FormulaRecognitionResult> doBatchPredict(List<PreProcessResult> mats, MatManager matManager, NDManager manager, Map<String, Object> extraParameters) {
         extraParameters.put("prompt", "Read formula in the image.");
-        var elementResults = model.doBatchPredict(mats, manager, extraParameters);
+        var elementResults = model.doBatchPredict(mats, matManager, manager, extraParameters);
         return elementResults.stream().map(r -> new FormulaRecognitionResult(List.of(r.text()), r.tokens(), r.score())).toList();
     }
 
     @Override
-    public PreProcessResult processRgb(Mat rgbMat, NDManager manager) {
-        return model.processRgb(rgbMat, manager);
+    public PreProcessResult processRgb(MatManager matManager, Mat rgbMat, NDManager manager) {
+        return model.processRgb(matManager, rgbMat, manager);
     }
 
     @Override

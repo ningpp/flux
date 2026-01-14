@@ -22,6 +22,7 @@ import ai.djl.ndarray.NDManager;
 import ai.onnxruntime.OnnxJavaType;
 import ai.onnxruntime.OrtEnvironment;
 import io.github.flux.core.BatchPredictor;
+import io.github.flux.core.MatManager;
 import io.github.flux.core.PreProcessResult;
 import io.github.flux.core.TextResult;
 import io.github.flux.exception.FluxException;
@@ -78,17 +79,17 @@ public class ByteDanceDolphinElementModel extends BatchPredictor<PreProcessResul
     }
 
     @Override
-    public PreProcessResult processRgb(Mat rgbMat, NDManager manager) {
-        return new PreProcessResult(preProcessor.process(rgbMat), null);
+    public PreProcessResult processRgb(MatManager matManager, Mat rgbMat, NDManager manager) {
+        return new PreProcessResult(preProcessor.process(matManager, rgbMat), null);
     }
 
     @Override
-    public List<TextResult> doBatchPredict(List<PreProcessResult> images, NDManager manager, Map<String, Object> extraParameters) {
+    public List<TextResult> doBatchPredict(List<PreProcessResult> images, MatManager matManager, NDManager manager, Map<String, Object> extraParameters) {
         String prompt = String.valueOf(extraParameters.getOrDefault("prompt", "Read text in the image."));
         try {
             String task_prompt = "<s>" + prompt + " <Answer/>";
             long[] decoder_input_ids = tokenizer.encode(task_prompt, false, false).getIds();
-            float[][][] encoderResults = encoderModel.batchPredict(PreProcessResult.getMats(images), manager);
+            float[][][] encoderResults = encoderModel.batchPredict(PreProcessResult.getMats(images), matManager, manager);
 
             return decoderModel.predict(prompt, encoderResults, decoder_input_ids, manager);
         } catch (Exception e) {

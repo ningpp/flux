@@ -27,6 +27,7 @@ import ai.djl.ndarray.NDManager;
 import ai.djl.ndarray.types.DataType;
 import ai.djl.ndarray.types.Shape;
 import ai.djl.util.RandomUtils;
+import io.github.flux.core.MatManager;
 import org.opencv.core.Core;
 import org.opencv.core.CvType;
 import org.opencv.core.Mat;
@@ -56,6 +57,7 @@ import java.util.stream.Collectors;
 /** {@code OpenCVImage} is a high performance implementation of {@link Image}. */
 public class OpenCVImage implements Image {
 
+    private MatManager matManager;
     private Mat image;
 
     /**
@@ -63,7 +65,7 @@ public class OpenCVImage implements Image {
      *
      * @param image the wrapped image
      */
-    public OpenCVImage(Mat image) {
+    public OpenCVImage(MatManager matManager, Mat image) {
         this.image = image;
     }
 
@@ -92,9 +94,9 @@ public class OpenCVImage implements Image {
             return this;
         }
 
-        Mat resized = new Mat();
+        Mat resized = matManager.newMat();
         Imgproc.resize(image, resized, new Size(width, height));
-        return new OpenCVImage(resized);
+        return new OpenCVImage(matManager, resized);
     }
 
     /** {@inheritDoc} */
@@ -104,7 +106,7 @@ public class OpenCVImage implements Image {
         int h = mask.length;
         OpenCVImage resized = resize(w, h, false);
         Mat img = resized.getWrappedImage();
-        Mat ret = new Mat(h, w, CvType.CV_8UC4);
+        Mat ret = matManager.newMat(h, w, CvType.CV_8UC4);
         for (int y = 0; y < h; ++y) {
             for (int x = 0; x < w; ++x) {
                 if (mask[y][x] != 0) {
@@ -113,28 +115,28 @@ public class OpenCVImage implements Image {
                 }
             }
         }
-        return new OpenCVImage(ret);
+        return new OpenCVImage(matManager, ret);
     }
 
     /** {@inheritDoc} */
     @Override
     public Image getSubImage(int x, int y, int w, int h) {
         Mat mat = image.submat(new Rect(x, y, w, h));
-        return new OpenCVImage(mat);
+        return new OpenCVImage(matManager, mat);
     }
 
     /** {@inheritDoc} */
     @Override
     public Image duplicate() {
-        Mat mat = new Mat();
+        Mat mat = matManager.newMat();
         image.copyTo(mat);
-        return new OpenCVImage(mat);
+        return new OpenCVImage(matManager, mat);
     }
 
     /** {@inheritDoc} */
     @Override
     public NDArray toNDArray(NDManager manager, Flag flag) {
-        Mat mat = new Mat();
+        Mat mat = matManager.newMat();
         if (flag == Flag.GRAYSCALE) {
             Imgproc.cvtColor(image, mat, Imgproc.COLOR_BGR2GRAY);
         } else {
@@ -195,7 +197,7 @@ public class OpenCVImage implements Image {
                 Mask mask = (Mask) box;
                 BufferedImage img = mat2Image(image);
                 drawMask(img, mask, 0.5f);
-                image = image2Mat(img);
+                image = image2Mat(matManager, img);
             } else if (box instanceof Landmark) {
                 drawLandmarks(box);
             }
@@ -316,7 +318,7 @@ public class OpenCVImage implements Image {
     public List<BoundingBox> findBoundingBoxes() {
         List<MatOfPoint> points = new ArrayList<>();
         Imgproc.findContours(
-                image, points, new Mat(), Imgproc.RETR_LIST, Imgproc.CHAIN_APPROX_SIMPLE);
+                image, points, matManager.newMat(), Imgproc.RETR_LIST, Imgproc.CHAIN_APPROX_SIMPLE);
         return points.parallelStream()
                 .map(
                         point -> {
@@ -336,9 +338,9 @@ public class OpenCVImage implements Image {
      * @return rgb format image
      */
     public OpenCVImage bgr2rgb() {
-        Mat converted = new Mat();
+        Mat converted = matManager.newMat();
         Imgproc.cvtColor(image, converted, Imgproc.COLOR_BGR2RGB);
-        return new OpenCVImage(converted);
+        return new OpenCVImage(matManager, converted);
     }
 
     /**
@@ -352,11 +354,11 @@ public class OpenCVImage implements Image {
         int w = image.width();
 
         Mat cHW = image.reshape(0, new int[] {c, h * w});
-        Mat result = new Mat();
+        Mat result = matManager.newMat();
         result.create(h, w, CvType.makeType(image.depth(), c));
         result = result.reshape(c, new int[] {h, w});
         Core.transpose(cHW, result);
-        return new OpenCVImage(result);
+        return new OpenCVImage(matManager, result);
     }
 
     /**
@@ -369,10 +371,10 @@ public class OpenCVImage implements Image {
         int h = image.height();
         int w = image.width();
         Mat hWC = image.reshape(1, h * w);
-        Mat result = new Mat();
+        Mat result = matManager.newMat();
         Core.transpose(hWC, result);
         result = result.reshape(1, new int[] {c, h, w});
-        return new OpenCVImage(result);
+        return new OpenCVImage(matManager, result);
     }
 
     /**
@@ -383,10 +385,10 @@ public class OpenCVImage implements Image {
      * @return converted image
      */
     public OpenCVImage normalize(float[] mean, float[] std) {
-        Mat result = new Mat();
+        Mat result = matManager.newMat();
         Core.subtract(image, new Scalar(mean[0], mean[1], mean[2]), result);
         Core.divide(result, new Scalar(std[0], std[1], std[2]), result);
-        return new OpenCVImage(result);
+        return new OpenCVImage(matManager, result);
     }
 
     private void drawLine(Joints.Joint from, Joints.Joint to, int width, int height, Scalar color) {
@@ -469,7 +471,7 @@ public class OpenCVImage implements Image {
         return ret;
     }
 
-    private static Mat image2Mat(BufferedImage img) {
+    private static Mat image2Mat(MatManager matManager, BufferedImage img) {
         int width = img.getWidth();
         int height = img.getHeight();
         byte[] data;
@@ -477,13 +479,13 @@ public class OpenCVImage implements Image {
         DataBuffer buf = img.getRaster().getDataBuffer();
         if (buf instanceof DataBufferByte) {
             data = ((DataBufferByte) buf).getData();
-            mat = new Mat(height, width, CvType.CV_8UC3);
+            mat = matManager.newMat(height, width, CvType.CV_8UC3);
         } else if (buf instanceof DataBufferInt) {
             int[] intData = ((DataBufferInt) buf).getData();
             data = new byte[intData.length * 4];
             ByteBuffer bb = ByteBuffer.wrap(data);
             bb.asIntBuffer().put(intData);
-            mat = new Mat(height, width, CvType.CV_8UC4);
+            mat = matManager.newMat(height, width, CvType.CV_8UC4);
         } else {
             throw new IllegalArgumentException("Unsupported image type: " + buf.getClass());
         }

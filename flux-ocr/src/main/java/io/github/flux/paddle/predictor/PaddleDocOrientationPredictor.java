@@ -22,6 +22,7 @@ import ai.djl.ndarray.NDManager;
 import ai.onnxruntime.OrtEnvironment;
 import io.github.flux.core.BatchPredictor;
 import io.github.flux.core.ClassificationResult;
+import io.github.flux.core.MatManager;
 import io.github.flux.core.ModelParam;
 import io.github.flux.core.PreProcessResult;
 import io.github.flux.exception.FluxException;
@@ -76,7 +77,7 @@ public class PaddleDocOrientationPredictor extends BatchPredictor<PreProcessResu
     }
 
     @Override
-    public List<ClassificationResult> doBatchPredict(List<PreProcessResult> mats, NDManager manager, Map<String, Object> extraParameters) {
+    public List<ClassificationResult> doBatchPredict(List<PreProcessResult> mats, MatManager matManager, NDManager manager, Map<String, Object> extraParameters) {
         List<ClassificationResult> results = new ArrayList<>();
         for (PreProcessResult mat : mats) {
             results.add(predictor.predictProcessed(mat.mat(), 1).get(0));
@@ -85,8 +86,8 @@ public class PaddleDocOrientationPredictor extends BatchPredictor<PreProcessResu
     }
 
     @Override
-    public PreProcessResult processRgb(Mat rgbMat, NDManager manager) {
-        return new PreProcessResult(predictor.process(rgbMat), null);
+    public PreProcessResult processRgb(MatManager matManager, Mat rgbMat, NDManager manager) {
+        return new PreProcessResult(predictor.process(matManager, rgbMat), null);
     }
 
     @Override

@@ -25,6 +25,7 @@ import ai.onnxruntime.OnnxTensor;
 import ai.onnxruntime.OnnxValue;
 import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtSession;
+import io.github.flux.core.MatManager;
 import io.github.flux.core.TextDetectionResult;
 import io.github.flux.exception.FluxException;
 import io.github.flux.paddle.processor.DBPostProcess;
@@ -77,15 +78,16 @@ public class PaddleDetectionPredictor implements AutoCloseable {
         }
     }
 
-    private List<Mat> transform(List<Mat> data, List<ImageProcessor> processors) {
+    private List<Mat> transform(List<Mat> data, MatManager matManager, List<ImageProcessor> processors) {
         List<Mat> arrays = data;
         for (ImageProcessor processor : processors) {
-            arrays = processor.process(arrays);
+            arrays = processor.process(matManager, arrays);
         }
         return arrays;
     }
 
     public TextDetectionResult predict(Mat image,
+                                       MatManager matManager,
                                        NDManager manager,
                                        final Integer limitSideLen,
                                        final LimitType limitType,
@@ -94,10 +96,10 @@ public class PaddleDetectionPredictor implements AutoCloseable {
                                        final Float boxThresh,
                                        final Float unclipRatio) {
         try {
-            DetResizeResultV2 resizedResult = detResize.process(List.of(image),
+            DetResizeResultV2 resizedResult = detResize.process(matManager, List.of(image),
                     limitSideLen, limitType, maxSideLimit).get(0);
             double[] resizedImageShapes = resizedResult.imgShape();
-            Mat transformedResult = transform(List.of(resizedResult.resizeImg()), preProcessors).get(0);
+            Mat transformedResult = transform(List.of(resizedResult.resizeImg()), matManager, preProcessors).get(0);
             resizedResult.resizeImg().release();
 
             int size = (int) (transformedResult.total() * transformedResult.channels());
@@ -122,6 +124,7 @@ public class PaddleDetectionPredictor implements AutoCloseable {
                 preds.add(ArrayUtil.toNDArray(manager, data[0]));
 
                 Pair<List<NDArray>, List<Float>> postResult = dbPostProcess.call(
+                        matManager,
                         preds,
                         resizedImageShapes,
                         thresh == null ? dbPostProcess.getThresh() : thresh,

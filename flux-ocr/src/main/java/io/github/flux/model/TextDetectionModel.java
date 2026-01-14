@@ -3,6 +3,7 @@ package io.github.flux.model;
 import ai.djl.ndarray.NDManager;
 import ai.onnxruntime.OrtEnvironment;
 import io.github.flux.core.BatchPredictor;
+import io.github.flux.core.MatManager;
 import io.github.flux.core.ModelParam;
 import io.github.flux.core.PreProcessResult;
 import io.github.flux.core.TextDetectionResult;
@@ -72,12 +73,12 @@ public class TextDetectionModel extends BatchPredictor<PreProcessResult, TextDet
     }
 
     @Override
-    public List<TextDetectionResult> doBatchPredict(List<PreProcessResult> mats, NDManager manager,
+    public List<TextDetectionResult> doBatchPredict(List<PreProcessResult> mats, MatManager matManager, NDManager manager,
                                                     Map<String, Object> extraParameters) {
         List<TextDetectionResult> results = new ArrayList<>();
         for (PreProcessResult ppr : mats) {
             results.add(
-                predictor.predict(ppr.mat(), manager,
+                predictor.predict(ppr.mat(), matManager, manager,
                         ParameterUtil.getInteger(extraParameters, "det.limitSideLen"),
                         ParameterUtil.getLimitType(extraParameters, "det.limitType"),
                         ParameterUtil.getInteger(extraParameters, "det.maxSideLimit"),
@@ -91,11 +92,11 @@ public class TextDetectionModel extends BatchPredictor<PreProcessResult, TextDet
     }
 
     @Override
-    public PreProcessResult processRgb(Mat rgbMat, NDManager manager) {
+    public PreProcessResult processRgb(MatManager matManager, Mat rgbMat, NDManager manager) {
         return new PreProcessResult(rgbMat, null);
     }
 
-    public List<TextDetectionResult> predict(List<String> images, NDManager manager,
+    public List<TextDetectionResult> predict(List<String> images, MatManager matManager, NDManager manager,
                                              final Integer limitSideLen,
                                              final LimitType limitType,
                                              final Integer maxSideLimit,
@@ -104,14 +105,14 @@ public class TextDetectionModel extends BatchPredictor<PreProcessResult, TextDet
                                              final Float unclipRatio) {
         List<TextDetectionResult> results = new ArrayList<>();
         for (String image : images) {
-            results.add(predict(image, manager,
+            results.add(predict(image, matManager, manager,
                     limitSideLen, limitType, maxSideLimit,
                     thresh, boxThresh, unclipRatio));
         }
         return results;
     }
 
-    public TextDetectionResult predict(String image, NDManager manager,
+    public TextDetectionResult predict(String image, MatManager matManager, NDManager manager,
                                        final Integer limitSideLen,
                                        final LimitType limitType,
                                        final Integer maxSideLimit,
@@ -119,21 +120,21 @@ public class TextDetectionModel extends BatchPredictor<PreProcessResult, TextDet
                                        final Float boxThresh,
                                        final Float unclipRatio) {
         Mat bgrImg = Imgcodecs.imread(image, Imgcodecs.IMREAD_COLOR_BGR);
-        TextDetectionResult result = predict(bgrImg, manager,
+        TextDetectionResult result = predict(bgrImg, matManager, manager,
                 limitSideLen, limitType, maxSideLimit,
                 thresh, boxThresh, unclipRatio);
         bgrImg.release();
         return result;
     }
 
-    public TextDetectionResult predict(Mat image, NDManager manager,
+    public TextDetectionResult predict(Mat image, MatManager matManager, NDManager manager,
                                        final Integer limitSideLen,
                                        final LimitType limitType,
                                        final Integer maxSideLimit,
                                        final Float thresh,
                                        final Float boxThresh,
                                        final Float unclipRatio) {
-        return predictor.predict(image, manager, limitSideLen, limitType, maxSideLimit,
+        return predictor.predict(image, matManager, manager, limitSideLen, limitType, maxSideLimit,
                 thresh, boxThresh, unclipRatio);
     }
 

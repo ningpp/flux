@@ -22,6 +22,7 @@ import ai.onnxruntime.OnnxValue;
 import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtSession;
 import io.github.flux.core.ClassificationResult;
+import io.github.flux.core.MatManager;
 import io.github.flux.paddle.processor.TopkProcessor;
 import io.github.flux.core.TopkResult;
 import io.github.flux.exception.FluxException;
@@ -73,23 +74,23 @@ public class PaddleClassificationPredictor implements AutoCloseable {
         session.close();
     }
 
-    private List<Mat> transform(List<Mat> data, List<ImageProcessor> processors) {
+    private List<Mat> transform(MatManager matManager, List<Mat> data, List<ImageProcessor> processors) {
         List<Mat> arrays = data;
         for (ImageProcessor processor : processors) {
-            arrays = processor.process(arrays);
+            arrays = processor.process(matManager, arrays);
         }
         return arrays;
     }
 
-    public Mat process(Mat mat) {
+    public Mat process(MatManager matManager, Mat mat) {
         for (ImageProcessor processor : preProcessors) {
-            mat = processor.process(mat);
+            mat = processor.process(matManager, mat);
         }
         return mat;
     }
 
-    public List<ClassificationResult> predict(Mat image, final int k) {
-        Mat transformedResult = transform(List.of(image), preProcessors).get(0);
+    public List<ClassificationResult> predict(MatManager matManager, Mat image, final int k) {
+        Mat transformedResult = transform(matManager, List.of(image), preProcessors).get(0);
         return predictProcessed(transformedResult, k);
     }
 

@@ -21,6 +21,7 @@ import ai.djl.modality.cv.Image;
 import ai.djl.modality.cv.Image.Interpolation;
 import ai.djl.ndarray.NDArray;
 import io.github.flux.bytedeco.OpenCVImageFactory;
+import io.github.flux.core.MatManager;
 import io.github.flux.util.IOUtil;
 import io.github.flux.util.ImageUtil;
 import org.opencv.core.Mat;
@@ -45,29 +46,29 @@ public class ResizeNdArray {
         this.interp = interp;
     }
 
-    public List<NDArray> process(List<NDArray> imgs) {
+    public List<NDArray> process(MatManager matManager, List<NDArray> imgs) {
         var res = new ArrayList<NDArray>();
         for (var img : imgs) {
-            res.add(resize(img));
+            res.add(resize(matManager, img));
             img.close();
         }
         return res;
     }
 
-    private NDArray resize(NDArray img) {
+    private NDArray resize(MatManager matManager, NDArray img) {
         long[] shape = img.getShape().getShape();
         int h = (int) shape[0];
         int w = (int) shape[1];
         if (h == height && w == width) {
             return img;
         }
-        Image cv2Img = OpenCVImageFactory.INSTANCE.fromNDArray(img);
-        Mat resized = new Mat();
+        Image cv2Img = new OpenCVImageFactory(matManager).fromNDArray(img);
+        Mat resized = matManager.newMat();
         Imgproc.resize((Mat) cv2Img.getWrappedImage(),
                 resized, new Size(width, height),
                 1, 1, interp);
         // 这个和Python的结果不一样ai.djl.modality.cv.util.NDImageUtils.resize(img, rescaledWidth, rescaledHeight, interp)
-        NDArray ndArray = ImageUtil.toNDArray(resized, img.getManager(), null);
+        NDArray ndArray = ImageUtil.toNDArray(matManager, resized, img.getManager(), null);
         IOUtil.close((Mat) cv2Img.getWrappedImage());
         IOUtil.close(resized);
         IOUtil.close(img);

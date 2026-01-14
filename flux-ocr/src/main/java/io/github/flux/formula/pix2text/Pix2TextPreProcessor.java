@@ -19,13 +19,14 @@ package io.github.flux.formula.pix2text;
 
 import ai.djl.ndarray.NDArray;
 import ai.djl.ndarray.NDManager;
+import io.github.flux.core.MatManager;
 import io.github.flux.util.ImageUtil;
 import org.opencv.core.Mat;
 import org.opencv.imgproc.Imgproc;
 
 public class Pix2TextPreProcessor {
 
-    public NDArray process(Mat rgbImg, NDManager manager) {
+    public NDArray process(MatManager matManager, Mat rgbImg, NDManager manager) {
         DeiTImageProcessor deitProcessor = DeiTImageProcessor.builder()
                 .setDoResize(true)
                 .setSize(384, 384)
@@ -42,7 +43,7 @@ public class Pix2TextPreProcessor {
                 .build();
 
         NDArray imgNdArray = ImageUtil.toNDArrayUint8(rgbImg, manager);
-        NDArray input = deitProcessor.preprocess(imgNdArray, manager);
+        NDArray input = deitProcessor.preprocess(imgNdArray, matManager, manager);
 
         rgbImg.release();
         imgNdArray.close();

@@ -22,6 +22,7 @@ import ai.djl.ndarray.NDManager;
 import ai.djl.ndarray.index.NDIndex;
 import ai.djl.ndarray.types.Shape;
 import io.github.flux.bytedeco.OpenCVImageFactory;
+import io.github.flux.core.MatManager;
 import io.github.flux.paddle.processor.ImageProcessor;
 import io.github.flux.util.ImageUtil;
 import org.opencv.core.Core;
@@ -38,7 +39,7 @@ import java.util.List;
  */
 public class LatexImageFormat implements ImageProcessor {
 
-    public Mat ___process(Mat img) {
+    public Mat ___process(MatManager matManager, Mat img) {
         // Get image dimensions
         int imH = img.rows();
         int imW = img.cols();
@@ -50,7 +51,7 @@ public class LatexImageFormat implements ImageProcessor {
         // Pad the image to the new dimensions if necessary.
         // This is equivalent to np.pad with constant_values=1.
         // Note: In the case of (384, 384) input, padding will be zero.
-        Mat paddedImg = new Mat();
+        Mat paddedImg = matManager.newMat();
         int top = 0;
         int bottom = divideH - imH;
         int left = 0;
@@ -88,7 +89,7 @@ public class LatexImageFormat implements ImageProcessor {
      * @return The formatted image as an OpenCV Mat object with dimensions reshaped to (1, 1, H, W).
      */
     // @Override
-    public Mat process_(Mat img) {
+    public Mat process_(MatManager matManager, Mat img) {
         // Get image dimensions
         int imH = img.rows();
         int imW = img.cols();
@@ -101,7 +102,7 @@ public class LatexImageFormat implements ImageProcessor {
         // Corresponds to Python: img = img[:, :, 0]
         // This extracts the first channel of the image. If the image is already grayscale,
         // it will be a no-op in terms of channel data.
-        Mat singleChannelImg = new Mat();
+        Mat singleChannelImg = matManager.newMat();
         if (img.channels() > 1) {
             Core.extractChannel(img, singleChannelImg, 0);
         } else {
@@ -112,7 +113,7 @@ public class LatexImageFormat implements ImageProcessor {
         // Pad the image on the bottom and right to reach the new dimensions.
         // The padding value is 1, which assumes the image is in a floating-point format (e.g., 0.0-1.0).
         // If using an integer format (e.g., 0-255), a value of 255 might be more appropriate for white padding.
-        Mat paddedImg = new Mat();
+        Mat paddedImg = matManager.newMat();
         Core.copyMakeBorder(singleChannelImg, paddedImg, 0, divideH - imH, 0, divideW - imW, Core.BORDER_CONSTANT, new Scalar(1));
 
         // Corresponds to Python: img[:, :, np.newaxis].transpose(2, 0, 1)[np.newaxis, :]
@@ -133,16 +134,17 @@ public class LatexImageFormat implements ImageProcessor {
      * Formats a single image to a format compatible with certain processing pipelines,
      * often used for deep learning models.
      *
-     * @param img The input image as an OpenCV Mat object.
+     * @param matManager
+     * @param img        The input image as an OpenCV Mat object.
      * @return The formatted image as an OpenCV Mat object with dimensions reshaped to (1, 1, H, W).
      */
     @Override
-    public Mat process(Mat img) {
+    public Mat process(MatManager matManager, Mat img) {
         var manager = NDManager.newBaseManager();
-        NDArray imgNdArray = ImageUtil.toNDArray(img, manager, null);
+        NDArray imgNdArray = ImageUtil.toNDArray(matManager, img, manager, null);
         NDArray result = format(imgNdArray, manager);
 
-        return (Mat) OpenCVImageFactory.INSTANCE.fromNDArray(result).getWrappedImage();
+        return (Mat) new OpenCVImageFactory(matManager).fromNDArray(result).getWrappedImage();
     }
 
     /**

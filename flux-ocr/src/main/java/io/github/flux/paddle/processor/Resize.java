@@ -18,6 +18,7 @@
 package io.github.flux.paddle.processor;
 
 import ai.djl.modality.cv.Image.Interpolation;
+import io.github.flux.core.MatManager;
 import org.opencv.core.Mat;
 import org.opencv.core.Size;
 import org.opencv.imgproc.Imgproc;
@@ -37,20 +38,19 @@ public class Resize implements ImageProcessor {
     }
 
     public Resize(int width, int height, int interp) {
-        Objects.requireNonNull(interp, "you should set Interpolation");
         this.width = width;
         this.height = height;
         this.interp = interp;
     }
 
     @Override
-    public Mat process(Mat img) {
+    public Mat process(MatManager matManager, Mat img) {
         int h = img.rows();
         int w = img.cols();
         if (h == height && w == width) {
             return img;
         }
-        Mat resized = new Mat();
+        Mat resized = matManager.newMat();
         Imgproc.resize(img,
                 resized, new Size(width, height),
                 1, 1, interp);

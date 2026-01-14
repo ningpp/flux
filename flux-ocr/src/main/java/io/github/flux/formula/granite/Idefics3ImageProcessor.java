@@ -26,6 +26,7 @@ import ai.djl.ndarray.NDManager;
 import ai.djl.ndarray.index.NDIndex;
 import ai.djl.ndarray.types.DataType;
 import ai.djl.ndarray.types.Shape;
+import io.github.flux.core.MatManager;
 import io.github.flux.formula.pix2text.DeiTImageProcessor;
 import io.github.flux.paddle.processor.NougatImageProcessor;
 import io.github.flux.paddle.processor.ResizeNdArray;
@@ -37,10 +38,10 @@ import java.util.List;
 public class Idefics3ImageProcessor {
 
     public static Idefics3PreProcessResult process(HuggingFaceTokenizer tokenizer, String requestText,
-                                                   NDArray image, NDManager manager) {
+                                                   MatManager matManager, NDArray image, NDManager manager) {
         int image_seq_len = 64;
         boolean add_special_tokens = true;
-        Idefics3ImageProcessResult imageProcessResult = process_image(image, manager);
+        Idefics3ImageProcessResult imageProcessResult = process_image(matManager, image, manager);
         int[][] image_rows = imageProcessResult.images_list_rows();
         int[][] image_cols = imageProcessResult.images_list_cols();
 
@@ -127,13 +128,13 @@ public class Idefics3ImageProcessor {
                 fakeTokenAroundImage, imageToken, globalImgToken);
     }
 
-    private static Idefics3ImageProcessResult process_image(NDArray image, NDManager manager) {
+    private static Idefics3ImageProcessResult process_image(MatManager matManager, NDArray image, NDManager manager) {
         int resolution_max_side = 2048;
         float[] imageMean = new float[]{0.5f, 0.5f, 0.5f};
         float[] imageStd = new float[]{0.5f, 0.5f, 0.5f};
         float rescaleFactor = 0.00392156862745098f;
-        NDArray resized = resize(image, resolution_max_side);
-        SplitResult splitResult = do_image_splitting(resized, 512, 1);
+        NDArray resized = resize(matManager, image, resolution_max_side);
+        SplitResult splitResult = do_image_splitting(matManager, resized, 512, 1);
         NDList splited = splitResult.frames();
         int[][] images_list_rows = new int[1][];
         int[][] images_list_cols = new int[1][];
@@ -143,7 +144,7 @@ public class Idefics3ImageProcessor {
         NDList rgb_list = convert_to_rgb(splited, manager);
         NDList rescaled_list = rescale(rgb_list, rescaleFactor);
         NDList normalized_list = normalize(rescaled_list, imageMean, imageStd, manager);
-        PadResult pad_result = pad(normalized_list, manager);
+        PadResult pad_result = pad(matManager, normalized_list, manager);
         NDList images_list = pad_result.padded_images_list();
         NDList padded_mask = pad_result.padded_masks();
         NDList chw_images = toCHW(images_list);
@@ -175,13 +176,13 @@ public class Idefics3ImageProcessor {
         return results;
     }
 
-    private static PadResult pad(NDList list, NDManager manager) {
+    private static PadResult pad(MatManager matManager, NDList list, NDManager manager) {
         int[] pad_size = get_max_height_width(list);
 
         NDList padded_images_list = new NDList();
         NDList padded_masks = new NDList();
         for (NDArray image : list) {
-            padded_images_list.add(NougatImageProcessor.pad(image, pad_size[0], pad_size[1]));
+            padded_images_list.add(NougatImageProcessor.pad(matManager, image, pad_size[0], pad_size[1]));
             padded_masks.add(make_pixel_mask(image, pad_size[0], pad_size[1], manager));
         }
         return new PadResult(padded_images_list, padded_masks);
@@ -240,18 +241,18 @@ public class Idefics3ImageProcessor {
         return results;
     }
 
-    private static SplitResult do_image_splitting(NDArray image, int vision_encoder_max_size, int resample) {
+    private static SplitResult do_image_splitting(MatManager matManager, NDArray image, int vision_encoder_max_size, int resample) {
         // We first resize both height and width of each image to the nearest max_image_size multiple,
         // disregarding the aspect ratio
-        NDArray forVisonResized = resize_for_vision_encoder(image, vision_encoder_max_size, resample);
-        SplitResult splitResult = split_image(forVisonResized, vision_encoder_max_size);
+        NDArray forVisonResized = resize_for_vision_encoder(matManager, image, vision_encoder_max_size, resample);
+        SplitResult splitResult = split_image(matManager, forVisonResized, vision_encoder_max_size);
         return splitResult;
     }
 
     private static record SplitResult(NDList frames, int num_splits_h, int num_splits_w) {
     }
 
-    private static SplitResult split_image(NDArray image, int max_image_size) {
+    private static SplitResult split_image(MatManager matManager, NDArray image, int max_image_size) {
         long[] shape = image.getShape().getShape();
         int height = (int) shape[0];
         int width = (int) shape[1];
@@ -292,7 +293,7 @@ public class Idefics3ImageProcessor {
             int global_image_height = max_height;
             int global_image_width = max_width;
             if (height != global_image_height || width != global_image_width) {
-                frames.add(new ResizeNdArray(global_image_width, global_image_height, 1).process(List.of(image)).get(0));
+                frames.add(new ResizeNdArray(global_image_width, global_image_height, 1).process(matManager, List.of(image)).get(0));
             }
         } else {
             num_splits_h = 0;
@@ -370,7 +371,7 @@ public class Idefics3ImageProcessor {
         }
     }
 
-    private static NDArray resize_for_vision_encoder(NDArray image, int vision_encoder_max_size, int resample) {
+    private static NDArray resize_for_vision_encoder(MatManager matManager, NDArray image, int vision_encoder_max_size, int resample) {
         long[] shape = image.getShape().getShape();
         int height = (int) shape[0];
         int width = (int) shape[1];
@@ -388,12 +389,12 @@ public class Idefics3ImageProcessor {
             width = Double.valueOf(Math.ceil(((double) width) / ((double) vision_encoder_max_size))).intValue()
                     * vision_encoder_max_size;
         }
-        return new ResizeNdArray(width, height, resample).process(List.of(image)).get(0);
+        return new ResizeNdArray(width, height, resample).process(matManager, List.of(image)).get(0);
     }
 
-    private static NDArray resize(NDArray image, int resolution_max_side) {
+    private static NDArray resize(MatManager matManager, NDArray image, int resolution_max_side) {
         int[] heightAndWidth = get_resize_output_image_size(image, resolution_max_side);
-        return new ResizeNdArray(heightAndWidth[1], heightAndWidth[0], 1).process(List.of(image)).get(0);
+        return new ResizeNdArray(heightAndWidth[1], heightAndWidth[0], 1).process(matManager, List.of(image)).get(0);
     }
 
     private static final int MAX_IMAGE_SIZE = 4096;

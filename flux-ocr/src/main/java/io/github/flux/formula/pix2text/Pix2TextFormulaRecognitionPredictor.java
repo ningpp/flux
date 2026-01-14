@@ -22,6 +22,7 @@ import ai.djl.ndarray.NDManager;
 import ai.onnxruntime.OrtEnvironment;
 import io.github.flux.core.BatchPredictor;
 import io.github.flux.core.FormulaRecognitionResult;
+import io.github.flux.core.MatManager;
 import io.github.flux.core.PreProcessResult;
 import io.github.flux.exception.FluxException;
 import io.github.flux.util.IOUtil;
@@ -75,12 +76,12 @@ public class Pix2TextFormulaRecognitionPredictor extends BatchPredictor<PreProce
     }
 
     @Override
-    public PreProcessResult processRgb(Mat rgbMat, NDManager manager) {
-        return new PreProcessResult(null, new Pix2TextPreProcessor().process(rgbMat, manager));
+    public PreProcessResult processRgb(MatManager matManager, Mat rgbMat, NDManager manager) {
+        return new PreProcessResult(null, new Pix2TextPreProcessor().process(matManager, rgbMat, manager));
     }
 
     @Override
-    public List<FormulaRecognitionResult> doBatchPredict(List<PreProcessResult> inputNDArrays, NDManager manager, Map<String, Object> extraParameters) {
+    public List<FormulaRecognitionResult> doBatchPredict(List<PreProcessResult> inputNDArrays, MatManager matManager, NDManager manager, Map<String, Object> extraParameters) {
         float[][][] encoderResults = encoderModel.batchPredict(PreProcessResult.getNDArrays(inputNDArrays), manager);
         return decoderModel.batchPredict(encoderResults, manager);
     }

@@ -27,6 +27,7 @@ import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtSession;
 import io.github.flux.core.BatchPredictor;
 import io.github.flux.core.FormulaRecognitionResult;
+import io.github.flux.core.MatManager;
 import io.github.flux.core.PreProcessResult;
 import io.github.flux.exception.FluxException;
 import io.github.flux.util.IOUtil;
@@ -114,7 +115,7 @@ public class PaddleFormulaRecognitionPredictor extends BatchPredictor<PreProcess
     }
 
     @Override
-    public List<FormulaRecognitionResult> doBatchPredict(List<PreProcessResult> inputNDArrays, NDManager manager, Map<String, Object> extraParameters) {
+    public List<FormulaRecognitionResult> doBatchPredict(List<PreProcessResult> inputNDArrays, MatManager matManager, NDManager manager, Map<String, Object> extraParameters) {
         try {
             NDList ndList = new NDList();
             ndList.addAll(PreProcessResult.getNDArrays(inputNDArrays));
@@ -156,9 +157,9 @@ public class PaddleFormulaRecognitionPredictor extends BatchPredictor<PreProcess
     }
 
     @Override
-    public PreProcessResult processRgb(Mat rgbMat, NDManager manager) {
-        Mat decodeResult = uniMERNetImgDecode.process(rgbMat);
-        NDArray uniMERNetImgDecodeResult = ImageUtil.toNDArray(decodeResult, manager, null);
+    public PreProcessResult processRgb(MatManager matManager, Mat rgbMat, NDManager manager) {
+        Mat decodeResult = uniMERNetImgDecode.process(matManager, rgbMat);
+        NDArray uniMERNetImgDecodeResult = ImageUtil.toNDArray(matManager, decodeResult, manager, null);
         NDArray uniMERNetTestTransformResult = uniMERNetTestTransform.transform(manager, uniMERNetImgDecodeResult);
         NDArray transformedResult = latexImageFormat.format(uniMERNetTestTransformResult, manager);
         IOUtil.close(uniMERNetTestTransformResult);

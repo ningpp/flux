@@ -3,6 +3,7 @@ package io.github.flux.model;
 import ai.djl.ndarray.NDManager;
 import ai.onnxruntime.OrtEnvironment;
 import io.github.flux.core.BatchPredictor;
+import io.github.flux.core.MatManager;
 import io.github.flux.core.ModelParam;
 import io.github.flux.core.PreProcessResult;
 import io.github.flux.core.RecognitionResult;
@@ -62,12 +63,12 @@ public class TextRecognitionModel extends BatchPredictor<PreProcessResult, List<
     }
 
     @Override
-    public List<List<RecognitionResult>> doBatchPredict(List<PreProcessResult> mats, NDManager manager, Map<String, Object> extraParameters) {
-        return predictor.batchPredict(mats.stream().map(PreProcessResult::mat).toList(), manager);
+    public List<List<RecognitionResult>> doBatchPredict(List<PreProcessResult> mats, MatManager matManager, NDManager manager, Map<String, Object> extraParameters) {
+        return predictor.batchPredict(mats.stream().map(PreProcessResult::mat).toList(), matManager, manager);
     }
 
     @Override
-    public PreProcessResult processRgb(Mat rgbMat, NDManager manager) {
+    public PreProcessResult processRgb(MatManager matManager, Mat rgbMat, NDManager manager) {
         return new PreProcessResult(rgbMat, null);
     }
 }

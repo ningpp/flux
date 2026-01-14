@@ -23,6 +23,7 @@ import ai.djl.ndarray.NDManager;
 import ai.onnxruntime.OrtEnvironment;
 import io.github.flux.core.BatchPredictor;
 import io.github.flux.core.FormulaRecognitionResult;
+import io.github.flux.core.MatManager;
 import io.github.flux.core.PreProcessResult;
 import io.github.flux.exception.FluxException;
 import io.github.flux.util.IOUtil;
@@ -67,13 +68,13 @@ public class NougatLatexFormulaModel extends BatchPredictor<PreProcessResult, Fo
     }
 
     @Override
-    public PreProcessResult processRgb(Mat rgbMat, NDManager manager) {
-        NDArray ndArray = preProcessor.process(rgbMat, manager);
+    public PreProcessResult processRgb(MatManager matManager, Mat rgbMat, NDManager manager) {
+        NDArray ndArray = preProcessor.process(matManager, rgbMat, manager);
         return new PreProcessResult(null, ndArray);
     }
 
     @Override
-    public List<FormulaRecognitionResult> doBatchPredict(List<PreProcessResult> batch, NDManager manager, Map<String, Object> extraParameters) {
+    public List<FormulaRecognitionResult> doBatchPredict(List<PreProcessResult> batch, MatManager matManager, NDManager manager, Map<String, Object> extraParameters) {
         try {
             float[][][] encoderResults = encoderModel.batchPredict(PreProcessResult.getNDArrays(batch), manager);
             return decoderModel.batchPredict(encoderResults, manager);

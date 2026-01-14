@@ -2,6 +2,7 @@ package io.github.flux.unirec;
 
 import ai.djl.ndarray.NDManager;
 import io.github.flux.core.BatchPredictor;
+import io.github.flux.core.MatManager;
 import io.github.flux.core.PreProcessResult;
 import io.github.flux.core.TableResult;
 import io.github.flux.util.IOUtil;
@@ -19,14 +20,14 @@ public class UnirecTableModel extends BatchPredictor<PreProcessResult, TableResu
     }
 
     @Override
-    public List<TableResult> doBatchPredict(List<PreProcessResult> mats, NDManager manager, Map<String, Object> extraParameters) {
-        return predictor.doBatchPredict(mats, manager, extraParameters).stream()
+    public List<TableResult> doBatchPredict(List<PreProcessResult> mats, MatManager matManager, NDManager manager, Map<String, Object> extraParameters) {
+        return predictor.doBatchPredict(mats, matManager, manager, extraParameters).stream()
                 .map(r -> new TableResult(r.text(), r.tokens())).toList();
     }
 
     @Override
-    public PreProcessResult processRgb(Mat rgbMat, NDManager manager) {
-        return predictor.processRgb(rgbMat, manager);
+    public PreProcessResult processRgb(MatManager matManager, Mat rgbMat, NDManager manager) {
+        return predictor.processRgb(matManager, rgbMat, manager);
     }
 
     @Override

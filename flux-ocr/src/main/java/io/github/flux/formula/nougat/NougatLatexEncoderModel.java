@@ -26,6 +26,7 @@ import ai.onnxruntime.OnnxValue;
 import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtException;
 import ai.onnxruntime.OrtSession;
+import io.github.flux.core.MatManager;
 import io.github.flux.exception.FluxException;
 import io.github.flux.util.IOUtil;
 import io.github.flux.util.ImageUtil;
@@ -67,17 +68,14 @@ public class NougatLatexEncoderModel implements AutoCloseable {
 
             this.inputNames = session.getInputNames();
             this.outputNames = session.getOutputNames();
-            System.out.println("\nNougatLatexEncoderModel\n");
-            System.out.println(session.getInputInfo());
-            System.out.println(session.getOutputInfo());
         } catch (Exception e) {
             throw new FluxException(e);
         }
     }
 
-    public float[][][] predict(String imgfile, NDManager manager) throws OrtException {
-        Mat mat = ImageUtil.readToRgb(imgfile);
-        NDArray ndArray = preProcessor.process(mat, manager);
+    public float[][][] predict(String imgfile, MatManager matManager, NDManager manager) throws OrtException {
+        Mat mat = ImageUtil.readToRgb(matManager, imgfile);
+        NDArray ndArray = preProcessor.process(matManager, mat, manager);
         mat.release();
         return predict(ndArray, manager);
     }

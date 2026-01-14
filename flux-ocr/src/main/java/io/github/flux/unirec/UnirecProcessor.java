@@ -18,7 +18,8 @@
 package io.github.flux.unirec;
 
 import ai.djl.modality.cv.Image.Interpolation;
-import io.github.flux.core.Processor;
+import io.github.flux.core.MatManager;
+import io.github.flux.paddle.processor.ImageProcessor;
 import io.github.flux.paddle.processor.Resize;
 import io.github.flux.paddle.processor.ToCHWImage;
 import org.opencv.core.Core;
@@ -26,14 +27,14 @@ import org.opencv.core.CvType;
 import org.opencv.core.Mat;
 import org.opencv.core.Scalar;
 
-public class UnirecProcessor implements Processor<Mat, Mat> {
+public class UnirecProcessor implements ImageProcessor {
 
     @Override
-    public Mat process(Mat input) {
+    public Mat process(MatManager matManager, Mat input) {
         int[] widthHeight = _calculate_target_size(input.cols(), input.rows());
-        Mat resized = new Resize(widthHeight[0], widthHeight[1], Interpolation.BICUBIC).process(input);
+        Mat resized = new Resize(widthHeight[0], widthHeight[1], Interpolation.BICUBIC).process(matManager, input);
 
-        Mat floatImg = new Mat();
+        Mat floatImg = matManager.newMat();
         resized.convertTo(floatImg, CvType.CV_32F, 1.0 / 255.0);
 
         // Define mean and std. In OpenCV, we can use Scalar for per-channel operations.
@@ -41,7 +42,7 @@ public class UnirecProcessor implements Processor<Mat, Mat> {
         Scalar std = new Scalar(0.5, 0.5, 0.5);
         Core.subtract(floatImg, mean, floatImg);
         Core.divide(floatImg, std, floatImg);
-        return new ToCHWImage().process(floatImg);
+        return new ToCHWImage().process(matManager, floatImg);
     }
 
     // Calculate target size with aspect ratio preservation.

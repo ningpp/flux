@@ -17,6 +17,7 @@
  */
 package io.github.flux.formula.paddle;
 
+import io.github.flux.core.MatManager;
 import io.github.flux.paddle.processor.ImageProcessor;
 import org.opencv.core.Core;
 import org.opencv.core.CvType;
@@ -56,9 +57,9 @@ public class UniMERNetImgDecode implements ImageProcessor {
      * @param img The input image as an OpenCV Mat.
      * @return The cropped image as a Mat.
      */
-    public Mat cropMargin(Mat img) {
+    public Mat cropMargin(MatManager matManager, Mat img) {
         // Corresponds to Python: img.convert("L")
-        Mat gray = new Mat();
+        Mat gray = matManager.newMat();
         Imgproc.cvtColor(img, gray, Imgproc.COLOR_BGR2GRAY);
 
         // Corresponds to Python: data.astype(np.uint8)
@@ -74,20 +75,20 @@ public class UniMERNetImgDecode implements ImageProcessor {
         }
 
         // Corresponds to Python: (data - min_val) / (max_val - min_val) * 255
-        Mat r1 = new Mat();
+        Mat r1 = matManager.newMat();
         Core.add(gray, new Scalar(-minVal), r1);
-        Mat r2 = new Mat();
+        Mat r2 = matManager.newMat();
         Core.multiply(r1, new Scalar(1.0 / (double)(maxVal-minVal)), r2);
-        Mat dataf = new Mat();
+        Mat dataf = matManager.newMat();
         Core.multiply(r2, new Scalar(255), dataf);
-        Mat data = new Mat();
+        Mat data = matManager.newMat();
         dataf.convertTo(data, CvType.CV_8U);
 
         // Corresponds to Python: 255 * (data < 200).astype(np.uint8)
-        // Mat normalized = new Mat();
+        // Mat normalized = matManager.newMat();
         // Core.normalize(data, normalized, 0, 255, Core.NORM_MINMAX, CvType.CV_8U);
 
-        Mat thresholded = new Mat();
+        Mat thresholded = matManager.newMat();
         Imgproc.threshold(data, thresholded, 199, 255, Imgproc.THRESH_BINARY_INV);
 
         // C++: enum ThresholdTypes (cv.ThresholdTypes)
@@ -102,7 +103,7 @@ public class UniMERNetImgDecode implements ImageProcessor {
                 THRESH_TRIANGLE = 16;
         */
         // Corresponds to Python: cv2.findNonZero(gray)
-        Mat nonZeroCoords = new Mat();
+        Mat nonZeroCoords = matManager.newMat();
         Core.findNonZero(thresholded, nonZeroCoords);
 
         if (nonZeroCoords.empty()) {
@@ -113,7 +114,7 @@ public class UniMERNetImgDecode implements ImageProcessor {
         Rect boundingRect = Imgproc.boundingRect(nonZeroCoords);
 
         // Corresponds to Python: img.crop((a, b, w + a, h + b))
-        return new Mat(img, boundingRect);
+        return matManager.newMat(img, boundingRect);
     }
 
     /**
@@ -122,9 +123,9 @@ public class UniMERNetImgDecode implements ImageProcessor {
      * @param img The input image as an OpenCV Mat.
      * @return The cropped image as a Mat.
      */
-    public Mat __1__cropMargin(Mat img) {
+    public Mat __1__cropMargin(MatManager matManager, Mat img) {
         // Corresponds to Python: img.convert("L")
-        Mat gray = new Mat();
+        Mat gray = matManager.newMat();
         Imgproc.cvtColor(img, gray, Imgproc.COLOR_BGR2GRAY);
 
         // Corresponds to Python: data.astype(np.uint8)
@@ -140,15 +141,15 @@ public class UniMERNetImgDecode implements ImageProcessor {
         }
 
         // Corresponds to Python: (data - min_val) / (max_val - min_val) * 255
-        Mat normalized = new Mat();
+        Mat normalized = matManager.newMat();
         Core.normalize(gray, normalized, 0, 255, Core.NORM_MINMAX, CvType.CV_8U);
 
         // Corresponds to Python: 255 * (data < 200).astype(np.uint8)
-        Mat thresholded = new Mat();
+        Mat thresholded = matManager.newMat();
         Imgproc.threshold(normalized, thresholded, 200, 255, Imgproc.THRESH_BINARY_INV);
 
         // Corresponds to Python: cv2.findNonZero(gray)
-        Mat nonZeroCoords = new Mat();
+        Mat nonZeroCoords = matManager.newMat();
         Core.findNonZero(thresholded, nonZeroCoords);
 
         if (nonZeroCoords.empty()) {
@@ -159,7 +160,7 @@ public class UniMERNetImgDecode implements ImageProcessor {
         Rect boundingRect = Imgproc.boundingRect(nonZeroCoords);
 
         // Corresponds to Python: img.crop((a, b, w + a, h + b))
-        return new Mat(img, boundingRect);
+        return matManager.newMat(img, boundingRect);
     }
 
     /**
@@ -169,7 +170,7 @@ public class UniMERNetImgDecode implements ImageProcessor {
      * @param size The desired size for the smallest edge.
      * @return The resized image as a Mat.
      */
-    public Mat resize_not_same_(Mat img, int size) {
+    public Mat resize_not_same_(MatManager matManager, Mat img, int size) {
         int image_height = img.rows();
         int image_width = img.cols();
 
@@ -191,7 +192,7 @@ public class UniMERNetImgDecode implements ImageProcessor {
             newH = newShort;
         }
 
-        Mat resizedImg = new Mat();
+        Mat resizedImg = matManager.newMat();
         Imgproc.resize(img, resizedImg, new Size(newW, newH), 1, 1, Imgproc.INTER_LINEAR);
         return resizedImg;
     }
@@ -199,17 +200,18 @@ public class UniMERNetImgDecode implements ImageProcessor {
     /**
      * Decodes the image by cropping margins, resizing, and adding padding.
      *
-     * @param img The input image as a Mat.
+     * @param matManager
+     * @param img        The input image as a Mat.
      * @return The decoded image as a Mat, or null on failure.
      */
     @Override
-    public Mat process(Mat img) {
+    public Mat process(MatManager matManager, Mat img) {
         if (img == null || img.empty()) {
             return null;
         }
 
         // Corresponds to Python: self.crop_margin(Image.fromarray(img).convert("RGB"))
-        Mat croppedImg = cropMargin(img);
+        Mat croppedImg = cropMargin(matManager, img);
 
         /*
         Util20250629.saveNDArrayToTxt(
@@ -223,21 +225,9 @@ public class UniMERNetImgDecode implements ImageProcessor {
             return null;
         }
 
-        /*
-        Imgcodecs.imwrite(
-                "D:\\after-cropped-" + System.currentTimeMillis() + ".png",
-                croppedImg);
-        */
-
         // Corresponds to Python: self.resize(img, min(self.input_size))
         int minInputSize = (int) Math.min(this.inputSize.height, this.inputSize.width);
-        Mat resizedImg = resize_not_same_(croppedImg, minInputSize);
-        /*
-        Util20250629.saveNDArrayToTxt(resizedImg,
-                NDManager.newBaseManager(),
-                "D:\\after-resize-java-" + System.currentTimeMillis() + ".txt",
-                1);
-        */
+        Mat resizedImg = resize_not_same_(matManager, croppedImg, minInputSize);
 
         // Corresponds to Python: img.thumbnail((self.input_size[1], self.input_size[0]))
         double r_width = this.inputSize.width / resizedImg.width();
@@ -265,7 +255,7 @@ public class UniMERNetImgDecode implements ImageProcessor {
         right = deltaWidth - left;
         bottom = deltaHeight - top;
 
-        Mat paddedImg = new Mat();
+        Mat paddedImg = matManager.newMat();
         Core.copyMakeBorder(resizedImg, paddedImg, top, bottom, left, right, Core.BORDER_CONSTANT, new Scalar(0, 0, 0));
 
         /*

@@ -21,6 +21,7 @@ import ai.djl.ndarray.NDArray;
 import ai.djl.ndarray.NDManager;
 import ai.djl.ndarray.index.NDIndex;
 import ai.djl.ndarray.types.Shape;
+import io.github.flux.core.MatManager;
 import io.github.flux.formula.pix2text.DeiTImageProcessor;
 import io.github.flux.paddle.processor.ResizeNdArray;
 import io.github.flux.util.ImageUtil;
@@ -31,9 +32,9 @@ import java.util.Locale;
 
 public class NougatImageProcessor {
 
-    public NDArray process(Mat rgbImg, NDManager manager) {
+    public NDArray process(MatManager matManager, Mat rgbImg, NDManager manager) {
         NDArray imgNdArray = ImageUtil.toNDArrayUint8(rgbImg, manager);
-        NDArray input = process(imgNdArray, manager);
+        NDArray input = process(matManager, imgNdArray, manager);
 
         rgbImg.release();
         imgNdArray.close();
@@ -63,14 +64,14 @@ public class NougatImageProcessor {
         }
     }
 
-    private static NDArray process(NDArray image, NDManager manager) {
+    private static NDArray process(MatManager matManager, NDArray image, NDManager manager) {
         float rescaleFactor = 0.00392156862745098f;
         float[] imageMean = new float[]{0.485f, 0.456f, 0.406f};
         float[] imageStd = new float[]{0.229f, 0.224f, 0.225f};
         int height = 224;
         int width = 560;
-        NDArray resized = resize(image, Math.min(height, width));
-        NDArray thumbnailed = thumbnail(resized, height, width, 2);
+        NDArray resized = resize(matManager, image, Math.min(height, width));
+        NDArray thumbnailed = thumbnail(matManager, resized, height, width, 2);
         NDArray padded = pad(thumbnailed, height, width);
         NDArray rescaled = DeiTImageProcessor.rescale(padded, rescaleFactor);
         NDArray normalized = DeiTImageProcessor.normalize(rescaled, imageMean, imageStd, manager);
@@ -112,16 +113,16 @@ public class NougatImageProcessor {
         return padded;
     }
 
-    private static NDArray resize(NDArray image, int shortest_edge) {
+    private static NDArray resize(MatManager matManager, NDArray image, int shortest_edge) {
         int[] heightAndWidth = get_resize_output_image_size(image, shortest_edge);
-        return resize(image, heightAndWidth[0], heightAndWidth[1], 2);
+        return resize(matManager, image, heightAndWidth[0], heightAndWidth[1], 2);
     }
 
-    private static NDArray resize(NDArray image, int targetHeight, int targetWidth, int resampleMode) {
-        return new ResizeNdArray(targetWidth, targetHeight, resampleMode).process(List.of(image)).get(0);
+    private static NDArray resize(MatManager matManager, NDArray image, int targetHeight, int targetWidth, int resampleMode) {
+        return new ResizeNdArray(targetWidth, targetHeight, resampleMode).process(matManager, List.of(image)).get(0);
     }
 
-    private static NDArray thumbnail(NDArray image, int output_height, int output_width, int resampleMode) {
+    private static NDArray thumbnail(MatManager matManager, NDArray image, int output_height, int output_width, int resampleMode) {
         long[] shape = image.getShape().getShape();
         int input_height = (int) shape[0];
         int input_width = (int) shape[1];
@@ -136,7 +137,7 @@ public class NougatImageProcessor {
         } else if (input_width > input_height) {
             height = input_height * width / input_width;
         }
-        return new ResizeNdArray(width, height, resampleMode).process(List.of(image)).get(0);
+        return new ResizeNdArray(width, height, resampleMode).process(matManager, List.of(image)).get(0);
     }
 
 }

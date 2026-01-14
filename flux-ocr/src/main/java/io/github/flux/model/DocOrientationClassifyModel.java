@@ -4,6 +4,7 @@ import ai.djl.ndarray.NDManager;
 import ai.onnxruntime.OrtEnvironment;
 import io.github.flux.core.BatchPredictor;
 import io.github.flux.core.ClassificationResult;
+import io.github.flux.core.MatManager;
 import io.github.flux.core.ModelParam;
 import io.github.flux.core.PreProcessResult;
 import io.github.flux.paddle.predictor.PaddleDocOrientationPredictor;
@@ -36,17 +37,17 @@ public class DocOrientationClassifyModel extends BatchPredictor<PreProcessResult
     }
 
     @Override
-    public List<ClassificationResult> doBatchPredict(List<PreProcessResult> mats, NDManager manager, Map<String, Object> extraParameters) {
-        return predictor.doBatchPredict(mats, manager, extraParameters);
+    public List<ClassificationResult> doBatchPredict(List<PreProcessResult> mats, MatManager matManager, NDManager manager, Map<String, Object> extraParameters) {
+        return predictor.doBatchPredict(mats, matManager, manager, extraParameters);
     }
 
     @Override
-    public PreProcessResult processRgb(Mat rgbMat, NDManager manager) {
-        return predictor.processRgb(rgbMat, manager);
+    public PreProcessResult processRgb(MatManager matManager, Mat rgbMat, NDManager manager) {
+        return predictor.processRgb(matManager, rgbMat, manager);
     }
 
-    public ClassificationResult predict(Mat rgbImg, NDManager manager, Map<String, Object> extraParameters) {
-        return doBatchPredict(List.of(processRgb(rgbImg, manager)), manager, extraParameters).get(0);
+    public ClassificationResult predict(MatManager matManager, Mat rgbImg, NDManager manager, Map<String, Object> extraParameters) {
+        return doBatchPredict(List.of(processRgb(matManager, rgbImg, manager)), matManager, manager, extraParameters).get(0);
     }
 
 }

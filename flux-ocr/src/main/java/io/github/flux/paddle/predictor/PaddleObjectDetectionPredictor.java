@@ -24,6 +24,7 @@ import ai.onnxruntime.OnnxValue;
 import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtSession;
 import io.github.flux.core.BatchPredictor;
+import io.github.flux.core.MatManager;
 import io.github.flux.core.ObjectDetectionResizeResult;
 import io.github.flux.core.ObjectDetectionResult;
 import io.github.flux.core.ProcessedMat;
@@ -93,48 +94,51 @@ public class PaddleObjectDetectionPredictor extends BatchPredictor<ProcessedMat,
         session.close();
     }
 
-    private List<Mat> transform(List<Mat> data, List<ImageProcessor> processors) {
+    private List<Mat> transform(List<Mat> data, MatManager matManager, List<ImageProcessor> processors) {
         List<Mat> arrays = data;
         for (ImageProcessor processor : processors) {
-            arrays = processor.process(arrays);
+            arrays = processor.process(matManager, arrays);
         }
         return arrays;
     }
 
     @Override
-    public List<List<ObjectDetectionResult>> doBatchPredict(List<ProcessedMat> mats, NDManager manager, Map<String, Object> extraParameters) {
-        return predict(mats, manager, true);
+    public List<List<ObjectDetectionResult>> doBatchPredict(List<ProcessedMat> mats, MatManager matManager, NDManager manager, Map<String, Object> extraParameters) {
+        return predict(mats, matManager, manager, true);
     }
 
     @Override
-    public ProcessedMat processRgb(Mat rgbMat, NDManager manager) {
+    public ProcessedMat processRgb(MatManager matManager, Mat rgbMat, NDManager manager) {
         return new ProcessedMat(rgbMat.width(), rgbMat.height(), rgbMat);
     }
 
-    public List<ObjectDetectionResult> predict(String image, NDManager manager,
+    public List<ObjectDetectionResult> predict(String image, MatManager matManager, NDManager manager,
                                                boolean layoutNms) {
-        Mat rgbImg = ImageUtil.readToRgb(image);
+        Mat rgbImg = ImageUtil.readToRgb(matManager, image);
         List<ObjectDetectionResult> results = predict(
                 List.of(new ProcessedMat(rgbImg.width(), rgbImg.height(), rgbImg)),
-                manager, layoutNms).get(0);
+                matManager, manager, layoutNms).get(0);
         rgbImg.release();
         return results;
     }
 
-    public List<List<ObjectDetectionResult>> predict(List<ProcessedMat> images, NDManager manager,
+    public List<List<ObjectDetectionResult>> predict(List<ProcessedMat> images, MatManager matManager, NDManager manager,
                                                      boolean layoutNms) {
         if ("PP-DocLayoutV2".equals(modelName)) {
+            return _predict(images, matManager, manager, layoutNms);
+            /*
             List<List<ObjectDetectionResult>> results = new ArrayList<>();
             for (var pm : images) {
-                results.addAll(_predict(List.of(pm), manager, layoutNms));
+                results.addAll(_predict(List.of(pm), matManager, manager, layoutNms));
             }
             return results;
+            */
         } else {
-            return _predict(images, manager, layoutNms);
+            return _predict(images, matManager, manager, layoutNms);
         }
     }
 
-    public List<List<ObjectDetectionResult>> _predict(List<ProcessedMat> images, NDManager manager,
+    public List<List<ObjectDetectionResult>> _predict(List<ProcessedMat> images, MatManager matManager, NDManager manager,
                                                       boolean layoutNms) {
 
         try {
@@ -146,9 +150,9 @@ public class PaddleObjectDetectionPredictor extends BatchPredictor<ProcessedMat,
             int cols = 0;
             float[][] allFloatDatas = new float[images.size()][];
             for (int i = 0; i < images.size(); i++) {
-                ObjectDetectionResizeResult resizeResult = detResize.process(images.get(i).processed());
+                ObjectDetectionResizeResult resizeResult = detResize.process(matManager, images.get(i).processed());
                 resizeResults.add(resizeResult);
-                Mat transformedResult = transform(List.of(resizeResult.result_img()), preProcessors).get(0);
+                Mat transformedResult = transform(List.of(resizeResult.result_img()), matManager, preProcessors).get(0);
 
                 scale_factors[i * 2] = (float) resizeResult.scale_factors()[1];
                 scale_factors[i * 2 + 1] = (float) resizeResult.scale_factors()[0];

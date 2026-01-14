@@ -27,6 +27,7 @@ import clipper2.core.Point64;
 import clipper2.offset.ClipperOffset;
 import clipper2.offset.EndType;
 import clipper2.offset.JoinType;
+import io.github.flux.core.MatManager;
 import org.opencv.core.CvType;
 import org.opencv.core.Mat;
 import org.opencv.core.MatOfPoint;
@@ -157,6 +158,7 @@ public class DBPostProcess {
      * @return a Pair of (List of box NDArrays, List of confidence scores)
      */
     public Pair<List<NDArray>, List<Float>> call(
+            MatManager matManager,
             final NDList preds,
             final double[] imageShapes,
             final Float thresh,
@@ -178,7 +180,7 @@ public class DBPostProcess {
             NDArray pred = batchPred.get(i);
 
             // process() returns a Pair<NDArray, Float>
-            Pair<List<NDArray>, List<Float>> result = this.process(pred, imageShapes, t, bt, ur);
+            Pair<List<NDArray>, List<Float>> result = this.process(matManager, pred, imageShapes, t, bt, ur);
 
             boxes.addAll(result.getKey());
             scores.addAll(result.getValue());
@@ -200,6 +202,7 @@ public class DBPostProcess {
      * @return a Pair of (List of box NDArrays, List of confidence scores)
      */
     public Pair<List<NDArray>, List<Float>> process(
+            MatManager matManager,
             final NDArray pred,
             final double[] imageShapes,
             final float thresh,
@@ -215,12 +218,12 @@ public class DBPostProcess {
 
         // 5) extract boxes & scores based on boxType
         if ("poly".equals(boxType)) {
-            Pair<List<NDArray>, List<Float>> result = polygonsFromBitmap(pred, segmentation, srcW, srcH, boxThresh, unclipRatio);
+            Pair<List<NDArray>, List<Float>> result = polygonsFromBitmap(matManager, pred, segmentation, srcW, srcH, boxThresh, unclipRatio);
             segmentation.close();
             pred.close();
             return result;
         } else if ("quad".equals(boxType)) {
-            Pair<List<NDArray>, List<Float>> result = boxesFromBitmap(pred, segmentation, srcW, srcH, boxThresh, unclipRatio);
+            Pair<List<NDArray>, List<Float>> result = boxesFromBitmap(matManager, pred, segmentation, srcW, srcH, boxThresh, unclipRatio);
             segmentation.close();
             pred.close();
             return result;
@@ -232,6 +235,7 @@ public class DBPostProcess {
     }
 
     public Pair<List<NDArray>, List<Float>> boxesFromBitmap(
+            MatManager matManager,
             final NDArray pred,
             final NDArray bitmap,
             final int destWidth,
@@ -257,7 +261,7 @@ public class DBPostProcess {
         for (int i = 0; i < flat.length; i++) {
             binBytes[i] = flat[i] > 0 ? (byte) 255 : (byte) 0;
         }
-        Mat mat = new Mat(height, width, CvType.CV_8UC1);
+        Mat mat = matManager.newMat(height, width, CvType.CV_8UC1);
         mat.put(0, 0, binBytes);
         */
 
@@ -274,12 +278,12 @@ public class DBPostProcess {
         bitmap.close();
 
         // 4. 构造 OpenCV 的 Mat (单通道 8bit)
-        Mat mat = new Mat(height, width, CvType.CV_8UC1);
+        Mat mat = matManager.newMat(height, width, CvType.CV_8UC1);
         mat.put(0, 0, data);
 
         // 3. find contours
         List<MatOfPoint> contours = new ArrayList<>();
-        Mat hierarchy = new Mat();
+        Mat hierarchy = matManager.newMat();
         Imgproc.findContours(mat, contours, hierarchy, Imgproc.RETR_LIST, Imgproc.CHAIN_APPROX_SIMPLE);
         mat.release();
         hierarchy.release();
@@ -351,6 +355,7 @@ public class DBPostProcess {
      * @return Pair of (List of box NDArrays, List of box scores)
      */
     public Pair<List<NDArray>, List<Float>> polygonsFromBitmap(
+            MatManager matManager,
             final NDArray pred,
             final NDArray bitmap,
             final int destWidth,
@@ -376,7 +381,7 @@ public class DBPostProcess {
         for (int i = 0; i < flat.length; i++) {
             binBytes[i] = flat[i] > 0 ? (byte) 255 : (byte) 0;
         }
-        Mat mat = new Mat(height, width, CvType.CV_8UC1);
+        Mat mat = matManager.newMat(height, width, CvType.CV_8UC1);
         mat.put(0, 0, binBytes);
         */
 
@@ -394,12 +399,12 @@ public class DBPostProcess {
         bitmap.close();
 
         // 4. 构造 OpenCV 的 Mat (单通道 8bit)
-        Mat mat = new Mat(height, width, CvType.CV_8UC1);
+        Mat mat = matManager.newMat(height, width, CvType.CV_8UC1);
         mat.put(0, 0, data);
 
         // 3. find contours
         List<MatOfPoint> contours = new ArrayList<>();
-        Mat hierarchy = new Mat();
+        Mat hierarchy = matManager.newMat();
         Imgproc.findContours(mat, contours, hierarchy, Imgproc.RETR_LIST, Imgproc.CHAIN_APPROX_SIMPLE);
         mat.release();
         hierarchy.release();

@@ -28,6 +28,7 @@ import ai.onnxruntime.OnnxValue;
 import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtException;
 import ai.onnxruntime.OrtSession;
+import io.github.flux.core.MatManager;
 import io.github.flux.exception.FluxException;
 import io.github.flux.util.IOUtil;
 import io.github.flux.util.ImageUtil;
@@ -73,10 +74,10 @@ public class DolphinEncoderModel implements AutoCloseable {
         }
     }
 
-    public float[][][] batchPredict(List<Mat> inputMats, NDManager manager) throws OrtException {
+    public float[][][] batchPredict(List<Mat> inputMats, MatManager matManager, NDManager manager) throws OrtException {
         NDList ndList = new NDList();
         for (Mat mat : inputMats) {
-            ndList.add(ImageUtil.toChannalNDArrayFloat(mat, manager));
+            ndList.add(ImageUtil.toChannalNDArrayFloat(matManager, mat, manager));
         }
         NDArray inputNdArray = NDArrays.stack(ndList);
         inputMats.forEach(Mat::release);
@@ -109,8 +110,8 @@ public class DolphinEncoderModel implements AutoCloseable {
         return encodeResultFloats;
     }
 
-    public float[][][] predict(Mat inputMat, NDManager manager) throws OrtException {
-        NDArray inputNdArray = ImageUtil.toChannalNDArrayFloat(inputMat, manager);
+    public float[][][] predict(MatManager matManager, Mat inputMat, NDManager manager) throws OrtException {
+        NDArray inputNdArray = ImageUtil.toChannalNDArrayFloat(matManager, inputMat, manager);
         inputMat.release();
         NDArray expandResult = inputNdArray.expandDims(0);
         inputNdArray.close();

@@ -20,6 +20,7 @@ package io.github.flux.unirec;
 import ai.djl.ndarray.NDManager;
 import ai.onnxruntime.OrtEnvironment;
 import io.github.flux.core.BatchPredictor;
+import io.github.flux.core.MatManager;
 import io.github.flux.core.PreProcessResult;
 import io.github.flux.core.TextResult;
 import io.github.flux.exception.FluxException;
@@ -56,18 +57,18 @@ public class UnirecPredictor extends BatchPredictor<PreProcessResult, TextResult
     }
 
     @Override
-    public List<TextResult> doBatchPredict(List<PreProcessResult> mats, NDManager manager, Map<String, Object> extraParameters) {
+    public List<TextResult> doBatchPredict(List<PreProcessResult> mats, MatManager matManager, NDManager manager, Map<String, Object> extraParameters) {
         List<TextResult> results = new ArrayList<>(mats.size());
         for (PreProcessResult ppr : mats) {
-            UnirecEncoderModelPredictResult encodeResult = encoderModel.predict(ppr, manager);
+            UnirecEncoderModelPredictResult encodeResult = encoderModel.predict(ppr, matManager, manager);
             results.add(decoderModel.predict(encodeResult));
         }
         return results;
     }
 
     @Override
-    public PreProcessResult processRgb(Mat rgbMat, NDManager manager) {
-        return new PreProcessResult(new UnirecProcessor().process(rgbMat), null);
+    public PreProcessResult processRgb(MatManager matManager, Mat rgbMat, NDManager manager) {
+        return new PreProcessResult(new UnirecProcessor().process(matManager, rgbMat), null);
     }
 
     @Override

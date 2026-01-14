@@ -24,6 +24,7 @@ import ai.onnxruntime.OnnxValue;
 import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtSession;
 import io.github.flux.core.BatchPredictor;
+import io.github.flux.core.MatManager;
 import io.github.flux.core.ObjectDetectionResult;
 import io.github.flux.core.ProcessedMat;
 import io.github.flux.exception.FluxException;
@@ -85,13 +86,13 @@ public class DoclingLayoutModel extends BatchPredictor<ProcessedMat, List<Object
             "docling-layout-heron-101"
     );
 
-    public List<List<ObjectDetectionResult>> batchPredictFiles(List<String> images, NDManager manager, float threshold) {
+    public List<List<ObjectDetectionResult>> batchPredictFiles(List<String> images, MatManager matManager, NDManager manager, float threshold) {
         List<ProcessedMat> mats = new ArrayList<>();
         for (String image : images) {
-            ProcessedMat rgbImg = process(image, manager);
+            ProcessedMat rgbImg = process(matManager, image, manager);
             mats.add(rgbImg);
         }
-        return batchPredict(mats, manager, threshold);
+        return batchPredict(mats, matManager, manager, threshold);
     }
 
     private static final List<ImageProcessor> PREPROCESSORS = List.of(
@@ -120,7 +121,7 @@ public class DoclingLayoutModel extends BatchPredictor<ProcessedMat, List<Object
             "Key-Value Region"
     ));
 
-    public List<List<ObjectDetectionResult>> batchPredict(List<ProcessedMat> mats, NDManager manager, float threshold) {
+    public List<List<ObjectDetectionResult>> batchPredict(List<ProcessedMat> mats, MatManager matManager, NDManager manager, float threshold) {
         try {
             int[][] targetSizes = new int[2][mats.size()];
             int i = 0;
@@ -131,7 +132,7 @@ public class DoclingLayoutModel extends BatchPredictor<ProcessedMat, List<Object
             }
             List<Mat> processed = new ArrayList<>(mats.stream().map(ProcessedMat::processed).toList());
             for (ImageProcessor processor : PREPROCESSORS) {
-                processed = processor.process(processed);
+                processed = processor.process(matManager, processed);
             }
 
             List<Mat> transformedResults = processed;
@@ -192,12 +193,12 @@ public class DoclingLayoutModel extends BatchPredictor<ProcessedMat, List<Object
     public static final float DEFAULT_THRESHOLD = 0.3f;
 
     @Override
-    public List<List<ObjectDetectionResult>> doBatchPredict(List<ProcessedMat> mats, NDManager manager, Map<String, Object> extraParameters) {
-        return batchPredict(mats, manager, DEFAULT_THRESHOLD);
+    public List<List<ObjectDetectionResult>> doBatchPredict(List<ProcessedMat> mats, MatManager matManager, NDManager manager, Map<String, Object> extraParameters) {
+        return batchPredict(mats, matManager, manager, DEFAULT_THRESHOLD);
     }
 
     @Override
-    public ProcessedMat processRgb(Mat rgbMat, NDManager manager) {
+    public ProcessedMat processRgb(MatManager matManager, Mat rgbMat, NDManager manager) {
         return new ProcessedMat(rgbMat.width(), rgbMat.height(), rgbMat);
     }
 

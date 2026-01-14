@@ -22,6 +22,7 @@ import ai.djl.ndarray.NDArray;
 import ai.djl.ndarray.types.DataType;
 import ai.djl.ndarray.types.Shape;
 import ai.djl.util.Utils;
+import io.github.flux.core.MatManager;
 import org.bytedeco.javacpp.Loader;
 import org.bytedeco.opencv.opencv_java;
 import org.opencv.core.CvType;
@@ -39,14 +40,18 @@ import java.nio.file.Path;
 /** {@code OpenCVImageFactory} is a high performance implementation of {@link ImageFactory}. */
 public class OpenCVImageFactory extends ImageFactory {
 
-    public static final OpenCVImageFactory INSTANCE = new OpenCVImageFactory();
-
     static {
         Loader.load(opencv_java.class);
         if (System.getProperty("apple.awt.UIElement") == null) {
             // disables coffee cup image showing up on macOS
             System.setProperty("apple.awt.UIElement", "true");
         }
+    }
+
+    private MatManager matManager;
+
+    public OpenCVImageFactory(MatManager matManager) {
+        this.matManager = matManager;
     }
 
     /** {@inheritDoc} */
@@ -57,7 +62,7 @@ public class OpenCVImageFactory extends ImageFactory {
         if (img.empty()) {
             throw new IOException("Read image failed: " + path);
         }
-        return new OpenCVImage(img);
+        return new OpenCVImage(matManager, img);
     }
 
     /** {@inheritDoc} */
@@ -69,13 +74,13 @@ public class OpenCVImageFactory extends ImageFactory {
         if (img.empty()) {
             throw new IOException("Read image failed.");
         }
-        return new OpenCVImage(img);
+        return new OpenCVImage(matManager, img);
     }
 
     /** {@inheritDoc} */
     @Override
     public Image fromImage(Object image) {
-        return new OpenCVImage((Mat) image);
+        return new OpenCVImage(matManager, (Mat) image);
     }
 
     /** {@inheritDoc} */
@@ -91,9 +96,9 @@ public class OpenCVImageFactory extends ImageFactory {
             // expected CHW
             int width = Math.toIntExact(shape.get(2));
             int height = Math.toIntExact(shape.get(1));
-            Mat img = new Mat(height, width, CvType.CV_8UC1);
+            Mat img = matManager.newMat(height, width, CvType.CV_8UC1);
             img.put(0, 0, array.toByteArray());
-            return new OpenCVImage(img);
+            return new OpenCVImage(matManager, img);
         }
         if (NDImageUtils.isCHW(shape)) {
             array = array.transpose(1, 2, 0);
@@ -101,16 +106,16 @@ public class OpenCVImageFactory extends ImageFactory {
         }
         int width = Math.toIntExact(shape.get(1));
         int height = Math.toIntExact(shape.get(0));
-        Mat img = new Mat(height, width, CvType.CV_8UC3);
+        Mat img = matManager.newMat(height, width, CvType.CV_8UC3);
         img.put(0, 0, array.toByteArray());
         Imgproc.cvtColor(img, img, Imgproc.COLOR_RGB2BGR);
-        return new OpenCVImage(img);
+        return new OpenCVImage(matManager, img);
     }
 
     /** {@inheritDoc} */
     @Override
     public Image fromPixels(int[] pixels, int width, int height) {
-        Mat img = new Mat(height, width, CvType.CV_8UC4);
+        Mat img = matManager.newMat(height, width, CvType.CV_8UC4);
         byte[] data = new byte[width * height * 4];
         IntBuffer buf = ByteBuffer.wrap(data).asIntBuffer();
         for (int pixel : pixels) {
@@ -120,6 +125,6 @@ public class OpenCVImageFactory extends ImageFactory {
             buf.put(pixel >>> 24 | b | g | r);
         }
         img.put(0, 0, data);
-        return new OpenCVImage(img);
+        return new OpenCVImage(matManager, img);
     }
 }

@@ -81,9 +81,6 @@ public class NougatLatexDecoderModel implements AutoCloseable {
             this.session = env.createSession(modelFile, options);
 
             this.outputNames = session.getOutputNames();
-            System.out.println("\nNougatLatexDecoderModel\n");
-            System.out.println(session.getInputInfo());
-            System.out.println(session.getOutputInfo());
         } catch (Exception e) {
             throw new FluxException(e);
         }

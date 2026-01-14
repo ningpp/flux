@@ -29,6 +29,7 @@ import ai.onnxruntime.OnnxJavaType;
 import ai.onnxruntime.OrtEnvironment;
 import io.github.flux.core.BatchPredictor;
 import io.github.flux.core.FormulaRecognitionResult;
+import io.github.flux.core.MatManager;
 import io.github.flux.core.PreProcessResult;
 import io.github.flux.exception.FluxException;
 import io.github.flux.util.ArrayUtil;
@@ -90,20 +91,20 @@ public class GraniteDoclingFormulaModel extends BatchPredictor<PreProcessResult,
     }
 
     @Override
-    public List<FormulaRecognitionResult> doBatchPredict(List<PreProcessResult> mats, NDManager manager, Map<String, Object> extraParameters) {
+    public List<FormulaRecognitionResult> doBatchPredict(List<PreProcessResult> mats, MatManager matManager, NDManager manager, Map<String, Object> extraParameters) {
         List<FormulaRecognitionResult> results = new ArrayList<>();
         for (PreProcessResult ppr : mats) {
-            results.add(_predict(ppr.mat(), manager));
+            results.add(_predict(matManager, ppr.mat(), manager));
         }
         return results;
     }
 
     @Override
-    public PreProcessResult processRgb(Mat rgbMat, NDManager manager) {
+    public PreProcessResult processRgb(MatManager matManager, Mat rgbMat, NDManager manager) {
         return new PreProcessResult(rgbMat, null);
     }
 
-    private FormulaRecognitionResult _predict(Mat image, NDManager manager) {
+    private FormulaRecognitionResult _predict(MatManager matManager, Mat image, NDManager manager) {
         try {
             long image_token_id = 100270;
             long eos_token_id = 100257;
@@ -123,7 +124,7 @@ public class GraniteDoclingFormulaModel extends BatchPredictor<PreProcessResult,
             NDArray imgNdArray = ImageUtil.toNDArrayUint8(image, manager);
             String requestText = Idefics3Processor.apply_chat_template("Convert formula to LaTeX.");
             // cost ~40ms
-            Idefics3PreProcessResult preResult = Idefics3ImageProcessor.process(tokenizer, requestText, imgNdArray, manager);
+            Idefics3PreProcessResult preResult = Idefics3ImageProcessor.process(tokenizer, requestText, matManager, imgNdArray, manager);
             long[] input_ids_long = preResult.input_ids();
             NDArray input_ids = manager.create(input_ids_long, new Shape(1, input_ids_long.length));
             long[] attention_mask_long = preResult.attention_mask();

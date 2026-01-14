@@ -20,6 +20,7 @@ package io.github.flux.paddle;
 import ai.djl.ndarray.NDManager;
 import ai.onnxruntime.OrtEnvironment;
 import io.github.flux.core.BatchPredictor;
+import io.github.flux.core.MatManager;
 import io.github.flux.core.ObjectDetectionResult;
 import io.github.flux.core.ProcessedMat;
 import io.github.flux.exception.FluxException;
@@ -173,13 +174,13 @@ public class PaddleLayoutModel extends BatchPredictor<ProcessedMat, List<ObjectD
     }
 
     @Override
-    public List<List<ObjectDetectionResult>> doBatchPredict(List<ProcessedMat> mats, NDManager manager, Map<String, Object> extraParameters) {
-        return predictor.predict(mats, manager, true);
+    public List<List<ObjectDetectionResult>> doBatchPredict(List<ProcessedMat> mats, MatManager matManager, NDManager manager, Map<String, Object> extraParameters) {
+        return predictor.predict(mats, matManager, manager, true);
     }
 
     @Override
-    public ProcessedMat processRgb(Mat rgbMat, NDManager manager) {
-        return predictor.processRgb(rgbMat, manager);
+    public ProcessedMat processRgb(MatManager matManager, Mat rgbMat, NDManager manager) {
+        return predictor.processRgb(matManager, rgbMat, manager);
     }
 
     @Override

@@ -17,6 +17,7 @@
  */
 package io.github.flux.paddle.processor;
 
+import io.github.flux.core.MatManager;
 import io.github.flux.util.IOUtil;
 import org.opencv.core.Core;
 import org.opencv.core.CvType;
@@ -66,8 +67,8 @@ public class Normalize implements ImageProcessor {
     }
 
     @Override
-    public Mat process(Mat mat) {
-        Mat matFloat32 = new Mat();
+    public Mat process(MatManager matManager, Mat mat) {
+        Mat matFloat32 = matManager.newMat();
         mat.convertTo(matFloat32, CvType.CV_32F);
         List<Mat> splitIm = new ArrayList<>();
         Core.split(matFloat32, splitIm);
@@ -80,7 +81,7 @@ public class Normalize implements ImageProcessor {
             Core.add(channel, new Scalar(beta[c]), channel);
         }
 
-        Mat res = new Mat();
+        Mat res = matManager.newMat();
         Core.merge(splitIm, res);
         IOUtil.close(splitIm);
         IOUtil.close(matFloat32);
