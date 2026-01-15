@@ -1,0 +1,3 @@
+org.opencv.core.Mat#<init>()
+org.opencv.imgcodecs.Imgcodecs#imread(java.lang.String)
+org.opencv.imgcodecs.Imgcodecs#imread(java.lang.String, int)

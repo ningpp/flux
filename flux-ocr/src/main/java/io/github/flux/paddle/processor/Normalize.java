@@ -24,7 +24,6 @@ import org.opencv.core.CvType;
 import org.opencv.core.Mat;
 import org.opencv.core.Scalar;
 
-import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -70,8 +69,7 @@ public class Normalize implements ImageProcessor {
     public Mat process(MatManager matManager, Mat mat) {
         Mat matFloat32 = matManager.newMat();
         mat.convertTo(matFloat32, CvType.CV_32F);
-        List<Mat> splitIm = new ArrayList<>();
-        Core.split(matFloat32, splitIm);
+        List<Mat> splitIm = matManager.split(matFloat32);
 
         for (int c = 0; c < mat.channels(); c++) {
             Mat channel = splitIm.get(c);

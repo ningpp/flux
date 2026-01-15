@@ -26,7 +26,6 @@ import org.opencv.core.Scalar;
 import org.opencv.core.Size;
 import org.opencv.imgproc.Imgproc;
 
-import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -88,8 +87,7 @@ public class OCRResizeNormImg implements ImageProcessor {
         resizedImage.convertTo(resizedImage, CvType.CV_32F);
 
         // Transpose from HWC to CHW
-        List<Mat> channels = new ArrayList<>();
-        Core.split(resizedImage, channels);
+        List<Mat> channels = matManager.split(resizedImage);
         Mat transposed = matManager.newMat();
         Core.merge(channels, transposed);
         // The actual transpose of axes (like numpy.transpose(2,0,1)) is complex.

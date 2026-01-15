@@ -19,11 +19,9 @@ package io.github.flux.paddle.processor;
 
 import io.github.flux.core.MatManager;
 import io.github.flux.util.IOUtil;
-import org.opencv.core.Core;
 import org.opencv.core.CvType;
 import org.opencv.core.Mat;
 
-import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -35,8 +33,7 @@ public class ToCHWImage implements ImageProcessor {
     public Mat process(MatManager matManager, Mat img) {
 
         // Split channels
-        List<Mat> channels = new ArrayList<>();
-        Core.split(img, channels);
+        List<Mat> channels = matManager.split(img);
 
         int height = img.rows();
         int width = img.cols();

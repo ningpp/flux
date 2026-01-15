@@ -119,7 +119,7 @@ public class TextDetectionModel extends BatchPredictor<PreProcessResult, TextDet
                                        final Float thresh,
                                        final Float boxThresh,
                                        final Float unclipRatio) {
-        Mat bgrImg = Imgcodecs.imread(image, Imgcodecs.IMREAD_COLOR_BGR);
+        Mat bgrImg = matManager.imread(image, Imgcodecs.IMREAD_COLOR_BGR);
         TextDetectionResult result = predict(bgrImg, matManager, manager,
                 limitSideLen, limitType, maxSideLimit,
                 thresh, boxThresh, unclipRatio);

@@ -163,7 +163,7 @@ public final class ImageUtil {
     }
 
     public static Mat readToRgb(MatManager matManager, String image) {
-        Mat bgrImg = Imgcodecs.imread(image, Imgcodecs.IMREAD_COLOR_BGR);
+        Mat bgrImg = matManager.imread(image, Imgcodecs.IMREAD_COLOR_BGR);
         Mat rgbImg = matManager.newMat();
         Imgproc.cvtColor(bgrImg, rgbImg, Imgproc.COLOR_BGR2RGB);
         bgrImg.release();
