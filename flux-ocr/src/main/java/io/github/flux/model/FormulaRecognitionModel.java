@@ -14,6 +14,7 @@ import io.github.flux.exception.FluxException;
 import io.github.flux.formula.nougat.NougatLatexFormulaModel;
 import io.github.flux.formula.paddle.PaddleFormulaRecognitionPredictor;
 import io.github.flux.formula.pix2text.Pix2TextFormulaRecognitionPredictor;
+import io.github.flux.formula.texteller.TexTellerPredictor;
 import io.github.flux.unirec.UnirecFormulaModel;
 import io.github.flux.unirec.UnirecPredictor;
 import io.github.flux.util.CollectionUtil;
@@ -33,6 +34,7 @@ public class FormulaRecognitionModel extends BatchPredictor<PreProcessResult, Fo
             NougatLatexFormulaModel.MODEL_NAMES,
             PaddleFormulaRecognitionPredictor.MODEL_NAMES,
             Pix2TextFormulaRecognitionPredictor.MODEL_NAMES,
+            TexTellerPredictor.MODEL_NAMES,
             UnirecPredictor.MODEL_NAMES
     ));
 
@@ -52,6 +54,8 @@ public class FormulaRecognitionModel extends BatchPredictor<PreProcessResult, Fo
             this.predictor = new PaddleFormulaRecognitionPredictor(modelRootDir, modelName, gpuIndex, env);
         } else if (Pix2TextFormulaRecognitionPredictor.MODEL_NAMES.contains(modelName)) {
             this.predictor = new Pix2TextFormulaRecognitionPredictor(modelRootDir, modelName, gpuIndex, env);
+        } else if (TexTellerPredictor.MODEL_NAMES.contains(modelName)) {
+            this.predictor = new TexTellerPredictor(modelRootDir, modelName, gpuIndex, env);
         } else if (UnirecPredictor.MODEL_NAMES.contains(modelName)) {
             this.predictor = new UnirecFormulaModel(new UnirecPredictor(modelRootDir, modelName, gpuIndex, env));
         } else {

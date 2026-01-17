@@ -25,6 +25,9 @@ import java.nio.ByteBuffer;
 import java.nio.FloatBuffer;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 public final class ImageUtil {
 
@@ -33,6 +36,248 @@ public final class ImageUtil {
     }
 
     private ImageUtil() {
+    }
+
+    public static Mat toCHWOfByte(MatManager matManager, Mat img) {
+
+        // Split channels
+        List<Mat> channels = matManager.split(img);
+
+        int height = img.rows();
+        int width = img.cols();
+        int channelSize = height * width;
+
+        byte[] chwData = new byte[3 * channelSize];
+
+        for (int c = 0; c < 3; c++) {
+            Mat channel = channels.get(c);
+            byte[] channelData = new byte[channelSize];
+            channel.get(0, 0, channelData);
+            System.arraycopy(channelData, 0, chwData, c * channelSize, channelSize);
+            IOUtil.close(channel);
+        }
+
+        Mat chw = matManager.newMat(height, width, CvType.CV_8SC3);
+        chw.put(0, 0, chwData);
+
+        return chw;
+    }
+
+    public static Mat toCHWOfFloat(MatManager matManager, Mat img) {
+
+        // Split channels
+        List<Mat> channels = matManager.split(img);
+
+        int height = img.rows();
+        int width = img.cols();
+        int channelSize = height * width;
+
+        float[] chwData = new float[3 * channelSize];
+
+        for (int c = 0; c < 3; c++) {
+            Mat channel = channels.get(c);
+            float[] channelData = new float[channelSize];
+            channel.get(0, 0, channelData);
+            System.arraycopy(channelData, 0, chwData, c * channelSize, channelSize);
+            IOUtil.close(channel);
+        }
+
+        Mat chw = matManager.newMat(height, width, CvType.CV_32FC3);
+        chw.put(0, 0, chwData);
+
+        return chw;
+    }
+
+    /**
+     * 将灰度 Mat（H x W）转换为 [1, H, W] 数组
+     * @param gray 灰度图像，CV_8U或CV_32F, shape (H, W)
+     * @return float[1][H][W]，可直接用于ch为首的神经网络输入
+     */
+    public static Mat toOneChannelCHW(MatManager matManager, Mat gray) {
+        int h = gray.rows();
+        int w = gray.cols();
+        float[][][] chw = new float[1][h][w];
+        float[] flat = new float[h * w];
+        // 确保数据为 float32，先转为 float
+        Mat grayFloat = matManager.newMat();
+        if (gray.type() != CvType.CV_32F) {
+            gray.convertTo(grayFloat, CvType.CV_32F);
+        } else {
+            grayFloat = gray;
+        }
+        grayFloat.get(0, 0, flat); // 拉成一维
+        // 还原 (H, W)
+        for (int i = 0; i < h; i++) {
+            for (int j = 0; j < w; j++) {
+                chw[0][i][j] = flat[i * w + j];
+            }
+        }
+        Mat chwMat = matManager.newMat(h, w, CvType.CV_32FC1);
+        chwMat.put(0, 0, ArrayUtil.flat(chw));
+        return chwMat;
+    }
+
+    public static Mat padding(MatManager matManager, Mat img, int requiredSize) {
+        int h = img.rows();
+        int w = img.cols();
+        int padRight = requiredSize - w;
+        int padBottom = requiredSize - h;
+        if (padRight < 0 || padBottom < 0) {
+            throw new IllegalArgumentException("Image larger than requiredSize!");
+        }
+
+        Mat padded = matManager.newMat();
+        Core.copyMakeBorder(img, padded,
+                0, padBottom,   // top, bottom
+                0, padRight,    // left, right
+                Core.BORDER_CONSTANT,
+                Scalar.all(0)   // 填充为0
+        );
+        return padded;
+    }
+
+    /**
+     * 剪裁图片外部的均色（边角最多出现的BGR色）边框
+     *
+     * @param image 输入BGR三通道图像，CV_8UC3
+     * @return 被裁剪后的图像（仍为BGR三通道）
+     */
+    public static Mat trimWhiteBorder(MatManager matManager, Mat image) {
+        // 检查输入
+        if (image.channels() != 3 || image.dims() != 2) {
+            throw new IllegalArgumentException("Image is not in BGR (3-channel, HxW) format");
+        }
+        if (image.type() != CvType.CV_8UC3) {
+            throw new IllegalArgumentException("Image should be CV_8UC3 (uint8)");
+        }
+
+        int rows = image.rows();
+        int cols = image.cols();
+
+        // 读取四个角的颜色，并找最多的
+        List<Scalar> corners = Arrays.asList(
+                new Scalar(image.get(0, 0)),
+                new Scalar(image.get(0, cols - 1)),
+                new Scalar(image.get(rows - 1, 0)),
+                new Scalar(image.get(rows - 1, cols - 1))
+        );
+        Scalar bgColor = mostCommonColor(corners);
+
+        // 填充背景图 bg
+        Mat bg = matManager.newMat(image.size(), image.type(), bgColor);
+
+        // 差异掩码
+        Mat diff = matManager.newMat();
+        Core.absdiff(image, bg, diff);
+        Mat grayDiff = matManager.newMat();
+        Imgproc.cvtColor(diff, grayDiff, Imgproc.COLOR_BGR2GRAY);
+
+        // 二值化
+        int threshold = 15;
+        Mat mask = matManager.newMat();
+        Imgproc.threshold(grayDiff, mask, threshold, 255, Imgproc.THRESH_BINARY);
+
+        // 计算包围矩形
+        Mat nonZero = matManager.newMat();
+        Core.findNonZero(mask, nonZero); // 得到所有非零点
+        if (nonZero.empty()) {
+            // 全是边角色未找到内容，按原图返回
+            return image;
+        }
+        Rect rect = Imgproc.boundingRect(nonZero);
+
+        // 裁切，必须clone，否则原始Mat被释放时影响submat
+        return matManager.cloneMat(matManager.newMat(image, rect));
+    }
+
+    // 统计列表里众数
+    private static Scalar mostCommonColor(List<Scalar> scalars) {
+        Map<String, Integer> colorCount = new HashMap<>();
+        String maxKey = null;
+        int maxCount = 0;
+
+        for (Scalar s : scalars) {
+            String key = Arrays.toString(s.val);
+            int count = colorCount.getOrDefault(key, 0) + 1;
+            colorCount.put(key, count);
+            if (count > maxCount) {
+                maxCount = count;
+                maxKey = key;
+            }
+        }
+        // 找到maxKey后转回Scalar
+        String[] vals = maxKey.replace("[", "").replace("]", "").split(", ");
+        double[] dvals = Arrays.stream(vals).mapToDouble(Double::parseDouble).toArray();
+        return new Scalar(dvals);
+    }
+
+    /**
+     * 对灰度float32图片归一化: (x - mean) / std
+     * @param src 灰度图像 (float32, 单通道)
+     * @param mean 均值
+     * @param std 标准差
+     * @return 标准化后的Mat (float32, 单通道)
+     */
+    public static Mat normalize(MatManager matManager, Mat src, double mean, double std) {
+        if (src.channels() != 1 || src.type() != CvType.CV_32F) {
+            throw new IllegalArgumentException("输入必须是 float32 单通道灰度图");
+        }
+        Mat dst = matManager.newMat();
+        // 先减去均值
+        Core.subtract(src, new Scalar(mean), dst);
+        // 再除以std
+        Core.divide(dst, new Scalar(std), dst);
+        return dst;
+    }
+
+    public static Mat toFloat32(MatManager matManager, Mat mat) {
+        Mat matFloat32 = matManager.newMat();
+        mat.convertTo(matFloat32, CvType.CV_32F);
+        return matFloat32;
+    }
+
+    /**
+     * Resize image following logic:
+     * - 短边缩放为 (fixedImgSizeMinus1)
+     * - 长边不得超过 maxSize
+     * - 双三次插值
+     * - 支持 antialias
+     *
+     * @param src 原始图像
+     * @param fixedImgSizeMinus1 缩放后短边（如 255 已是 256-1）
+     * @param maxSize            长边最大值
+     * @param antialias          是否抗锯齿
+     * @return Resize 后的 Mat
+     */
+    public static Mat resize(MatManager matManager, Mat src, int fixedImgSizeMinus1, int maxSize, boolean antialias) {
+        int h = src.rows();
+        int w = src.cols();
+
+        // 1. 计算缩放比例
+        int minOriginal = Math.min(h, w);
+        int maxOriginal = Math.max(h, w);
+
+        float scale = ((float) fixedImgSizeMinus1) / minOriginal;
+        // 检查缩放后长边是否超出maxSize，若超出再按maxSize限制缩小scale
+        if (Math.round(maxOriginal * scale) > maxSize) {
+            scale = ((float) maxSize) / maxOriginal;
+        }
+
+        int newW = Math.round(w * scale);
+        int newH = Math.round(h * scale);
+
+        // 2. 实际缩放
+        Mat dst = matManager.newMat();
+        int resizeFlags = Imgproc.INTER_CUBIC;
+        // TODO support antialias
+        Imgproc.resize(src, dst, new Size(newW, newH), 0, 0, resizeFlags);
+        return dst;
+    }
+
+    public static Mat rgbToGray(MatManager matManager, Mat mat) {
+        Mat gray = matManager.newMat();
+        Imgproc.cvtColor(mat, gray, Imgproc.COLOR_RGB2GRAY);
+        return gray;
     }
 
     public static Mat crop(MatManager matManager, Mat src, int startx, int starty, int endx, int endy) {

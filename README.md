@@ -15,6 +15,8 @@ Do not use in production.
 5. [huggingface/transformers](https://github.com/huggingface/transformers)
 6. [bytedance/Dolphin](https://github.com/bytedance/Dolphin/blob/v1.5)
 7. [docling-project/docling](https://github.com/docling-project/docling)
+8. [huggingface/optimum](https://github.com/huggingface/optimum)
+9. [OleehyO/TexTeller](https://github.com/OleehyO/TexTeller)
 
 
 ### Support Model Category
@@ -81,6 +83,7 @@ Do not use in production.
 | PP-FormulaNet_plus-S |  ✅  |  ❌   |
 | PP-FormulaNet_plus-M |  ✅  |  ❌   |
 | PP-FormulaNet_plus-L |  ✅  |  ❌   |
+| TexTeller            |  ✅  |  ✅   |
 | unirec-0.1b          |  ✅  |  ✅   |
 
 

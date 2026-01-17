@@ -4,6 +4,8 @@ import io.github.flux.util.IOUtil;
 import org.opencv.core.Core;
 import org.opencv.core.Mat;
 import org.opencv.core.Rect;
+import org.opencv.core.Scalar;
+import org.opencv.core.Size;
 import org.opencv.imgcodecs.Imgcodecs;
 
 import java.util.ArrayList;
@@ -50,6 +52,18 @@ public class MatManager implements AutoCloseable {
 
     public Mat newMat(int rows, int cols, int type) {
         Mat mat = new Mat(rows, cols, type);
+        resources.put(mat.getNativeObjAddr(), mat);
+        return mat;
+    }
+
+    public Mat cloneMat(Mat mat) {
+        Mat cloned = mat.clone();
+        resources.put(cloned.getNativeObjAddr(), cloned);
+        return cloned;
+    }
+
+    public Mat newMat(Size size, int type, Scalar s) {
+        Mat mat = new Mat(size, type, s);
         resources.put(mat.getNativeObjAddr(), mat);
         return mat;
     }
