@@ -18,10 +18,6 @@
 package io.github.flux.formula.pix2text;
 
 import ai.djl.huggingface.tokenizers.HuggingFaceTokenizer;
-import ai.djl.ndarray.NDArray;
-import ai.djl.ndarray.NDList;
-import ai.djl.ndarray.NDManager;
-import ai.djl.ndarray.types.DataType;
 import ai.onnxruntime.OnnxTensor;
 import ai.onnxruntime.OnnxValue;
 import ai.onnxruntime.OrtEnvironment;
@@ -31,16 +27,12 @@ import io.github.flux.core.FormulaRecognitionResult;
 import io.github.flux.exception.FluxException;
 import io.github.flux.util.ArrayUtil;
 import io.github.flux.util.IOUtil;
-import io.github.flux.util.OnnxUtil;
 
 import java.nio.FloatBuffer;
 import java.nio.LongBuffer;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
-import java.util.Set;
 
 public class Pix2TextDecoderModel implements AutoCloseable {
 
@@ -51,7 +43,6 @@ public class Pix2TextDecoderModel implements AutoCloseable {
 
     private final OrtEnvironment env;
     private final OrtSession session;
-    private final Set<String> outputNames;
     private final int maxLength;
     private final long padTokenId;
     private final long eosTokenId;
@@ -78,31 +69,23 @@ public class Pix2TextDecoderModel implements AutoCloseable {
                 options.addCUDA(gpuIndex);
             }
             this.session = env.createSession(modelFile, options);
-
-            this.outputNames = session.getOutputNames();
         } catch (Exception e) {
             throw new FluxException(e);
         }
     }
 
-    public List<FormulaRecognitionResult> batchPredict(float[][][] encodeResultFloats, NDManager manager) {
-        try {
-            return _batchPredict(encodeResultFloats, manager);
-        } catch (Exception e) {
-            throw new FluxException(e);
-        }
-    }
-
-    private List<FormulaRecognitionResult> _batchPredict(float[][][] encodeResultFloats, NDManager manager) throws OrtException {
-        NDArray inputNdArray = ArrayUtil.toNDArray(manager, encodeResultFloats);
-        FloatBuffer dataBuffer = inputNdArray.toByteBuffer().asFloatBuffer();
-        long[] shape = inputNdArray.getShape().getShape();
-        OnnxTensor encoder_hidden_states_tensor = OnnxTensor.createTensor(env, dataBuffer, shape);
-
-        int batchSize = encodeResultFloats.length;
+    public List<FormulaRecognitionResult> batchPredict(float[][][] encodeResultFloats) throws OrtException {
+        FloatBuffer dataBuffer = FloatBuffer.wrap(ArrayUtil.flat(encodeResultFloats));
+        long[] shape = new long[] {
+                encodeResultFloats.length,
+                encodeResultFloats[0].length,
+                encodeResultFloats[0][0].length
+        };
+        OnnxTensor encoderHiddenStates = OnnxTensor.createTensor(env, dataBuffer, shape);
+        int batchSize = (int) shape[0];
         long[][] inputIds = new long[batchSize][];
-        for (int i = 0; i < encodeResultFloats.length; i++) {
-            inputIds[i] = ArrayUtil.clone(new long[]{decoderStartTokenId});
+        for (int i = 0; i < batchSize; i++) {
+            inputIds[i] = new long[]{decoderStartTokenId};
         }
 
         long[][] generated_tokens = new long[batchSize][];
@@ -114,16 +97,10 @@ public class Pix2TextDecoderModel implements AutoCloseable {
         for (int i = 0; i < maxLength; i++) {
             long[] flat = ArrayUtil.flat(inputIds);
             LongBuffer buffer = LongBuffer.wrap(flat);
-            OnnxTensor input_ids_tensor = OnnxTensor.createTensor(env, buffer,
-                    new long[] {inputIds.length, inputIds[0].length});
-            Map<String, OnnxTensor> inputs = new HashMap<>(2);
-            inputs.put("input_ids", input_ids_tensor);
-            inputs.put("encoder_hidden_states", encoder_hidden_states_tensor);
-
-            OrtSession.Result onnxResult = session.run(inputs, outputNames);
-            Optional<OnnxValue> optinalResult = onnxResult.get(List.copyOf(outputNames).get(0));
-            if (optinalResult.isPresent()) {
-                float[][][] decoderResultFloats = (float[][][]) optinalResult.get().getValue();
+            try (OnnxTensor input_ids_tensor = OnnxTensor.createTensor(env, buffer, new long[] {inputIds.length, inputIds[0].length});
+                 OrtSession.Result onnxResult = session.run(Map.of("input_ids", input_ids_tensor, "encoder_hidden_states", encoderHiddenStates))) {
+                OnnxValue onnxValue = onnxResult.get(0);
+                float[][][] decoderResultFloats = (float[][][]) onnxValue.getValue();
                 long[][] nextIds = new long[batchSize][1];
                 for (int j = 0; j < batchSize; j++) {
                     if (finished[j]) {
@@ -146,10 +123,9 @@ public class Pix2TextDecoderModel implements AutoCloseable {
                     break;
                 }
             }
-            IOUtil.close(onnxResult);
-            IOUtil.close(inputNdArray);
-            IOUtil.close(input_ids_tensor);
         }
+
+        IOUtil.close(encoderHiddenStates);
 
         List<FormulaRecognitionResult> results = new ArrayList<>();
         for (long[] tokens : generated_tokens) {
@@ -157,56 +133,6 @@ public class Pix2TextDecoderModel implements AutoCloseable {
             results.add(new FormulaRecognitionResult(List.of(text), tokens, -1));
         }
         return results;
-    }
-
-    public FormulaRecognitionResult predict(float[][][] encodeResultFloats, NDManager manager) {
-        long[] inputIds = new long[]{decoderStartTokenId};
-        NDList scores = new NDList();
-        try {
-            for (int i = 0; i < maxLength; i++) {
-                NDArray inputNdArray = ArrayUtil.toNDArray(manager, encodeResultFloats);
-                FloatBuffer dataBuffer = inputNdArray.toByteBuffer().asFloatBuffer();
-                long[] shape = inputNdArray.getShape().getShape();
-                OnnxTensor onnxInput = OnnxTensor.createTensor(env, dataBuffer, shape);
-
-                Map<String, OnnxTensor> inputs = new HashMap<>(2);
-                inputs.put("input_ids", OnnxTensor.createTensor(env, new long[][]{inputIds}));
-                inputs.put("encoder_hidden_states", onnxInput);
-                OrtSession.Result onnxResult = session.run(inputs, outputNames);
-                Optional<OnnxValue> optinalResult = onnxResult.get(List.copyOf(outputNames).get(0));
-                if (optinalResult.isPresent()) {
-                    float[][][] decoderResultFloats = (float[][][]) optinalResult.get().getValue();
-                    NDArray decoderResults = ArrayUtil.toNDArray(manager, decoderResultFloats);
-                    // 等价于 [:, -1, :]
-                    NDArray lastTokenLogits = decoderResults.get(":, -1, :");
-
-                    NDArray nextTokenLogits = lastTokenLogits.toType(DataType.FLOAT32, true);
-                    scores.add(nextTokenLogits);
-
-                    NDArray _nextTokens = nextTokenLogits.argMax(-1);
-                    NDArray nextTokens = _nextTokens.toType(DataType.INT64, false);
-
-                    long[] nextTokenIds = nextTokens.toLongArray();
-                    inputIds = ArrayUtil.concat(inputIds, nextTokenIds);
-                    if (ArrayUtil.contains(nextTokenIds, eosTokenId)) {
-                        break;
-                    }
-                }
-                onnxResult.close();
-                inputNdArray.close();
-                OnnxUtil.closeTensors(inputs);
-            }
-
-            String text = tokenizer.decode(inputIds, true);
-            NDArray _sequences = manager.create(inputIds);
-            NDArray sequences = _sequences.reshape(1, inputIds.length);
-            var r = new FormulaRecognitionResult(List.of(text), inputIds, -1);
-            sequences.close();
-            _sequences.close();
-            return r;
-        } catch (Exception e) {
-            throw new FluxException(e);
-        }
     }
 
 }

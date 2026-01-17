@@ -82,8 +82,12 @@ public class Pix2TextFormulaRecognitionPredictor extends BatchPredictor<PreProce
 
     @Override
     public List<FormulaRecognitionResult> doBatchPredict(List<PreProcessResult> inputNDArrays, MatManager matManager, NDManager manager, Map<String, Object> extraParameters) {
-        float[][][] encoderResults = encoderModel.batchPredict(PreProcessResult.getNDArrays(inputNDArrays), manager);
-        return decoderModel.batchPredict(encoderResults, manager);
+        try {
+            float[][][] encoderHiddenStates = encoderModel.batchPredict(PreProcessResult.getNDArrays(inputNDArrays));
+            return decoderModel.batchPredict(encoderHiddenStates);
+        } catch (Exception e) {
+            throw new FluxException(e);
+        }
     }
 
     @Override

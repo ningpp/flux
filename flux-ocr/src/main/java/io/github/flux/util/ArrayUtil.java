@@ -281,6 +281,19 @@ public final class ArrayUtil {
         return OnnxTensor.createTensor(env, FloatBuffer.wrap(flat(data)), new long[] {d1, d2, d3, d4});
     }
 
+    public static float[][][] reshape(float[] flat, int d1, int d2, int d3) {
+        float[][][] data = new float[d1][d2][d3];
+        int idx = 0;
+        for (int i = 0; i < d1; i++) {
+            for (int j = 0; j < d2; j++) {
+                for (int k = 0; k < d3; k++) {
+                    data[i][j][k] = flat[idx++];
+                }
+            }
+        }
+        return data;
+    }
+
     public static float[] flat(float[][][] data) {
         int d1 = data.length;
         int d2 = data[0].length;
