@@ -96,6 +96,43 @@ public final class ArrayUtil {
         return output;
     }
 
+    /**
+     * 等价于 PyTorch: logits.softmax(dim=1)
+     *
+     * @param logits shape: [batch, numClasses]
+     * @return probs shape: [batch, numClasses]
+     */
+    public static float[][] softmaxDim1(float[][] logits) {
+        int batch = logits.length;
+        int numClasses = logits[0].length;
+
+        float[][] probs = new float[batch][numClasses];
+
+        for (int i = 0; i < batch; i++) {
+            // 1. 找 max（数值稳定）
+            float max = Float.NEGATIVE_INFINITY;
+            for (int j = 0; j < numClasses; j++) {
+                if (logits[i][j] > max) {
+                    max = logits[i][j];
+                }
+            }
+
+            // 2. exp(x - max) 并求和
+            float sum = 0.0f;
+            for (int j = 0; j < numClasses; j++) {
+                probs[i][j] = (float) Math.exp(logits[i][j] - max);
+                sum += probs[i][j];
+            }
+
+            // 3. 归一化
+            for (int j = 0; j < numClasses; j++) {
+                probs[i][j] /= sum;
+            }
+        }
+
+        return probs;
+    }
+
     public static float max(float[] row) {
         float max = Float.MIN_VALUE; // for numerical stability
         for (float f : row) {
