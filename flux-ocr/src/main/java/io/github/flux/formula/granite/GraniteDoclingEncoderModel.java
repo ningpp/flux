@@ -62,7 +62,7 @@ public class GraniteDoclingEncoderModel implements AutoCloseable {
         }
     }
 
-    public float[][][] predict(NDArray not_expanded_pixel_values, NDArray not_expanded_pixel_attention_mask) throws OrtException {
+    public float[][][][] predict(NDArray not_expanded_pixel_values, NDArray not_expanded_pixel_attention_mask) throws OrtException {
         NDArray pixel_values = not_expanded_pixel_values.expandDims(0);
         NDArray pixel_attention_mask = not_expanded_pixel_attention_mask.expandDims(0);
         NDArray pixel_attention_mask_expand_bool = pixel_attention_mask.toType(DataType.BOOLEAN, false);
@@ -80,8 +80,13 @@ public class GraniteDoclingEncoderModel implements AutoCloseable {
         OrtSession.Result onnxResult = session.run(inputs, outputNames);
         Optional<OnnxValue> optinalResult = onnxResult.get(List.copyOf(outputNames).get(0));
         if (optinalResult.isPresent()) {
-            float[][][] encodeResultFloats = (float[][][]) optinalResult.get().getValue();
-            return encodeResultFloats;
+            Object result = optinalResult.get().getValue();
+            onnxResult.close();
+            if (result instanceof float[][][] fr) {
+                return new float[][][][] {fr};
+            } else {
+                return (float[][][][]) result;
+            }
         }
         onnxResult.close();
         not_expanded_pixel_values.close();

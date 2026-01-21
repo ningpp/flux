@@ -11,6 +11,7 @@ import io.github.flux.core.PreProcessResult;
 import io.github.flux.dolphin.ByteDanceDolphinElementModel;
 import io.github.flux.dolphin.ByteDanceDolphinFormulaModel;
 import io.github.flux.exception.FluxException;
+import io.github.flux.formula.granite.GraniteDoclingFormulaModel;
 import io.github.flux.formula.nougat.NougatLatexFormulaModel;
 import io.github.flux.formula.paddle.PaddleFormulaRecognitionPredictor;
 import io.github.flux.formula.pix2text.Pix2TextFormulaRecognitionPredictor;
@@ -31,6 +32,7 @@ public class FormulaRecognitionModel extends BatchPredictor<PreProcessResult, Fo
 
     public static final Set<String> MODEL_NAMES = CollectionUtil.distinct(List.of(
             ByteDanceDolphinElementModel.MODEL_NAMES,
+            GraniteDoclingFormulaModel.MODEL_NAMES,
             NougatLatexFormulaModel.MODEL_NAMES,
             PaddleFormulaRecognitionPredictor.MODEL_NAMES,
             Pix2TextFormulaRecognitionPredictor.MODEL_NAMES,
@@ -48,6 +50,8 @@ public class FormulaRecognitionModel extends BatchPredictor<PreProcessResult, Fo
                                    final OrtEnvironment env) {
         if (ByteDanceDolphinElementModel.MODEL_NAMES.contains(modelName)) {
             this.predictor = new ByteDanceDolphinFormulaModel(modelRootDir, modelName, gpuIndex, env, OnnxJavaType.FLOAT);
+        } else if (GraniteDoclingFormulaModel.MODEL_NAMES.contains(modelName)) {
+            this.predictor = new GraniteDoclingFormulaModel(modelRootDir, modelName, gpuIndex, env, 512);
         } else if (NougatLatexFormulaModel.MODEL_NAMES.contains(modelName)) {
             this.predictor = new NougatLatexFormulaModel(modelRootDir, modelName, gpuIndex, env);
         } else if (PaddleFormulaRecognitionPredictor.MODEL_NAMES.contains(modelName)) {

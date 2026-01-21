@@ -29,7 +29,6 @@ import io.github.flux.util.OnnxUtil;
 
 import java.nio.LongBuffer;
 import java.util.Map;
-import java.util.Optional;
 
 public class GraniteDoclingEmbedModel implements AutoCloseable {
 
@@ -71,16 +70,11 @@ public class GraniteDoclingEmbedModel implements AutoCloseable {
         OnnxTensor tensor = OnnxTensor.createTensor(env, buffer, shape);
         Map<String, OnnxTensor> inputs = Map.of("input_ids", tensor);
         OrtSession.Result onnxResult = session.run(inputs);
-        Optional<OnnxValue> optinalResult = onnxResult.get("inputs_embeds");
-        if (optinalResult.isPresent()) {
-            float[][][] encodeResultFloats = (float[][][]) optinalResult.get().getValue();
-            onnxResult.close();
-            OnnxUtil.closeTensors(inputs);
-            return encodeResultFloats;
-        }
+        OnnxValue optinalResult = onnxResult.get(0);
+        float[][][] encodeResultFloats = (float[][][]) optinalResult.getValue();
         onnxResult.close();
         OnnxUtil.closeTensors(inputs);
-        return null;
+        return encodeResultFloats;
     }
 
 }

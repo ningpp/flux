@@ -49,6 +49,7 @@ import java.util.Set;
 public class GraniteDoclingFormulaModel extends BatchPredictor<PreProcessResult, FormulaRecognitionResult> {
 
     public static final Set<String> MODEL_NAMES = Set.of(
+            "CodeFormulaV2",
             "granite-docling-258M"
     );
 
@@ -57,6 +58,8 @@ public class GraniteDoclingFormulaModel extends BatchPredictor<PreProcessResult,
     private final GraniteDoclingDecoderModel decoderModel;
     private final HuggingFaceTokenizer tokenizer;
     private final int maxLength;
+    private final long eos_token_id;
+    private final String query;
 
     public GraniteDoclingFormulaModel(final String modelRootDir,
                                       final String modelName,
@@ -68,6 +71,15 @@ public class GraniteDoclingFormulaModel extends BatchPredictor<PreProcessResult,
         }
 
         this.maxLength = maxLength;
+
+        if ("CodeFormulaV2".equals(modelName)) {
+            this.eos_token_id = 100338;
+            this.query = "<formula>";
+        } else {
+            this.eos_token_id = 100257;
+            this.query = "Convert formula to LaTeX.";
+        }
+
         final String modelDir = modelRootDir + File.separator + modelName;
         try {
             this.encoderModel = new GraniteDoclingEncoderModel(new File(modelDir, "vision_encoder.onnx").getAbsolutePath(),
@@ -78,7 +90,6 @@ public class GraniteDoclingFormulaModel extends BatchPredictor<PreProcessResult,
             this.decoderModel = new GraniteDoclingDecoderModel(
                     new File(
                             modelDir,
-                            //"decoder_model_merged_fp16.onnx"
                             "decoder_model_merged.onnx"
                     ).getAbsolutePath(),
                     gpuIndex,
@@ -107,7 +118,6 @@ public class GraniteDoclingFormulaModel extends BatchPredictor<PreProcessResult,
     private FormulaRecognitionResult _predict(MatManager matManager, Mat image, NDManager manager) {
         try {
             long image_token_id = 100270;
-            long eos_token_id = 100257;
             int num_hidden_layers = 30;
             int num_key_value_heads = 3;
             int head_dim = 64;
@@ -122,14 +132,14 @@ public class GraniteDoclingFormulaModel extends BatchPredictor<PreProcessResult,
             }
 
             NDArray imgNdArray = ImageUtil.toNDArrayUint8(image, manager);
-            String requestText = Idefics3Processor.apply_chat_template("Convert formula to LaTeX.");
+            String requestText = Idefics3Processor.apply_chat_template(query);
             // cost ~40ms
             Idefics3PreProcessResult preResult = Idefics3ImageProcessor.process(tokenizer, requestText, matManager, imgNdArray, manager);
             long[] input_ids_long = preResult.input_ids();
             NDArray input_ids = manager.create(input_ids_long, new Shape(1, input_ids_long.length));
             long[] attention_mask_long = preResult.attention_mask();
 
-            float[][][] image_feature_floats = encoderModel.predict(preResult.pixel_values(), preResult.pixel_attention_mask());
+            float[][][][] image_feature_floats = encoderModel.predict(preResult.pixel_values(), preResult.pixel_attention_mask());
 
             NDArray attention_mask = manager.create(attention_mask_long, new Shape(1, attention_mask_long.length));
             long[] generated_tokens = new long[]{};
@@ -184,7 +194,7 @@ public class GraniteDoclingFormulaModel extends BatchPredictor<PreProcessResult,
             IOUtil.close(imgNdArray);
             IOUtil.close(input_ids);
             IOUtil.close(attention_mask);
-            return new FormulaRecognitionResult(List.of(tokenizer.decode(generated_tokens, true)), generated_tokens, -1);
+            return new FormulaRecognitionResult(List.of(tokenizer.decode(generated_tokens, false)), generated_tokens, -1);
         } catch (Exception e) {
             throw new FluxException(e);
         }

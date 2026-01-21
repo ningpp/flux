@@ -73,8 +73,10 @@ Do not use in production.
 #### Formula Recognition Model
 | Model                | CPU | CUDA |
 |:---------------------|:---:|:----:|
+| CodeFormulaV2        |  ✅  |  ✅   |
 | Dolphin              |  ✅  |  ✅   |
 | Dolphin-1.5          |  ✅  |  ✅   |
+| granite-docling-258M |  ✅  |  ✅   |
 | nougat-latex-base    |  ✅  |  ✅   |
 | pix2text-mfr         |  ✅  |  ✅   |
 | pix2text-mfr-1.5     |  ✅  |  ✅   |
