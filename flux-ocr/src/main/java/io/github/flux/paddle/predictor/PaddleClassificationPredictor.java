@@ -17,32 +17,31 @@
  */
 package io.github.flux.paddle.predictor;
 
+import ai.djl.ndarray.NDManager;
 import ai.onnxruntime.OnnxTensor;
 import ai.onnxruntime.OnnxValue;
 import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtSession;
 import io.github.flux.core.ClassificationResult;
 import io.github.flux.core.MatManager;
-import io.github.flux.paddle.processor.TopkProcessor;
+import io.github.flux.core.PreProcessResult;
 import io.github.flux.core.TopkResult;
 import io.github.flux.exception.FluxException;
 import io.github.flux.paddle.processor.ImageProcessor;
+import io.github.flux.paddle.processor.TopkProcessor;
+import io.github.flux.util.ParameterUtil;
 import org.opencv.core.Mat;
 
 import java.nio.FloatBuffer;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
-import java.util.Set;
 
 public class PaddleClassificationPredictor implements AutoCloseable {
 
     private final OrtEnvironment env;
     private final OrtSession session;
-    private final Set<String> inputNames;
-    private final Set<String> outputNames;
+    private final String inputName;
     private final List<ImageProcessor> preProcessors;
     private final TopkProcessor topkProcessor;
 
@@ -59,8 +58,7 @@ public class PaddleClassificationPredictor implements AutoCloseable {
             }
             this.session = env.createSession(modelFile, options);
 
-            this.inputNames = session.getInputNames();
-            this.outputNames = session.getOutputNames();
+            this.inputName = List.copyOf(session.getInputNames()).getFirst();
 
             this.preProcessors = List.copyOf(preProcessors);
             this.topkProcessor = new TopkProcessor(List.copyOf(labels));
@@ -89,50 +87,58 @@ public class PaddleClassificationPredictor implements AutoCloseable {
         return mat;
     }
 
-    public List<ClassificationResult> predict(MatManager matManager, Mat image, final int k) {
-        Mat transformedResult = transform(matManager, List.of(image), preProcessors).get(0);
-        return predictProcessed(transformedResult, k);
-    }
-
-    public List<ClassificationResult> predictProcessed(Mat transformedResult, final int k) {
+    public List<List<ClassificationResult>> doBatchPredict(List<PreProcessResult> mats, MatManager matManager,
+                                                           NDManager manager, Map<String, Object> extraParameters) {
         try {
-            int size = (int) (transformedResult.total() * transformedResult.channels());
+            List<List<ClassificationResult>> allResults = new ArrayList<>();
+            Integer k = ParameterUtil.getInteger(extraParameters, "k");
+            if (k == null) {
+                k = 1;
+            }
+
+            int height = mats.get(0).mat().rows();
+            int width = mats.get(0).mat().cols();
+            int channels = mats.get(0).mat().channels();
+            int oneSize = (int) (mats.get(0).mat().total() * channels);
+            int size = mats.size() * oneSize;
             float[] floatDatas = new float[size];
-            // Copy the data from Mat to the float array
-            transformedResult.get(0, 0, floatDatas);
-
+            int index = 0;
+            for (PreProcessResult ppr : mats) {
+                float[] oneDatas = new float[oneSize];
+                ppr.mat().get(0, 0, oneDatas);
+                System.arraycopy(oneDatas, 0, floatDatas, index, oneDatas.length);
+                index += oneSize;
+            }
             FloatBuffer dataBuffer = FloatBuffer.wrap(floatDatas);
-            long[] shape = new long[] {1, transformedResult.channels(), transformedResult.rows(), transformedResult.cols() };
-            OnnxTensor onnxInput = OnnxTensor.createTensor(env, dataBuffer, shape);
-
-            Map<String, OnnxTensor> inputs = new HashMap<>(inputNames.size());
-            for (String inputName : inputNames) {
-                inputs.put(inputName, onnxInput);
-            }
-            OrtSession.Result onnxResult = session.run(inputs, outputNames);
-            Optional<OnnxValue> optinalResult = onnxResult.get(List.copyOf(outputNames).get(0));
-            if (optinalResult.isPresent()) {
-                float[][] preditResult = (float[][]) optinalResult.get().getValue();
-                TopkResult topkResult = topkProcessor.compute(preditResult, k);
-                List<ClassificationResult> results = new ArrayList<>(k);
-                for (int i = 0; i < k; i++) {
-                    results.add(new ClassificationResult(
-                            topkResult.scores()[0][i],
-                            topkResult.labels()[0][i]
-                    ));
+            long[] shape = new long[] {
+                    mats.size(),
+                    channels,
+                    height,
+                    width
+            };
+            try (
+                    OnnxTensor onnxInput = OnnxTensor.createTensor(env, dataBuffer, shape);
+                    OrtSession.Result onnxResult = session.run(Map.of(inputName, onnxInput));
+            ) {
+                OnnxValue optinalResult = onnxResult.get(0);
+                float[][] preditResult = (float[][]) optinalResult.getValue();
+                for (int i = 0; i < mats.size(); i++) {
+                    float[][] softmax = new float[][] {preditResult[i]};
+                    TopkResult topkResult = topkProcessor.compute(softmax, k);
+                    List<ClassificationResult> results = new ArrayList<>();
+                    for (int j = 0; j < k; j++) {
+                        results.add(new ClassificationResult(
+                                topkResult.scores()[0][j],
+                                topkResult.labels()[0][j]
+                        ));
+                    }
+                    allResults.add(results);
                 }
-                onnxResult.close();
-                onnxInput.close();
-                transformedResult.release();
-                return results;
+                return allResults;
             }
-            onnxResult.close();
-            onnxInput.close();
-            transformedResult.release();
         } catch (Exception e) {
             throw new FluxException(e);
         }
-        throw new FluxException("未知错误！");
     }
 
 }
