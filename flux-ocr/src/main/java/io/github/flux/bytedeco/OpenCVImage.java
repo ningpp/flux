@@ -57,6 +57,10 @@ import java.util.stream.Collectors;
 /** {@code OpenCVImage} is a high performance implementation of {@link Image}. */
 public class OpenCVImage implements Image {
 
+    static {
+        org.bytedeco.javacpp.Loader.load(org.bytedeco.opencv.opencv_java.class);
+    }
+
     private MatManager matManager;
     private Mat image;
 
@@ -471,7 +475,7 @@ public class OpenCVImage implements Image {
         return ret;
     }
 
-    private static Mat image2Mat(MatManager matManager, BufferedImage img) {
+    public static Mat image2Mat(MatManager matManager, BufferedImage img) {
         int width = img.getWidth();
         int height = img.getHeight();
         byte[] data;
