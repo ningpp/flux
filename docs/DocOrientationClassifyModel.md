@@ -2,10 +2,10 @@
 ## DocOrientationClassifyModel
 
 ### Performance
-| Model   |  CUDA   |
-|:--------|:-------:|
-| End2End | 61.97ms |
-| Infer   | 5.48ms  |
+| Model                 |  Type   |  CUDA   |
+|:----------------------|:-------:|:-------:|
+| PP-LCNet_x1_0_doc_ori | End2End | 61.97ms |
+| PP-LCNet_x1_0_doc_ori |  Infer  | 5.48ms  |
 
 
 ### Test Environment
@@ -20,7 +20,7 @@
 
 ### Performance Metrics
 - **End2End**: Includes PDF loading, page-to-image conversion, image preprocessing, model inference, and postprocessing.
-- **Infer**: Model inference only (excluding I/O and preprocessing).
+- **Infer**: Model inference (including I/O and postprocessing).
 
 **Results are averaged over 16 pages and 1234 iterations.**
 

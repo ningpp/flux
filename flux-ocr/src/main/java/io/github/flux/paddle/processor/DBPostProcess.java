@@ -20,7 +20,6 @@ package io.github.flux.paddle.processor;
 import ai.djl.ndarray.NDArray;
 import ai.djl.ndarray.NDList;
 import ai.djl.ndarray.types.DataType;
-import ai.djl.util.Pair;
 import clipper2.core.Path64;
 import clipper2.core.Paths64;
 import clipper2.core.Point64;
@@ -28,6 +27,7 @@ import clipper2.offset.ClipperOffset;
 import clipper2.offset.EndType;
 import clipper2.offset.JoinType;
 import io.github.flux.core.MatManager;
+import org.apache.commons.lang3.tuple.Pair;
 import org.opencv.core.CvType;
 import org.opencv.core.Mat;
 import org.opencv.core.MatOfPoint;
@@ -188,7 +188,7 @@ public class DBPostProcess {
         }
 
         batchPred.close();
-        return new Pair<>(boxes, scores);
+        return Pair.of(boxes, scores);
     }
 
     /**
@@ -339,7 +339,7 @@ public class DBPostProcess {
             boxes.add(boxArrInt32);
             scores.add(score);
         }
-        return new Pair<>(boxes, scores);
+        return Pair.of(boxes, scores);
     }
 
 
@@ -470,7 +470,7 @@ public class DBPostProcess {
             scores.add(score);
         }
 
-        return new Pair<>(boxes, scores);
+        return Pair.of(boxes, scores);
     }
 
     /**
@@ -616,7 +616,7 @@ public class DBPostProcess {
         contour2f.release();
         contour.release();
 
-        return new Pair<>(box, shortSide);
+        return Pair.of(box, shortSide);
     }
 
 

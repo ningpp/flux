@@ -20,10 +20,10 @@ package io.github.flux.paddle.predictor;
 import ai.djl.ndarray.NDArray;
 import ai.djl.ndarray.NDList;
 import ai.djl.ndarray.NDManager;
-import ai.djl.util.Pair;
 import ai.onnxruntime.OnnxTensor;
 import ai.onnxruntime.OnnxValue;
 import ai.onnxruntime.OrtEnvironment;
+import ai.onnxruntime.OrtException;
 import ai.onnxruntime.OrtSession;
 import io.github.flux.core.MatManager;
 import io.github.flux.core.TextDetectionResult;
@@ -34,9 +34,12 @@ import io.github.flux.paddle.processor.DetResize.DetResizeResultV2;
 import io.github.flux.paddle.processor.ImageProcessor;
 import io.github.flux.paddle.processor.LimitType;
 import io.github.flux.util.ArrayUtil;
+import io.github.flux.util.ImageUtil;
+import org.apache.commons.lang3.tuple.Pair;
 import org.opencv.core.Mat;
 
 import java.nio.FloatBuffer;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -47,6 +50,7 @@ public class PaddleDetectionPredictor implements AutoCloseable {
 
     private final OrtEnvironment env;
     private final OrtSession session;
+    private final String inputName;
     private final Set<String> inputNames;
     private final Set<String> outputNames;
     private final DetResize detResize;
@@ -71,6 +75,7 @@ public class PaddleDetectionPredictor implements AutoCloseable {
 
             this.inputNames = session.getInputNames();
             this.outputNames = session.getOutputNames();
+            this.inputName = List.copyOf(session.getInputNames()).getFirst();
 
             this.preProcessors = List.copyOf(preProcessors);
         } catch (Exception e) {
@@ -164,6 +169,70 @@ public class PaddleDetectionPredictor implements AutoCloseable {
             throw new FluxException(e);
         }
         throw new FluxException("未知错误！");
+    }
+
+    public List<TextDetectionResult> batchPredict(List<Mat> images,
+                                       MatManager matManager,
+                                       NDManager manager,
+                                       final Integer limitSideLen,
+                                       final LimitType limitType,
+                                       final Integer maxSideLimit,
+                                       final Float thresh,
+                                       final Float boxThresh,
+                                       final Float unclipRatio) throws OrtException {
+        List<int[]> srcSizes = new ArrayList<>();
+        for (Mat mat : images) {
+            srcSizes.add(new int[] {mat.rows(), mat.cols()});
+        }
+        List<Mat> sameSizeMats = ImageUtil.padImageToSame(matManager, images);
+        List<Pair<DetResizeResultV2, Mat>> detResizeResults = new ArrayList<>();
+        for (Mat sameSizeMat : sameSizeMats) {
+            DetResizeResultV2 resizedResult = detResize.process(matManager, List.of(sameSizeMat),
+                    limitSideLen, limitType, maxSideLimit).get(0);
+            detResizeResults.add(Pair.of(resizedResult,
+                    transform(List.of(resizedResult.resizeImg()), matManager, preProcessors).get(0)));
+        }
+        try (
+                OnnxTensor onnxInput = ImageUtil.matToOnnxTensor(detResizeResults.stream().map(Pair::getRight).toList(), env);
+                OrtSession.Result onnxResult = session.run(Map.of(inputName, onnxInput))
+        ) {
+            OnnxValue outputResult = onnxResult.get(0);
+            float[][][][] data = (float[][][][]) outputResult.getValue();
+            List<TextDetectionResult> tdResults = new ArrayList<>();
+            for (int b = 0; b < data.length; b++) {
+                NDList preds = new NDList();
+                preds.add(ArrayUtil.toNDArray(manager, data[b]));
+
+                Pair<List<NDArray>, List<Float>> postResult = dbPostProcess.call(
+                        matManager,
+                        preds,
+                        detResizeResults.get(b).getLeft().imgShape(),
+                        thresh == null ? dbPostProcess.getThresh() : thresh,
+                        boxThresh == null ? dbPostProcess.getBoxThresh() : boxThresh,
+                        unclipRatio == null ? dbPostProcess.getUnclipRatio() : unclipRatio
+                );
+
+                int[][][] polys = new int[postResult.getKey().size()][][];
+                int index = 0;
+                for (NDArray array : postResult.getKey()) {
+                    long[] arrayShape = array.getShape().getShape();
+                    int rows = (int) arrayShape[0];
+                    int cols = (int) arrayShape[1];
+                    int[][] result = new int[rows][cols];
+                    for (int i = 0; i < rows; i++) {
+                        for (int j = 0; j < cols; j++) {
+                            result[i][j] = array.getInt(i, j);
+                        }
+                    }
+                    polys[index] = result;
+                    array.close();
+                    index++;
+                }
+                preds.close();
+                tdResults.add(new TextDetectionResult(polys, postResult.getValue()));
+            }
+            return tdResults;
+        }
     }
 
     @Override

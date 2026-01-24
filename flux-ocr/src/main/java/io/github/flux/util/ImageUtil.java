@@ -5,6 +5,9 @@ import ai.djl.ndarray.NDArray;
 import ai.djl.ndarray.NDManager;
 import ai.djl.ndarray.types.DataType;
 import ai.djl.ndarray.types.Shape;
+import ai.onnxruntime.OnnxTensor;
+import ai.onnxruntime.OrtEnvironment;
+import ai.onnxruntime.OrtException;
 import io.github.flux.core.MatManager;
 import org.opencv.core.Core;
 import org.opencv.core.CvType;
@@ -23,6 +26,7 @@ import java.awt.image.BufferedImage;
 import java.awt.image.DataBufferByte;
 import java.nio.ByteBuffer;
 import java.nio.FloatBuffer;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -36,6 +40,51 @@ public final class ImageUtil {
     }
 
     private ImageUtil() {
+    }
+
+    public static OnnxTensor matToOnnxTensor(List<Mat> transformedResults,
+                                             final OrtEnvironment env) throws OrtException {
+        int height = transformedResults.get(0).rows();
+        int width = transformedResults.get(0).cols();
+        int channels = transformedResults.get(0).channels();
+        int oneSize = (int) (transformedResults.get(0).total() * channels);
+        int size = transformedResults.size() * oneSize;
+        float[] floatDatas = new float[size];
+        int index = 0;
+        for (Mat pad : transformedResults) {
+            float[] oneDatas = new float[oneSize];
+            pad.get(0, 0, oneDatas);
+            System.arraycopy(oneDatas, 0, floatDatas, index, oneDatas.length);
+            index += oneSize;
+        }
+
+        FloatBuffer dataBuffer = FloatBuffer.wrap(floatDatas);
+        long[] shape = new long[] {
+                transformedResults.size(),
+                channels,
+                height,
+                width
+        };
+        return OnnxTensor.createTensor(env, dataBuffer, shape);
+    }
+
+    public static List<Mat> padImageToSame(MatManager matManager, List<Mat> images) {
+        int maxWidth = 0;
+        int maxHeight = 0;
+
+        // Load images and find maximum dimensions
+        for (Mat image : images) {
+            maxWidth = Math.max(maxWidth, image.cols());
+            maxHeight = Math.max(maxHeight, image.rows());
+        }
+
+        Scalar paddingColor = new Scalar(255, 255, 255);
+        List<Mat> results = new ArrayList<>(images.size());
+        for (Mat image : images) {
+            Mat pad = ImageUtil.padImageToSize(matManager, image, maxWidth, maxHeight, paddingColor);
+            results.add(pad);
+        }
+        return results;
     }
 
     public static Mat toCHWOfByte(MatManager matManager, Mat img) {

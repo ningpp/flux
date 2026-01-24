@@ -64,7 +64,11 @@ public class TextRecognitionModel extends BatchPredictor<PreProcessResult, List<
 
     @Override
     public List<List<RecognitionResult>> doBatchPredict(List<PreProcessResult> mats, MatManager matManager, NDManager manager, Map<String, Object> extraParameters) {
-        return predictor.batchPredict(mats.stream().map(PreProcessResult::mat).toList(), matManager, manager);
+        try {
+            return predictor.batchPredict(mats.stream().map(PreProcessResult::mat).toList(), matManager, manager);
+        } catch (Exception e) {
+            throw new FluxException(e);
+        }
     }
 
     @Override

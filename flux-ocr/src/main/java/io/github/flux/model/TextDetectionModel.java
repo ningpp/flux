@@ -75,20 +75,17 @@ public class TextDetectionModel extends BatchPredictor<PreProcessResult, TextDet
     @Override
     public List<TextDetectionResult> doBatchPredict(List<PreProcessResult> mats, MatManager matManager, NDManager manager,
                                                     Map<String, Object> extraParameters) {
-        List<TextDetectionResult> results = new ArrayList<>();
-        for (PreProcessResult ppr : mats) {
-            results.add(
-                predictor.predict(ppr.mat(), matManager, manager,
+        try {
+            return predictor.batchPredict(PreProcessResult.getMats(mats), matManager, manager,
                         ParameterUtil.getInteger(extraParameters, "det.limitSideLen"),
                         ParameterUtil.getLimitType(extraParameters, "det.limitType"),
                         ParameterUtil.getInteger(extraParameters, "det.maxSideLimit"),
                         ParameterUtil.getFloat(extraParameters, "det.thresh"),
                         ParameterUtil.getFloat(extraParameters, "det.boxThresh"),
-                        ParameterUtil.getFloat(extraParameters, "det.unclipRatio")
-                )
-            );
+                        ParameterUtil.getFloat(extraParameters, "det.unclipRatio"));
+        } catch (Exception e) {
+            throw new FluxException(e);
         }
-        return results;
     }
 
     @Override
