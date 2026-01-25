@@ -19,7 +19,7 @@ package io.github.flux.dolphin;
 
 import ai.djl.huggingface.tokenizers.HuggingFaceTokenizer;
 import ai.djl.ndarray.NDManager;
-import ai.onnxruntime.OnnxJavaType;
+import ai.onnxruntime.OnnxTensor;
 import ai.onnxruntime.OrtEnvironment;
 import io.github.flux.core.BatchPredictor;
 import io.github.flux.core.MatManager;
@@ -46,13 +46,11 @@ public class ByteDanceDolphinElementModel extends BatchPredictor<PreProcessResul
     private final DolphinDecoderModel decoderModel;
     private final HuggingFaceTokenizer tokenizer;
     private final DolphinPreProcessor preProcessor;
-    private final boolean skipSpecialTokens;
 
     public ByteDanceDolphinElementModel(final String modelRootDir,
                                         final String modelName,
                                         final int gpuIndex,
                                         final OrtEnvironment env,
-                                        final OnnxJavaType dtype,
                                         final boolean skipSpecialTokens) {
         if (!MODEL_NAMES.contains(modelName)) {
             throw new FluxException("not supported pix2text model: " + modelName);
@@ -60,19 +58,12 @@ public class ByteDanceDolphinElementModel extends BatchPredictor<PreProcessResul
 
         final String modelDir = modelRootDir + File.separator + modelName;
         try {
-            this.skipSpecialTokens = skipSpecialTokens;
             this.preProcessor = new DolphinPreProcessor();
-            String suffix;
-            if (dtype == OnnxJavaType.FLOAT) {
-                suffix = "_float32";
-            } else {
-                suffix = "_float16";
-            }
-            this.encoderModel = new DolphinEncoderModel(new File(modelDir, "encoder_model" + suffix + ".onnx").getAbsolutePath(),
-                    gpuIndex, env, dtype);
+            this.encoderModel = new DolphinEncoderModel(new File(modelDir, "encoder_model.onnx").getAbsolutePath(),
+                    gpuIndex, env);
             this.tokenizer = HuggingFaceTokenizer.newInstance(Paths.get(modelDir));
-            this.decoderModel = new DolphinDecoderModel(new File(modelDir, "decoder_model" + suffix + ".onnx").getAbsolutePath(),
-                    gpuIndex, env, 4096, 1, 2, tokenizer, skipSpecialTokens, dtype);
+            this.decoderModel = new DolphinDecoderModel(new File(modelDir, "decoder_model.onnx").getAbsolutePath(),
+                    gpuIndex, env, 4096, 1, 2, tokenizer, skipSpecialTokens);
         } catch (Exception e) {
             throw new FluxException(e);
         }
@@ -89,9 +80,9 @@ public class ByteDanceDolphinElementModel extends BatchPredictor<PreProcessResul
         try {
             String task_prompt = "<s>" + prompt + " <Answer/>";
             long[] decoder_input_ids = tokenizer.encode(task_prompt, false, false).getIds();
-            float[][][] encoderResults = encoderModel.batchPredict(PreProcessResult.getMats(images), matManager, manager);
-
-            return decoderModel.predict(prompt, encoderResults, decoder_input_ids, manager);
+            try (OnnxTensor encodeResult = encoderModel.predictOnnxTensor(PreProcessResult.getMats(images))) {
+                return decoderModel.predict(prompt, encodeResult, decoder_input_ids, manager);
+            }
         } catch (Exception e) {
             throw new FluxException(e);
         }

@@ -18,7 +18,6 @@
 package io.github.flux.dolphin;
 
 import ai.djl.ndarray.NDManager;
-import ai.onnxruntime.OnnxJavaType;
 import ai.onnxruntime.OrtEnvironment;
 import io.github.flux.core.BatchPredictor;
 import io.github.flux.core.FormulaRecognitionResult;
@@ -41,16 +40,24 @@ public class ByteDanceDolphinFormulaModel extends BatchPredictor<PreProcessResul
     public ByteDanceDolphinFormulaModel(final String modelRootDir,
                                         final String modelName,
                                         final int gpuIndex,
-                                        final OrtEnvironment env,
-                                        final OnnxJavaType dtype) {
-        this.model = new ByteDanceDolphinElementModel(modelRootDir, modelName, gpuIndex, env, dtype, true);
+                                        final OrtEnvironment env) {
+        this.model = new ByteDanceDolphinElementModel(modelRootDir, modelName, gpuIndex, env, true);
     }
 
     @Override
     public List<FormulaRecognitionResult> doBatchPredict(List<PreProcessResult> mats, MatManager matManager, NDManager manager, Map<String, Object> extraParameters) {
         extraParameters.put("prompt", "Read formula in the image.");
         var elementResults = model.doBatchPredict(mats, matManager, manager, extraParameters);
-        return elementResults.stream().map(r -> new FormulaRecognitionResult(List.of(r.text()), r.tokens(), r.score())).toList();
+        return elementResults.stream().map(r -> new FormulaRecognitionResult(
+                List.of(removeDollar(r.text())), r.tokens(), r.score())).toList();
+    }
+
+    private String removeDollar(String text) {
+        if (text.startsWith("$$") && text.endsWith("$$")) {
+            return text.substring(2, text.length()-2);
+        } else {
+            return text;
+        }
     }
 
     @Override

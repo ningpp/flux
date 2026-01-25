@@ -1,7 +1,6 @@
 package io.github.flux.model;
 
 import ai.djl.ndarray.NDManager;
-import ai.onnxruntime.OnnxJavaType;
 import ai.onnxruntime.OrtEnvironment;
 import io.github.flux.core.BatchPredictor;
 import io.github.flux.core.FormulaRecognitionResult;
@@ -49,7 +48,7 @@ public class FormulaRecognitionModel extends BatchPredictor<PreProcessResult, Fo
                                    final int gpuIndex,
                                    final OrtEnvironment env) {
         if (ByteDanceDolphinElementModel.MODEL_NAMES.contains(modelName)) {
-            this.predictor = new ByteDanceDolphinFormulaModel(modelRootDir, modelName, gpuIndex, env, OnnxJavaType.FLOAT);
+            this.predictor = new ByteDanceDolphinFormulaModel(modelRootDir, modelName, gpuIndex, env);
         } else if (GraniteDoclingFormulaModel.MODEL_NAMES.contains(modelName)) {
             this.predictor = new GraniteDoclingFormulaModel(modelRootDir, modelName, gpuIndex, env, 512);
         } else if (NougatLatexFormulaModel.MODEL_NAMES.contains(modelName)) {

@@ -18,7 +18,6 @@
 package io.github.flux.dolphin;
 
 import ai.djl.ndarray.NDManager;
-import ai.onnxruntime.OnnxJavaType;
 import ai.onnxruntime.OrtEnvironment;
 import io.github.flux.core.BatchPredictor;
 import io.github.flux.core.MatManager;
@@ -41,9 +40,8 @@ public class ByteDanceDolphinTableModel extends BatchPredictor<PreProcessResult,
     public ByteDanceDolphinTableModel(final String modelRootDir,
                                       final String modelName,
                                       final int gpuIndex,
-                                      final OrtEnvironment env,
-                                      final OnnxJavaType dtype) {
-        this.model = new ByteDanceDolphinElementModel(modelRootDir, modelName, gpuIndex, env, dtype, false);
+                                      final OrtEnvironment env) {
+        this.model = new ByteDanceDolphinElementModel(modelRootDir, modelName, gpuIndex, env, false);
     }
 
     @Override

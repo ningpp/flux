@@ -18,10 +18,7 @@
 package io.github.flux.dolphin;
 
 import ai.djl.huggingface.tokenizers.HuggingFaceTokenizer;
-import ai.djl.ndarray.NDArray;
 import ai.djl.ndarray.NDManager;
-import ai.djl.ndarray.types.DataType;
-import ai.onnxruntime.OnnxJavaType;
 import ai.onnxruntime.OnnxTensor;
 import ai.onnxruntime.OnnxValue;
 import ai.onnxruntime.OrtEnvironment;
@@ -32,9 +29,7 @@ import io.github.flux.exception.FluxException;
 import io.github.flux.util.ArrayUtil;
 import io.github.flux.util.IOUtil;
 
-import java.nio.FloatBuffer;
 import java.nio.LongBuffer;
-import java.nio.ShortBuffer;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -57,7 +52,6 @@ public class DolphinDecoderModel implements AutoCloseable {
     private final long eosTokenId;
     private final HuggingFaceTokenizer tokenizer;
     private final boolean skipSpecialTokens;
-    private final OnnxJavaType dtype;
 
     public DolphinDecoderModel(final String modelFile,
                                final int gpuIndex,
@@ -66,9 +60,7 @@ public class DolphinDecoderModel implements AutoCloseable {
                                long padTokenId,
                                long eosTokenId,
                                HuggingFaceTokenizer tokenizer,
-                               boolean skipSpecialTokens,
-                               final OnnxJavaType dtype) {
-        this.dtype = dtype;
+                               boolean skipSpecialTokens) {
         this.maxLength = maxLength;
         this.padTokenId = padTokenId;
         this.eosTokenId = eosTokenId;
@@ -88,27 +80,11 @@ public class DolphinDecoderModel implements AutoCloseable {
         }
     }
 
-    public List<TextResult> predict(String prompt, float[][][] encodeResultFloats, long[] decoder_input_ids, NDManager manager) throws OrtException {
-        int batchSize = encodeResultFloats.length;
+    public List<TextResult> predict(String prompt, OnnxTensor encoder_hidden_states_tensor, long[] decoder_input_ids, NDManager manager) throws OrtException {
+        int batchSize = Math.toIntExact(encoder_hidden_states_tensor.getInfo().getShape()[0]);
         long[][] inputIds = new long[batchSize][];
-        for (int i = 0; i < encodeResultFloats.length; i++) {
+        for (int i = 0; i < batchSize; i++) {
             inputIds[i] = ArrayUtil.clone(decoder_input_ids);
-        }
-        int d1 = encodeResultFloats.length;
-        int d2 = encodeResultFloats[0].length;
-        int d3 = encodeResultFloats[0][0].length;
-        long[] shape = new long[]{d1, d2, d3};
-        OnnxTensor encoder_hidden_states_tensor;
-        if (dtype == OnnxJavaType.FLOAT) {
-            FloatBuffer dataBuffer = FloatBuffer.wrap(ArrayUtil.flat(encodeResultFloats));
-            encoder_hidden_states_tensor = OnnxTensor.createTensor(env, dataBuffer, shape);
-        } else {
-            NDArray encoded = ArrayUtil.toNDArray(manager, encodeResultFloats);
-            NDArray encodedFloat16 = encoded.toType(DataType.FLOAT16, true);
-            ShortBuffer buffer = encodedFloat16.toByteBuffer().asShortBuffer();
-            encoder_hidden_states_tensor = OnnxTensor.createTensor(env, buffer, shape, OnnxJavaType.FLOAT16);
-            IOUtil.close(encodedFloat16);
-            IOUtil.close(encoded);
         }
 
         long[][] generated_tokens = new long[batchSize][];
@@ -159,14 +135,10 @@ public class DolphinDecoderModel implements AutoCloseable {
             IOUtil.close(input_ids_tensor);
         }
 
-        IOUtil.close(encoder_hidden_states_tensor);
         List<TextResult> results = new ArrayList<>();
         for (long[] tokens : generated_tokens) {
             String text = tokenizer.decode(tokens, skipSpecialTokens);
             String noPromptText = text.replace(prompt, "").replace("<pad>", "").replace("</s>", "").strip();
-            if (noPromptText.startsWith("$$") && noPromptText.endsWith("$$")) {
-                noPromptText = noPromptText.substring(2, noPromptText.length()-2);
-            }
             results.add(new TextResult(noPromptText, tokens, -1));
         }
         return results;

@@ -1,7 +1,6 @@
 package io.github.flux.model;
 
 import ai.djl.ndarray.NDManager;
-import ai.onnxruntime.OnnxJavaType;
 import ai.onnxruntime.OrtEnvironment;
 import io.github.flux.core.BatchPredictor;
 import io.github.flux.core.MatManager;
@@ -39,7 +38,7 @@ public class TableModel extends BatchPredictor<PreProcessResult, TableResult> {
                       final int gpuIndex,
                       final OrtEnvironment env) {
         if (ByteDanceDolphinElementModel.MODEL_NAMES.contains(modelName)) {
-            this.predictor = new ByteDanceDolphinTableModel(modelRootDir, modelName, gpuIndex, env, OnnxJavaType.FLOAT);
+            this.predictor = new ByteDanceDolphinTableModel(modelRootDir, modelName, gpuIndex, env);
         } else if (UnirecPredictor.MODEL_NAMES.contains(modelName)) {
             this.predictor = new UnirecTableModel(new UnirecPredictor(modelRootDir, modelName, gpuIndex, env));
         } else {
