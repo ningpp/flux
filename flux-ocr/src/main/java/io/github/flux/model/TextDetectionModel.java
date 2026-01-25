@@ -8,19 +8,17 @@ import io.github.flux.core.ModelParam;
 import io.github.flux.core.PreProcessResult;
 import io.github.flux.core.TextDetectionResult;
 import io.github.flux.exception.FluxException;
-import io.github.flux.paddle.processor.ImageProcessor;
 import io.github.flux.paddle.predictor.PaddleDetectionPredictor;
 import io.github.flux.paddle.processor.DBPostProcess;
 import io.github.flux.paddle.processor.DetResize;
+import io.github.flux.paddle.processor.ImageProcessor;
 import io.github.flux.paddle.processor.LimitType;
 import io.github.flux.paddle.processor.Normalize;
 import io.github.flux.paddle.processor.ToCHWImage;
 import io.github.flux.util.ParameterUtil;
 import org.opencv.core.Mat;
-import org.opencv.imgcodecs.Imgcodecs;
 
 import java.io.File;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -91,48 +89,6 @@ public class TextDetectionModel extends BatchPredictor<PreProcessResult, TextDet
     @Override
     public PreProcessResult processRgb(MatManager matManager, Mat rgbMat, NDManager manager) {
         return new PreProcessResult(rgbMat, null);
-    }
-
-    public List<TextDetectionResult> predict(List<String> images, MatManager matManager, NDManager manager,
-                                             final Integer limitSideLen,
-                                             final LimitType limitType,
-                                             final Integer maxSideLimit,
-                                             final Float thresh,
-                                             final Float boxThresh,
-                                             final Float unclipRatio) {
-        List<TextDetectionResult> results = new ArrayList<>();
-        for (String image : images) {
-            results.add(predict(image, matManager, manager,
-                    limitSideLen, limitType, maxSideLimit,
-                    thresh, boxThresh, unclipRatio));
-        }
-        return results;
-    }
-
-    public TextDetectionResult predict(String image, MatManager matManager, NDManager manager,
-                                       final Integer limitSideLen,
-                                       final LimitType limitType,
-                                       final Integer maxSideLimit,
-                                       final Float thresh,
-                                       final Float boxThresh,
-                                       final Float unclipRatio) {
-        Mat bgrImg = matManager.imread(image, Imgcodecs.IMREAD_COLOR_BGR);
-        TextDetectionResult result = predict(bgrImg, matManager, manager,
-                limitSideLen, limitType, maxSideLimit,
-                thresh, boxThresh, unclipRatio);
-        bgrImg.release();
-        return result;
-    }
-
-    public TextDetectionResult predict(Mat image, MatManager matManager, NDManager manager,
-                                       final Integer limitSideLen,
-                                       final LimitType limitType,
-                                       final Integer maxSideLimit,
-                                       final Float thresh,
-                                       final Float boxThresh,
-                                       final Float unclipRatio) {
-        return predictor.predict(image, matManager, manager, limitSideLen, limitType, maxSideLimit,
-                thresh, boxThresh, unclipRatio);
     }
 
     @Override
