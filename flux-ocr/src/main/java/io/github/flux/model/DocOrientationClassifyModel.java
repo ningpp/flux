@@ -46,8 +46,4 @@ public class DocOrientationClassifyModel extends BatchPredictor<PreProcessResult
         return predictor.processRgb(matManager, rgbMat, manager);
     }
 
-    public ClassificationResult predict(MatManager matManager, Mat rgbImg, NDManager manager, Map<String, Object> extraParameters) {
-        return doBatchPredict(List.of(processRgb(matManager, rgbImg, manager)), matManager, manager, extraParameters).get(0);
-    }
-
 }

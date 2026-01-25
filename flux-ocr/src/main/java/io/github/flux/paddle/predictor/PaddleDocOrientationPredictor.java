@@ -36,7 +36,6 @@ import org.opencv.core.Mat;
 
 import java.io.File;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -80,12 +79,7 @@ public class PaddleDocOrientationPredictor extends BatchPredictor<PreProcessResu
     @Override
     public List<ClassificationResult> doBatchPredict(List<PreProcessResult> mats, MatManager matManager, NDManager manager, Map<String, Object> extraParameters) {
         List<ClassificationResult> results = new ArrayList<>();
-        Map<String, Object> params = new HashMap<>();
-        if (extraParameters != null) {
-            params.putAll(extraParameters);
-        }
-        params.put("k", 4);
-        List<List<ClassificationResult>> batchKrs = predictor.doBatchPredict(mats, matManager, manager, params);
+        List<List<ClassificationResult>> batchKrs = predictor.doBatchPredict(mats, extraParameters);
         for (var krs : batchKrs) {
             results.add(krs.get(0));
         }

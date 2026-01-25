@@ -2,6 +2,7 @@ package io.github.flux.util;
 
 import ai.djl.ndarray.NDArray;
 import ai.djl.ndarray.NDManager;
+import ai.djl.ndarray.types.DataType;
 import ai.djl.ndarray.types.Shape;
 import ai.onnxruntime.OnnxTensor;
 import ai.onnxruntime.OrtEnvironment;
@@ -15,6 +16,41 @@ import java.util.List;
 public final class ArrayUtil {
 
     private ArrayUtil() {
+    }
+
+    public static int[][][] toInt3d(NDArray intArr) {
+        // 1) Ensure it's INT32
+        if (intArr.getDataType() != DataType.INT32) {
+            throw new IllegalArgumentException("NDArray' data type must be INT32, but got " + intArr.getDataType());
+        }
+
+        // 2) Get and check shape
+        Shape shape = intArr.getShape();
+        if (shape.dimension() != 3) {
+            throw new IllegalArgumentException("NDArray must be 3‑D, but got shape " + shape);
+        }
+        int d1 = (int) shape.get(0);
+        int d2 = (int) shape.get(1);
+        int d3 = (int) shape.get(2);
+
+        // 3) Flattened data
+        int[] flat = intArr.toIntArray();
+        if (flat.length != d1 * d2 * d3) {
+            throw new IllegalStateException("Data length mismatch: expected "
+                    + (d1 * d2 * d3) + " but got " + flat.length);
+        }
+
+        // 4) Reshape into int[d1][d2][d3]
+        int[][][] result = new int[d1][d2][d3];
+        int idx = 0;
+        for (int i = 0; i < d1; i++) {
+            for (int j = 0; j < d2; j++) {
+                for (int k = 0; k < d3; k++) {
+                    result[i][j][k] = flat[idx++];
+                }
+            }
+        }
+        return result;
     }
 
     /**

@@ -17,7 +17,6 @@
  */
 package io.github.flux.paddle.predictor;
 
-import ai.djl.ndarray.NDManager;
 import ai.onnxruntime.OnnxTensor;
 import ai.onnxruntime.OnnxValue;
 import ai.onnxruntime.OrtEnvironment;
@@ -29,10 +28,10 @@ import io.github.flux.core.TopkResult;
 import io.github.flux.exception.FluxException;
 import io.github.flux.paddle.processor.ImageProcessor;
 import io.github.flux.paddle.processor.TopkProcessor;
+import io.github.flux.util.ImageUtil;
 import io.github.flux.util.ParameterUtil;
 import org.opencv.core.Mat;
 
-import java.nio.FloatBuffer;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -87,8 +86,8 @@ public class PaddleClassificationPredictor implements AutoCloseable {
         return mat;
     }
 
-    public List<List<ClassificationResult>> doBatchPredict(List<PreProcessResult> mats, MatManager matManager,
-                                                           NDManager manager, Map<String, Object> extraParameters) {
+    public List<List<ClassificationResult>> doBatchPredict(List<PreProcessResult> pprs,
+                                                           Map<String, Object> extraParameters) {
         try {
             List<List<ClassificationResult>> allResults = new ArrayList<>();
             Integer k = ParameterUtil.getInteger(extraParameters, "k");
@@ -96,33 +95,13 @@ public class PaddleClassificationPredictor implements AutoCloseable {
                 k = 1;
             }
 
-            int height = mats.get(0).mat().rows();
-            int width = mats.get(0).mat().cols();
-            int channels = mats.get(0).mat().channels();
-            int oneSize = (int) (mats.get(0).mat().total() * channels);
-            int size = mats.size() * oneSize;
-            float[] floatDatas = new float[size];
-            int index = 0;
-            for (PreProcessResult ppr : mats) {
-                float[] oneDatas = new float[oneSize];
-                ppr.mat().get(0, 0, oneDatas);
-                System.arraycopy(oneDatas, 0, floatDatas, index, oneDatas.length);
-                index += oneSize;
-            }
-            FloatBuffer dataBuffer = FloatBuffer.wrap(floatDatas);
-            long[] shape = new long[] {
-                    mats.size(),
-                    channels,
-                    height,
-                    width
-            };
             try (
-                    OnnxTensor onnxInput = OnnxTensor.createTensor(env, dataBuffer, shape);
+                    OnnxTensor onnxInput = ImageUtil.matToOnnxTensor(PreProcessResult.getMats(pprs), env);
                     OrtSession.Result onnxResult = session.run(Map.of(inputName, onnxInput));
             ) {
                 OnnxValue optinalResult = onnxResult.get(0);
                 float[][] preditResult = (float[][]) optinalResult.getValue();
-                for (int i = 0; i < mats.size(); i++) {
+                for (int i = 0; i < pprs.size(); i++) {
                     float[][] softmax = new float[][] {preditResult[i]};
                     TopkResult topkResult = topkProcessor.compute(softmax, k);
                     List<ClassificationResult> results = new ArrayList<>();
