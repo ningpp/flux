@@ -34,13 +34,13 @@ import io.github.flux.paddle.processor.Resize;
 import io.github.flux.paddle.processor.RtdetrPostProcessor;
 import io.github.flux.paddle.processor.ToCHWImage;
 import io.github.flux.util.ArrayUtil;
+import io.github.flux.util.ImageUtil;
+import io.github.flux.util.ParameterUtil;
 import org.opencv.core.Mat;
 import org.opencv.imgproc.Imgproc;
 
 import java.io.File;
-import java.nio.FloatBuffer;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -50,8 +50,7 @@ public class DoclingLayoutModel extends BatchPredictor<ProcessedMat, List<Object
 
     private final OrtEnvironment env;
     private final OrtSession session;
-    private final Set<String> inputNames;
-    private final Set<String> outputNames;
+    private final String inputName;
 
     @Override
     public void close() throws Exception {
@@ -71,8 +70,7 @@ public class DoclingLayoutModel extends BatchPredictor<ProcessedMat, List<Object
             String modelFile = new File(modelDir + File.separator + modelName, "model.onnx").getAbsolutePath();
             this.session = env.createSession(modelFile, options);
 
-            this.inputNames = session.getInputNames();
-            this.outputNames = session.getOutputNames();
+            this.inputName = List.copyOf(session.getInputNames()).getFirst();
         } catch (Exception e) {
             throw new FluxException(e);
         }
@@ -85,15 +83,6 @@ public class DoclingLayoutModel extends BatchPredictor<ProcessedMat, List<Object
             "docling-layout-heron",
             "docling-layout-heron-101"
     );
-
-    public List<List<ObjectDetectionResult>> batchPredictFiles(List<String> images, MatManager matManager, NDManager manager, float threshold) {
-        List<ProcessedMat> mats = new ArrayList<>();
-        for (String image : images) {
-            ProcessedMat rgbImg = process(matManager, image, manager);
-            mats.add(rgbImg);
-        }
-        return batchPredict(mats, matManager, manager, threshold);
-    }
 
     private static final List<ImageProcessor> PREPROCESSORS = List.of(
             new Resize(640, 640, Imgproc.INTER_AREA),
@@ -135,56 +124,22 @@ public class DoclingLayoutModel extends BatchPredictor<ProcessedMat, List<Object
                 processed = processor.process(matManager, processed);
             }
 
-            List<Mat> transformedResults = processed;
-            int height = transformedResults.get(0).rows();
-            int width = transformedResults.get(0).cols();
-            int channels = transformedResults.get(0).channels();
-            int oneSize = (int) (transformedResults.get(0).total() * channels);
-            int size = transformedResults.size() * oneSize;
-            float[] floatDatas = new float[size];
-            int index = 0;
-            for (Mat pad : transformedResults) {
-                float[] oneDatas = new float[oneSize];
-                pad.get(0, 0, oneDatas);
-                System.arraycopy(oneDatas, 0, floatDatas, index, oneDatas.length);
-                index += oneSize;
+            try (
+                    OnnxTensor onnxInput = ImageUtil.matToOnnxTensor(processed, env);
+                    OrtSession.Result onnxResult = session.run(Map.of(inputName, onnxInput))
+            ) {
+                Optional<OnnxValue> logitsResult = onnxResult.get("logits");
+                Optional<OnnxValue> predBoxesResult = onnxResult.get("pred_boxes");
+
+                List<List<ObjectDetectionResult>> allResults = new ArrayList<>();
+                if (logitsResult.isPresent() && predBoxesResult.isPresent()) {
+                    NDArray logits = ArrayUtil.toNDArray(manager, (float[][][]) logitsResult.get().getValue());
+                    NDArray bboxes = ArrayUtil.toNDArray(manager, (float[][][]) predBoxesResult.get().getValue());
+                    allResults.addAll(POST_PROCESSOR.process(logits, bboxes, threshold, targetSizes, true));
+                }
+
+                return allResults;
             }
-
-            for (ProcessedMat mat : mats) {
-                mat.release();
-            }
-
-            for (Mat mat : transformedResults) {
-                mat.release();
-            }
-
-            FloatBuffer dataBuffer = FloatBuffer.wrap(floatDatas);
-            long[] shape = new long[]{
-                    transformedResults.size(),
-                    channels,
-                    height,
-                    width
-            };
-            OnnxTensor onnxInput = OnnxTensor.createTensor(env, dataBuffer, shape);
-
-            Map<String, OnnxTensor> inputs = new HashMap<>(inputNames.size());
-            for (String inputName : inputNames) {
-                inputs.put(inputName, onnxInput);
-            }
-            OrtSession.Result onnxResult = session.run(inputs, outputNames);
-            Optional<OnnxValue> logitsResult = onnxResult.get("logits");
-            Optional<OnnxValue> predBoxesResult = onnxResult.get("pred_boxes");
-
-            List<List<ObjectDetectionResult>> allResults = new ArrayList<>();
-            if (logitsResult.isPresent() && predBoxesResult.isPresent()) {
-                NDArray logits = ArrayUtil.toNDArray(manager, (float[][][]) logitsResult.get().getValue());
-                NDArray bboxes = ArrayUtil.toNDArray(manager, (float[][][]) predBoxesResult.get().getValue());
-                allResults.addAll(POST_PROCESSOR.process(logits, bboxes, threshold, targetSizes, true));
-            }
-
-            onnxResult.close();
-            onnxInput.close();
-            return allResults;
         } catch (Exception e) {
             throw new FluxException(e);
         }
@@ -194,7 +149,8 @@ public class DoclingLayoutModel extends BatchPredictor<ProcessedMat, List<Object
 
     @Override
     public List<List<ObjectDetectionResult>> doBatchPredict(List<ProcessedMat> mats, MatManager matManager, NDManager manager, Map<String, Object> extraParameters) {
-        return batchPredict(mats, matManager, manager, DEFAULT_THRESHOLD);
+        Float threshold = ParameterUtil.getFloat(extraParameters, "docling.layout.threshold");
+        return batchPredict(mats, matManager, manager, threshold==null ? DEFAULT_THRESHOLD : threshold);
     }
 
     @Override
