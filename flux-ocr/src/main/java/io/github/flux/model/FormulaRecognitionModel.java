@@ -50,7 +50,7 @@ public class FormulaRecognitionModel extends BatchPredictor<PreProcessResult, Fo
         if (ByteDanceDolphinElementModel.MODEL_NAMES.contains(modelName)) {
             this.predictor = new ByteDanceDolphinFormulaModel(modelRootDir, modelName, gpuIndex, env);
         } else if (GraniteDoclingFormulaModel.MODEL_NAMES.contains(modelName)) {
-            this.predictor = new GraniteDoclingFormulaModel(modelRootDir, modelName, gpuIndex, env, 512);
+            this.predictor = new GraniteDoclingFormulaModel(modelRootDir, modelName, gpuIndex, env, 8192);
         } else if (NougatLatexFormulaModel.MODEL_NAMES.contains(modelName)) {
             this.predictor = new NougatLatexFormulaModel(modelRootDir, modelName, gpuIndex, env);
         } else if (PaddleFormulaRecognitionPredictor.MODEL_NAMES.contains(modelName)) {

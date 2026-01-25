@@ -145,15 +145,13 @@ public class GraniteDoclingFormulaModel extends BatchPredictor<PreProcessResult,
             long[] generated_tokens = new long[]{};
             for (int i = 0; i < maxLength; i++) {
                 float[][][] inputs_embed_floats = embedModel.predict(input_ids);
-                NDArray image_features = ArrayUtil.toNDArray(manager, image_feature_floats);
                 NDArray inputs_embeds = ArrayUtil.toNDArray(manager, inputs_embed_floats);
                 if (i == 0) {
+                    NDArray image_features = ArrayUtil.toNDArray(manager, image_feature_floats);
                     mergeTextAndVisionEmbeddings(input_ids, image_token_id,
                             inputs_embeds, image_features);
                 }
 
-                inputs_embeds = inputs_embeds.toType(DataType.FLOAT32, false);
-                attention_mask = attention_mask.toType(DataType.INT64, false);
                 GraniteDoclingDecodeResult decodeResult = decoderModel.predict(inputs_embeds, attention_mask,
                         past_key_values);
                 float[][][] logits_floats = decodeResult.logits();

@@ -86,15 +86,10 @@ public class NougatLatexDecoderModel implements AutoCloseable {
         }
     }
 
-    public List<FormulaRecognitionResult> batchPredict(float[][][] encodeResultFloats, NDManager manager) throws OrtException {
-        NDArray inputNdArray = ArrayUtil.toNDArray(manager, encodeResultFloats);
-        FloatBuffer dataBuffer = inputNdArray.toByteBuffer().asFloatBuffer();
-        long[] shape = inputNdArray.getShape().getShape();
-        OnnxTensor encoder_hidden_states_tensor = OnnxTensor.createTensor(env, dataBuffer, shape);
-
-        int batchSize = encodeResultFloats.length;
+    public List<FormulaRecognitionResult> batchPredict(OnnxTensor encoder_hidden_states) throws OrtException {
+        int batchSize = Math.toIntExact(encoder_hidden_states.getInfo().getShape()[0]);
         long[][] inputIds = new long[batchSize][];
-        for (int i = 0; i < encodeResultFloats.length; i++) {
+        for (int i = 0; i < batchSize; i++) {
             inputIds[i] = ArrayUtil.clone(new long[]{decoderStartTokenId});
         }
 
@@ -111,7 +106,7 @@ public class NougatLatexDecoderModel implements AutoCloseable {
                     new long[] {inputIds.length, inputIds[0].length});
             Map<String, OnnxTensor> inputs = new HashMap<>(2);
             inputs.put("input_ids", input_ids_tensor);
-            inputs.put("encoder_hidden_states", encoder_hidden_states_tensor);
+            inputs.put("encoder_hidden_states", encoder_hidden_states);
 
             OrtSession.Result onnxResult = session.run(inputs, outputNames);
             Optional<OnnxValue> optinalResult = onnxResult.get(List.copyOf(outputNames).get(0));
@@ -140,7 +135,6 @@ public class NougatLatexDecoderModel implements AutoCloseable {
                 }
             }
             IOUtil.close(onnxResult);
-            IOUtil.close(inputNdArray);
             IOUtil.close(input_ids_tensor);
         }
 

@@ -20,6 +20,7 @@ package io.github.flux.formula.nougat;
 import ai.djl.huggingface.tokenizers.HuggingFaceTokenizer;
 import ai.djl.ndarray.NDArray;
 import ai.djl.ndarray.NDManager;
+import ai.onnxruntime.OnnxTensor;
 import ai.onnxruntime.OrtEnvironment;
 import io.github.flux.core.BatchPredictor;
 import io.github.flux.core.FormulaRecognitionResult;
@@ -75,9 +76,8 @@ public class NougatLatexFormulaModel extends BatchPredictor<PreProcessResult, Fo
 
     @Override
     public List<FormulaRecognitionResult> doBatchPredict(List<PreProcessResult> batch, MatManager matManager, NDManager manager, Map<String, Object> extraParameters) {
-        try {
-            float[][][] encoderResults = encoderModel.batchPredict(PreProcessResult.getNDArrays(batch), manager);
-            return decoderModel.batchPredict(encoderResults, manager);
+        try (OnnxTensor encodeResult = encoderModel.batchPredict(PreProcessResult.getNDArrays(batch), manager)) {
+            return decoderModel.batchPredict(encodeResult);
         } catch (Exception e) {
             throw new FluxException(e);
         }
