@@ -10,12 +10,19 @@ import ai.onnxruntime.OrtException;
 import com.google.gson.Gson;
 
 import java.nio.FloatBuffer;
+import java.nio.LongBuffer;
 import java.util.ArrayList;
 import java.util.List;
 
 public final class ArrayUtil {
 
     private ArrayUtil() {
+    }
+
+    public static OnnxTensor createOnnxTensor(long[][] inputIds, OrtEnvironment env) throws OrtException {
+        return OnnxTensor.createTensor(env,
+                    LongBuffer.wrap(ArrayUtil.flat(inputIds)),
+                    new long[] {inputIds.length, inputIds[0].length});
     }
 
     public static int[][][] toInt3d(NDArray intArr) {
@@ -344,6 +351,13 @@ public final class ArrayUtil {
 
     public static float[][][][] createZeros(int i, int j, int k, int m) {
         return new float[Math.max(i, 1)][Math.max(j, 1)][Math.max(k, 1)][Math.max(m, 1)];
+    }
+
+    public static OnnxTensor createOnnxTensor(float[][][] data, OrtEnvironment env) throws OrtException {
+        int d1 = data.length;
+        int d2 = data[0].length;
+        int d3 = data[0][0].length;
+        return OnnxTensor.createTensor(env, FloatBuffer.wrap(flat(data)), new long[] {d1, d2, d3});
     }
 
     public static OnnxTensor createOnnxTensor(float[][][][] data, OrtEnvironment env) throws OrtException {

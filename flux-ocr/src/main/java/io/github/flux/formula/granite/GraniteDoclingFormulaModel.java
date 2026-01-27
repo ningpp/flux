@@ -67,7 +67,7 @@ public class GraniteDoclingFormulaModel extends BatchPredictor<PreProcessResult,
                                       final OrtEnvironment env,
                                       final int maxLength) {
         if (!MODEL_NAMES.contains(modelName)) {
-            throw new FluxException("not supported nougat latex model: " + modelName);
+            throw new FluxException("not supported model: " + modelName);
         }
 
         this.maxLength = maxLength;

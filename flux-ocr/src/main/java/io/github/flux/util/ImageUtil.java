@@ -755,4 +755,11 @@ public final class ImageUtil {
         return manager.create(ByteBuffer.wrap(buf), shape, DataType.UINT8);
     }
 
+    public static NDArray rgbToNDArray(Mat mat, NDManager manager) {
+        byte[] buf = new byte[mat.height() * mat.width() * mat.channels()];
+        mat.get(0, 0, buf);
+        Shape shape = new Shape(mat.height(), mat.width(), mat.channels());
+        return manager.create(ByteBuffer.wrap(buf), shape, DataType.UINT8);
+    }
+
 }
