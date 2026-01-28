@@ -13,6 +13,7 @@ import org.opencv.core.Mat;
 
 import java.io.File;
 import java.nio.file.Paths;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -54,14 +55,18 @@ public class GotOcr2Model extends BatchPredictor<PreProcessResult, TextResult> {
     }
 
     @Override
-    public List<TextResult> doBatchPredict(List<PreProcessResult> pprs, MatManager matManager, NDManager manager, Map<String, Object> extraParameters) {
+    public List<TextResult> doBatchPredict(List<PreProcessResult> pprs, MatManager matManager, NDManager ndManager, Map<String, Object> extraParameters) {
         final long image_token_index = 151859;
         String imgpadStr = "<imgpad>".repeat(256);
         String prompt = "<|im_start|>system\n"
                 + "You should follow the instructions carefully and explain your answers in detail.<|im_end|><|im_start|>user\n"
                 + "<img>" + imgpadStr + "</img>\n"
-                + " OCR with format: <|im_end|><|im_start|>assistant";
+                + " OCR with format: <|im_end|><|im_start|>assistant\n";
         long[] one_input_ids = tokenizer.encode(prompt).getIds();
+        System.out.println("\n".repeat(11));
+        System.out.println("one_input_ids");
+        System.out.println(Arrays.toString(one_input_ids));
+        System.out.println("\n".repeat(11));
         long[][] inputIds = new long[pprs.size()][];
         for (int i = 0; i < pprs.size(); i++) {
             inputIds[i] = one_input_ids;
@@ -90,8 +95,13 @@ public class GotOcr2Model extends BatchPredictor<PreProcessResult, TextResult> {
                 }
             }
 
+            List<Long> genIds = decoderModel.predict(image_features,
+                    inputIds, inputs_embeds,
+                    attentionMask, positionIds, embedModel, ndManager);
+            long[] tokens = genIds.stream().mapToLong(Long::longValue).toArray();
+            String text = tokenizer.decode(tokens);
 
-            return List.of();
+            return List.of(new TextResult(text, tokens, -1));
         } catch (Exception e) {
             throw new FluxException(e);
         }

@@ -14,7 +14,7 @@ public class GotOcr2ImageProcessor {
 
     public static NDArray process(Mat rgbMat, MatManager matManager, NDManager ndManager) {
         NDArray image = ImageUtil.rgbToNDArray(rgbMat, ndManager);
-        NDArray resized = new ResizeNdArray(1024, 1024, 3).process(matManager, List.of(image)).getFirst();
+        NDArray resized = new ResizeNdArray(1024, 1024, 2).process(matManager, List.of(image)).getFirst();
         NDArray rescaled = DeiTImageProcessor.rescale(resized, 0.00392156862745098f);
         NDArray normalized = DeiTImageProcessor.normalize(rescaled,
                 new float[]{0.48145466f, 0.4578275f, 0.40821073f},
