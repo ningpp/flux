@@ -15,12 +15,8 @@ import io.github.flux.util.IOUtil;
 import io.github.flux.util.OnnxUtil;
 
 import java.nio.FloatBuffer;
-import java.time.LocalDateTime;
-import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 public class GotOcr2DecoderModel implements AutoCloseable {
 
@@ -31,11 +27,13 @@ public class GotOcr2DecoderModel implements AutoCloseable {
 
     private final OrtEnvironment env;
     private final OrtSession session;
-    private final Set<String> outputNames;
+    private final int maxLength;
 
     public GotOcr2DecoderModel(final String modelFile,
                                final int gpuIndex,
-                               final OrtEnvironment env) {
+                               final OrtEnvironment env,
+                               final int maxLength) {
+        this.maxLength = maxLength;
         try {
             this.env = env;
             OrtSession.SessionOptions options = new OrtSession.SessionOptions();
@@ -43,13 +41,12 @@ public class GotOcr2DecoderModel implements AutoCloseable {
                 options.addCUDA(gpuIndex);
             }
             this.session = env.createSession(modelFile, options);
-            this.outputNames = session.getOutputNames();
         } catch (Exception e) {
             throw new FluxException(e);
         }
     }
 
-    public List<Long> predict(float[][][] image_features, long[][] inputIds, float[][][] inputs_embeds,
+    public long[][] predict(float[][][] image_features, long[][] inputIds, float[][][] inputs_embeds,
                               long[][] attentionMask, long[][] positionIds,
                               GotOcr2EmbedModel embedModel,
                               NDManager ndManager) throws OrtException {
@@ -63,8 +60,6 @@ public class GotOcr2DecoderModel implements AutoCloseable {
             "position_ids", ArrayUtil.createOnnxTensor(positionIds, env))
         );
         for (int i = 0; i < layer; i++) {
-            float[][][][] empty_key = ArrayUtil.createZeros(batch_size, num_heads, 0, head_dim);
-            float[][][][] empty_value = ArrayUtil.createZeros(batch_size, num_heads, 0, head_dim);
             NDArray past_key_value = ndManager.zeros(new Shape(batch_size, num_heads, 0, head_dim), DataType.FLOAT32);
             long[] past_key_value_shape = past_key_value.getShape().getShape();
             FloatBuffer past_key_value_buffer = past_key_value.toByteBuffer().asFloatBuffer();
@@ -80,20 +75,31 @@ public class GotOcr2DecoderModel implements AutoCloseable {
         }
         long stop_id = 151645;
 
-        long next_token_id = ArrayUtil.argmax(logits[0][logits[0].length - 1]);
-        List<Long> generated_ids = new ArrayList<>();
-        generated_ids.add(next_token_id);
+        long start = ArrayUtil.argmax(logits[0][logits[0].length - 1]);
+        long[][] generated_tokens = new long[batch_size][];
+        for (int i = 0; i < batch_size; i++) {
+            generated_tokens[i] = new long[] {start};
+        }
+
+        long[][] next_token_ids = new long[batch_size][];
+        for (int i = 0; i < batch_size; i++) {
+            next_token_ids[i] = new long[] {start};
+        }
 
         int curr_len = inputIds[0].length;
-        for (int i = 0; i < 32; i++) {
-            System.out.println(String.format("%6d", i) + " ".repeat(11) + LocalDateTime.now());
-            float[][][] next_embed = embedModel.predict(new long[][] { {next_token_id} });
-
+        boolean[] finished = new boolean[batch_size];
+        for (int i = 0; i < maxLength; i++) {
             curr_len += 1;
+            float[][][] next_embed = embedModel.predict(next_token_ids);
+
             Map<String, OnnxTensor> inputs = new HashMap<>();
             inputs.put("inputs_embeds", ArrayUtil.createOnnxTensor(next_embed, env));
-            inputs.put("attention_mask", ArrayUtil.createOnnxTensor(ones(1, curr_len), env));
-            inputs.put("position_ids", ArrayUtil.createOnnxTensor( new long[][] { { (long)curr_len - 1L } }, env));
+            inputs.put("attention_mask", ArrayUtil.createOnnxTensor(ones(batch_size, curr_len), env));
+            long[][] position_ids = new long[batch_size][1];
+            for (int j = 0; j < batch_size; j++) {
+                position_ids[j] = new long[] {curr_len-1};
+            }
+            inputs.put("position_ids", ArrayUtil.createOnnxTensor( position_ids, env));
             for (int j = 0; j < layer; j++) {
                 inputs.put("past_key_" + j, ArrayUtil.createOnnxTensor(pkvs[2*j], env));
                 inputs.put("past_value_" + j, ArrayUtil.createOnnxTensor(pkvs[2*j+1], env));
@@ -105,37 +111,28 @@ public class GotOcr2DecoderModel implements AutoCloseable {
             }
             IOUtil.close(step_out);
             OnnxUtil.closeTensors(inputs);
-            next_token_id = nextId(logits);
-            if (next_token_id == stop_id) {
+
+            long[][] nextIds = new long[batch_size][1];
+            for (int j = 0; j < batch_size; j++) {
+                if (finished[j]) {
+                    continue;
+                }
+                float[] lastLogit = logits[j][0];
+                long nextToken = ArrayUtil.argmax(lastLogit);
+                nextIds[j][0] = nextToken;
+
+                generated_tokens[j] = ArrayUtil.concat(generated_tokens[j], new long[] {nextToken});
+                if (nextToken == stop_id) {
+                    finished[j] = true;
+                }
+            }
+            next_token_ids = nextIds;
+
+            if (ArrayUtil.allTrue(finished)) {
                 break;
             }
-            generated_ids.add(next_token_id);
         }
-        System.out.println("\n".repeat(11));
-        System.out.println("generated_ids");
-        System.out.println(String.join(", ", generated_ids.stream().map(String::valueOf).toList()));
-        return generated_ids;
-    }
-
-    public static long[][] ones(int rows, int cols) {
-        long[][] a = new long[rows][cols];
-        for (int i = 0; i < rows; i++) {
-            for (int j = 0; j < cols; j++) a[i][j] = 1L;
-        }
-        return a;
-    }
-
-    private long nextId(float[][][] logits) {
-        float[] last = logits[0][logits[0].length - 1];
-        int nextTokenId = 0;
-        float max = last[0];
-        for (int i = 1; i < last.length; i++) {
-            if (last[i] > max) {
-                max = last[i];
-                nextTokenId = i;
-            }
-        }
-        return nextTokenId;
+        return generated_tokens;
     }
 
 }

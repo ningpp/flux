@@ -13,7 +13,7 @@ import org.opencv.core.Mat;
 
 import java.io.File;
 import java.nio.file.Paths;
-import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -63,10 +63,6 @@ public class GotOcr2Model extends BatchPredictor<PreProcessResult, TextResult> {
                 + "<img>" + imgpadStr + "</img>\n"
                 + " OCR with format: <|im_end|><|im_start|>assistant\n";
         long[] one_input_ids = tokenizer.encode(prompt).getIds();
-        System.out.println("\n".repeat(11));
-        System.out.println("one_input_ids");
-        System.out.println(Arrays.toString(one_input_ids));
-        System.out.println("\n".repeat(11));
         long[][] inputIds = new long[pprs.size()][];
         for (int i = 0; i < pprs.size(); i++) {
             inputIds[i] = one_input_ids;
@@ -95,13 +91,15 @@ public class GotOcr2Model extends BatchPredictor<PreProcessResult, TextResult> {
                 }
             }
 
-            List<Long> genIds = decoderModel.predict(image_features,
+            long[][] genIds = decoderModel.predict(image_features,
                     inputIds, inputs_embeds,
                     attentionMask, positionIds, embedModel, ndManager);
-            long[] tokens = genIds.stream().mapToLong(Long::longValue).toArray();
-            String text = tokenizer.decode(tokens);
-
-            return List.of(new TextResult(text, tokens, -1));
+            List<TextResult> textResults = new ArrayList<>();
+            for (long[] tokens : genIds) {
+                String text = tokenizer.decode(tokens);
+                textResults.add(new TextResult(text, tokens, -1));
+            }
+            return textResults;
         } catch (Exception e) {
             throw new FluxException(e);
         }
@@ -110,17 +108,18 @@ public class GotOcr2Model extends BatchPredictor<PreProcessResult, TextResult> {
     private void prepare_inputs_embeds(long[][] inputIds, long image_token_index,
                                        float[][][] image_features,
                                        float[][][] inputs_embeds) {
-        int batchIndex = 0; // 对应 Python 中的 [0]
+        int batchSize = inputIds.length;
+        int seqLen = inputIds[0].length;
 
-        // 先遍历 inputIds[0]，找到 image token 的位置
-        int imageFeatureIndex = 0;
+        for (int i = 0; i < batchSize; i++) {
+            int imageFeatureIdx = 0; // 对应 Python 里的 j
 
-        for (int pos = 0; pos < inputIds[batchIndex].length; pos++) {
-            if (inputIds[batchIndex][pos] == image_token_index) {
-                // inputs_embeds[0, pos] = image_features[0, i]
-                inputs_embeds[batchIndex][pos] =
-                        image_features[batchIndex][imageFeatureIndex];
-                imageFeatureIndex++;
+            for (int pos = 0; pos < seqLen; pos++) {
+                if (inputIds[i][pos] == image_token_index) {
+                    // inputs_embeds[i, pos] = image_features[i, j]
+                    inputs_embeds[i][pos] = image_features[i][imageFeatureIdx];
+                    imageFeatureIdx++;
+                }
             }
         }
     }

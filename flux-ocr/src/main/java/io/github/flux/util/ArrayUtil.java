@@ -19,6 +19,14 @@ public final class ArrayUtil {
     private ArrayUtil() {
     }
 
+    public static long[][] ones(int rows, int cols) {
+        long[][] a = new long[rows][cols];
+        for (int i = 0; i < rows; i++) {
+            for (int j = 0; j < cols; j++) a[i][j] = 1L;
+        }
+        return a;
+    }
+
     public static OnnxTensor createOnnxTensor(long[][] inputIds, OrtEnvironment env) throws OrtException {
         return OnnxTensor.createTensor(env,
                     LongBuffer.wrap(ArrayUtil.flat(inputIds)),
