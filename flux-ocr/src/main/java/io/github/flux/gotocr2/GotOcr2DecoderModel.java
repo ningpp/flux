@@ -94,7 +94,7 @@ public class GotOcr2DecoderModel implements AutoCloseable {
 
             Map<String, OnnxTensor> inputs = new HashMap<>();
             inputs.put("inputs_embeds", ArrayUtil.createOnnxTensor(next_embed, env));
-            inputs.put("attention_mask", ArrayUtil.createOnnxTensor(ones(batch_size, curr_len), env));
+            inputs.put("attention_mask", ArrayUtil.createOnnxTensor(ArrayUtil.ones(batch_size, curr_len), env));
             long[][] position_ids = new long[batch_size][1];
             for (int j = 0; j < batch_size; j++) {
                 position_ids[j] = new long[] {curr_len-1};

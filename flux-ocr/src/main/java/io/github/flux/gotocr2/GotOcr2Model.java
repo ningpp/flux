@@ -47,7 +47,8 @@ public class GotOcr2Model extends BatchPredictor<PreProcessResult, TextResult> {
             this.decoderModel = new GotOcr2DecoderModel(
                     new File(modelDir, "decoder_model.onnx").getAbsolutePath(),
                     gpuIndex,
-                    env
+                    env,
+                    4096
             );
         } catch (Exception e) {
             throw new FluxException(e);
