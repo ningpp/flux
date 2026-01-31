@@ -60,6 +60,7 @@ public class GraniteDoclingFormulaModel extends BatchPredictor<PreProcessResult,
     private final int maxLength;
     private final long eos_token_id;
     private final String query;
+    private final String chat_template;
 
     public GraniteDoclingFormulaModel(final String modelRootDir,
                                       final String modelName,
@@ -71,7 +72,11 @@ public class GraniteDoclingFormulaModel extends BatchPredictor<PreProcessResult,
         }
 
         this.maxLength = maxLength;
-
+        if ("CodeFormulaV2".equals(modelName)) {
+            chat_template = "<|start_of_role|>user<|end_of_role|><image>%s<|end_of_text|>\n<|start_of_role|>assistant:";
+        } else {
+            chat_template = "<|start_of_role|>user<|end_of_role|><image>%s<|end_of_text|>\n<|start_of_role|>assistant<|end_of_role|>";
+        }
         if ("CodeFormulaV2".equals(modelName)) {
             this.eos_token_id = 100338;
             this.query = "<formula>";
@@ -105,7 +110,7 @@ public class GraniteDoclingFormulaModel extends BatchPredictor<PreProcessResult,
     public List<FormulaRecognitionResult> doBatchPredict(List<PreProcessResult> mats, MatManager matManager, NDManager manager, Map<String, Object> extraParameters) {
         List<FormulaRecognitionResult> results = new ArrayList<>();
         for (PreProcessResult ppr : mats) {
-            results.add(_predict(matManager, ppr.mat(), manager));
+            results.add(_predict(chat_template, matManager, ppr.mat(), manager));
         }
         return results;
     }
@@ -115,7 +120,7 @@ public class GraniteDoclingFormulaModel extends BatchPredictor<PreProcessResult,
         return new PreProcessResult(rgbMat, null);
     }
 
-    private FormulaRecognitionResult _predict(MatManager matManager, Mat image, NDManager manager) {
+    private FormulaRecognitionResult _predict(String chat_template, MatManager matManager, Mat image, NDManager manager) {
         try {
             long image_token_id = 100270;
             int num_hidden_layers = 30;
@@ -132,7 +137,7 @@ public class GraniteDoclingFormulaModel extends BatchPredictor<PreProcessResult,
             }
 
             NDArray imgNdArray = ImageUtil.toNDArrayUint8(image, manager);
-            String requestText = Idefics3Processor.apply_chat_template(query);
+            String requestText = Idefics3Processor.apply_chat_template(chat_template, query);
             // cost ~40ms
             Idefics3PreProcessResult preResult = Idefics3ImageProcessor.process(tokenizer, requestText, matManager, imgNdArray, manager);
             long[] input_ids_long = preResult.input_ids();
