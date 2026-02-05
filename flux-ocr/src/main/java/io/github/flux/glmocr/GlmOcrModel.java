@@ -18,9 +18,8 @@ package io.github.flux.glmocr;
 import ai.djl.huggingface.tokenizers.HuggingFaceTokenizer;
 import ai.djl.ndarray.NDManager;
 import ai.onnxruntime.OrtEnvironment;
-import io.github.flux.core.BatchPredictor;
+import ai.onnxruntime.OrtException;
 import io.github.flux.core.MatManager;
-import io.github.flux.core.PreProcessResult;
 import io.github.flux.core.TextResult;
 import io.github.flux.exception.FluxException;
 import io.github.flux.util.IOUtil;
@@ -30,14 +29,13 @@ import java.io.File;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 
 /**
  * GLM-OCR Model for end-to-end document OCR.
  * 
  * Uses a vision-language architecture with:
- * - Vision encoder for image feature extraction
+ * - Vision encoder for image feature extraction (unique patch-based input)
  * - Embedding model for token embeddings
  * - Unified LLM decoder with KV-cache for autoregressive generation
  * 
@@ -47,16 +45,16 @@ import java.util.Set;
  * - llm_unified.onnx: Unified LLM decoder model (or llm_unified_fp16.onnx for FP16)
  * - tokenizer.json: HuggingFace tokenizer config
  */
-public class GlmOcrModel extends BatchPredictor<PreProcessResult, TextResult> {
+public class GlmOcrModel implements AutoCloseable {
 
     public static final Set<String> MODEL_NAMES = Set.of(
             "GLM-OCR"
     );
 
-    private static final int IMAGE_TOKEN_ID = 151329;  // <|begin_of_image|>
-    private static final int IMAGE_PAD_TOKEN_ID = 151330;  // <|image_pad|>
-    private static final int END_IMAGE_TOKEN_ID = 151331;  // <|end_of_image|>
-    private static final int NUM_IMAGE_TOKENS = 256;  // Number of image token placeholders
+    // Token IDs for GLM-OCR
+    private static final long IMAGE_PAD_TOKEN_ID = 151330L;  // <|image_pad|>
+    private static final long EOS_TOKEN_ID = 151643L;        // End of sequence
+    private static final int NUM_IMAGE_TOKENS = 256;         // Number of image token placeholders
     
     private final GlmOcrVisionEncoderModel encoderModel;
     private final GlmOcrEmbedModel embedModel;
@@ -120,87 +118,111 @@ public class GlmOcrModel extends BatchPredictor<PreProcessResult, TextResult> {
         }
     }
 
-    @Override
-    public List<TextResult> doBatchPredict(List<PreProcessResult> pprs,
-                                           MatManager matManager,
-                                           NDManager ndManager,
-                                           Map<String, Object> extraParameters) {
-        // Build prompt with image placeholders
-        String imgPadStr = "<|image_pad|>".repeat(NUM_IMAGE_TOKENS);
-        String prompt = "<|system|>\nYou are an OCR assistant. Extract all text from the image.<|end|>\n"
-                + "<|user|>\n<|begin_of_image|>" + imgPadStr + "<|end_of_image|>\n"
-                + "Please perform OCR on this image and return all text content.<|end|>\n"
-                + "<|assistant|>\n";
-        
-        long[] oneInputIds = tokenizer.encode(prompt).getIds();
-        long[][] inputIds = new long[pprs.size()][];
-        for (int i = 0; i < pprs.size(); i++) {
-            inputIds[i] = oneInputIds.clone();
-        }
-
+    /**
+     * Perform OCR on a single image.
+     *
+     * @param rgbMat input RGB image
+     * @param matManager OpenCV Mat resource manager
+     * @param ndManager NDArray manager
+     * @param prompt OCR prompt (e.g., "OCR:")
+     * @return OCR result text
+     */
+    public TextResult predict(Mat rgbMat, MatManager matManager, NDManager ndManager, String prompt) {
         try {
-            // Encode images
-            float[][][] imageFeatures = encoderModel.predict(PreProcessResult.getNDArrays(pprs));
+            // Preprocess image
+            GlmOcrImageProcessor.PreprocessResult ppResult = 
+                    GlmOcrImageProcessor.process(rgbMat, matManager, ndManager);
+            
+            // Encode image
+            float[][] imageFeatures = encoderModel.predict(ppResult.pixelValues, ppResult.imageGridThw);
+            
+            // Build prompt with image placeholders
+            String imgPadStr = "<|image_pad|>".repeat(imageFeatures.length);  // One per output token
+            String fullPrompt = "<|system|>\nYou are an OCR assistant.<|end|>\n"
+                    + "<|user|>\n<|begin_of_image|>" + imgPadStr + "<|end_of_image|>\n"
+                    + prompt + "<|end|>\n"
+                    + "<|assistant|>\n";
+            
+            // Tokenize prompt
+            long[] inputIds = tokenizer.encode(fullPrompt).getIds();
             
             // Get text embeddings
-            float[][][] inputsEmbeds = embedModel.predict(inputIds);
+            float[][][] inputsEmbeds = embedModel.predict(new long[][]{inputIds});
             
-            // Merge image features into embeddings at image token positions
-            prepareInputsEmbeds(inputIds, IMAGE_PAD_TOKEN_ID, imageFeatures, inputsEmbeds);
-
+            // Merge image features into embeddings at image pad token positions
+            mergeImageFeatures(inputIds, inputsEmbeds[0], imageFeatures);
+            
             // Generate output tokens
             long[][] genIds = decoderModel.predict(
-                    imageFeatures,
-                    inputIds,
+                    new float[][][]{expandToHidden(imageFeatures)},  // Wrap for batch
+                    new long[][]{inputIds},
                     inputsEmbeds,
                     embedModel,
                     ndManager
             );
-
+            
             // Decode tokens to text
-            List<TextResult> textResults = new ArrayList<>();
-            for (long[] tokens : genIds) {
-                String text = tokenizer.decode(tokens);
-                textResults.add(new TextResult(text, tokens, -1));
-            }
-            return textResults;
-        } catch (Exception e) {
+            String text = tokenizer.decode(genIds[0]);
+            return new TextResult(text, genIds[0], -1);
+            
+        } catch (OrtException e) {
             throw new FluxException(e);
         }
     }
 
     /**
-     * Merge image features into text embeddings at image pad token positions.
-     *
-     * @param inputIds input token IDs
-     * @param imageTokenIndex the token ID for image padding
-     * @param imageFeatures vision encoder outputs [batch, num_patches, hidden]
-     * @param inputsEmbeds text embeddings to be modified in-place [batch, seq_len, hidden]
+     * Perform OCR on a single image with default prompt.
      */
-    private void prepareInputsEmbeds(long[][] inputIds,
-                                     long imageTokenIndex,
-                                     float[][][] imageFeatures,
-                                     float[][][] inputsEmbeds) {
-        int batchSize = inputIds.length;
-        int seqLen = inputIds[0].length;
+    public TextResult predict(Mat rgbMat, MatManager matManager, NDManager ndManager) {
+        return predict(rgbMat, matManager, ndManager, "OCR:");
+    }
 
-        for (int i = 0; i < batchSize; i++) {
-            int imageFeatureIdx = 0;
-            for (int pos = 0; pos < seqLen; pos++) {
-                if (inputIds[i][pos] == imageTokenIndex) {
-                    // Replace text embedding with image feature
-                    if (imageFeatureIdx < imageFeatures[i].length) {
-                        inputsEmbeds[i][pos] = imageFeatures[i][imageFeatureIdx];
-                        imageFeatureIdx++;
-                    }
+    /**
+     * Perform batch OCR on multiple images.
+     * Note: Due to variable sequence lengths, images are processed sequentially.
+     *
+     * @param images list of RGB images
+     * @param matManager OpenCV Mat resource manager
+     * @param ndManager NDArray manager
+     * @param prompt OCR prompt
+     * @return list of OCR results
+     */
+    public List<TextResult> batchPredict(List<Mat> images, MatManager matManager, NDManager ndManager, String prompt) {
+        List<TextResult> results = new ArrayList<>();
+        for (Mat image : images) {
+            results.add(predict(image, matManager, ndManager, prompt));
+        }
+        return results;
+    }
+
+    /**
+     * Merge image features into text embeddings at image pad token positions.
+     */
+    private void mergeImageFeatures(long[] inputIds, float[][] inputsEmbeds, float[][] imageFeatures) {
+        int imageFeatureIdx = 0;
+        for (int pos = 0; pos < inputIds.length; pos++) {
+            if (inputIds[pos] == IMAGE_PAD_TOKEN_ID) {
+                if (imageFeatureIdx < imageFeatures.length) {
+                    // Copy image features to embedding position
+                    System.arraycopy(imageFeatures[imageFeatureIdx], 0, 
+                            inputsEmbeds[pos], 0, 
+                            Math.min(imageFeatures[imageFeatureIdx].length, inputsEmbeds[pos].length));
+                    imageFeatureIdx++;
                 }
             }
         }
     }
 
-    @Override
-    public PreProcessResult processRgb(MatManager matManager, Mat rgbMat, NDManager ndManager) {
-        return new PreProcessResult(null, GlmOcrImageProcessor.process(rgbMat, matManager, ndManager));
+    /**
+     * Expand 2D image features to 3D format expected by decoder.
+     */
+    private float[][][] expandToHidden(float[][] imageFeatures) {
+        // [num_tokens, hidden] -> [1, num_tokens, hidden] for batch=1
+        float[][][] result = new float[1][imageFeatures.length][imageFeatures[0].length];
+        for (int i = 0; i < imageFeatures.length; i++) {
+            System.arraycopy(imageFeatures[i], 0, result[0][i], 0, imageFeatures[i].length);
+        }
+        return result;
     }
 
     @Override
