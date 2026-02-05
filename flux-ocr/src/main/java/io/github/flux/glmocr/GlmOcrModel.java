@@ -62,7 +62,7 @@ public class GlmOcrModel implements AutoCloseable {
     
     private final GlmOcrVisionEncoderModel encoderModel;
     private final GlmOcrEmbedModel embedModel;
-    private final GlmOcrDecoderModelUnified decoderModel;
+    private final GlmOcrDecoderModel decoderModel;
     private final HuggingFaceTokenizer tokenizer;
 
     /**
@@ -112,12 +112,13 @@ public class GlmOcrModel implements AutoCloseable {
                     new File(modelDir, "embedding.onnx").getAbsolutePath(),
                     gpuIndex, env);
             
-            // Use unified model for lower memory (single model instead of prefill + decode)
-            this.decoderModel = new GlmOcrDecoderModelUnified(
-                    new File(modelDir, "llm_unified.onnx").getAbsolutePath(),
+            // Use separate prefill and decode models for better CUDA compatibility
+            this.decoderModel = new GlmOcrDecoderModel(
+                    new File(modelDir, "llm_prefill.onnx").getAbsolutePath(),
+                    new File(modelDir, "llm_decode.onnx").getAbsolutePath(),
                     gpuIndex,
                     env,
-                    64  // max length
+                    131072  // max length
             );
             
             this.tokenizer = HuggingFaceTokenizer.newInstance(Paths.get(modelDir));

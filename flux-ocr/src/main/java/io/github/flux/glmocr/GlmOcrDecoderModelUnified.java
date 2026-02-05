@@ -275,7 +275,11 @@ public class GlmOcrDecoderModelUnified implements AutoCloseable {
         int d1 = data.length;
         int d2 = data[0].length;
         int d3 = data[0][0].length;
-        int d4 = (d3 > 0) ? data[0][0][0].length : HEAD_DIM;
+        int d4 = HEAD_DIM;
+        // Handle empty cache (d3 == 0)
+        if (d3 == 0) {
+            return OnnxTensor.createTensor(env, FloatBuffer.wrap(new float[0]), new long[]{d1, d2, 0, d4});
+        }
         float[] flat = ArrayUtil.flat(data);
         return OnnxTensor.createTensor(env, FloatBuffer.wrap(flat), new long[]{d1, d2, d3, d4});
     }
