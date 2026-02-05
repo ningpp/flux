@@ -130,7 +130,8 @@ public class GlmOcrDecoderModel implements AutoCloseable {
         OnnxUtil.closeTensors(prefillInputs);
 
         // Get first predicted token from prefill
-        long eosTokenId = 151643L;  // GLM-OCR EOS token
+        long eosTokenId = 59246L;  // GLM-OCR EOS token <|endoftext|>
+        long userTokenId = 59253L;  // <|user|> - also signals end of response
         long start = ArrayUtil.argmax(logits[0][logits[0].length - 1]);
 
         long[][] generatedTokens = new long[batchSize][];
@@ -148,7 +149,7 @@ public class GlmOcrDecoderModel implements AutoCloseable {
 
         // Check if already finished
         for (int i = 0; i < batchSize; i++) {
-            if (start == eosTokenId) {
+            if (start == eosTokenId || start == userTokenId) {
                 finished[i] = true;
             }
         }
@@ -160,8 +161,6 @@ public class GlmOcrDecoderModel implements AutoCloseable {
             if (ArrayUtil.allTrue(finished)) {
                 break;
             }
-            System.out.println(String.format("%6d", step) + " ".repeat(11) + java.time.LocalDateTime.now());
-
             currLen += 1;
 
             // Get embeddings for next tokens
@@ -212,7 +211,7 @@ public class GlmOcrDecoderModel implements AutoCloseable {
                 nextIds[j][0] = nextToken;
 
                 generatedTokens[j] = ArrayUtil.concat(generatedTokens[j], new long[]{nextToken});
-                if (nextToken == eosTokenId) {
+                if (nextToken == eosTokenId || nextToken == userTokenId) {
                     finished[j] = true;
                 }
             }

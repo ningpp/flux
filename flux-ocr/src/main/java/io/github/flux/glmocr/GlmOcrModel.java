@@ -118,7 +118,7 @@ public class GlmOcrModel implements AutoCloseable {
                     new File(modelDir, "llm_decode.onnx").getAbsolutePath(),
                     gpuIndex,
                     env,
-                    32  // max length
+                    64  // max length
             );
             
             this.tokenizer = HuggingFaceTokenizer.newInstance(Paths.get(modelDir));
