@@ -52,9 +52,13 @@ public class GlmOcrModel implements AutoCloseable {
     );
 
     // Token IDs for GLM-OCR
-    private static final long IMAGE_PAD_TOKEN_ID = 151330L;  // <|image_pad|>
+    private static final long IMAGE_TOKEN_ID = 59280L;       // <|image|>
+    private static final long BEGIN_IMAGE_TOKEN_ID = 59256L; // <|begin_of_image|>
+    private static final long END_IMAGE_TOKEN_ID = 59257L;   // <|end_of_image|>
     private static final long EOS_TOKEN_ID = 151643L;        // End of sequence
-    private static final int NUM_IMAGE_TOKENS = 256;         // Number of image token placeholders
+    
+    // Merge size for calculating number of image tokens
+    private static final int MERGE_SIZE = 2;
     
     private final GlmOcrVisionEncoderModel encoderModel;
     private final GlmOcrEmbedModel embedModel;
@@ -83,7 +87,7 @@ public class GlmOcrModel implements AutoCloseable {
      * @param modelName model name (e.g., "GLM-OCR")
      * @param gpuIndex GPU index (-1 for CPU)
      * @param env ONNX Runtime environment
-     * @param useFp16 whether to use FP16 model for reduced memory
+     * @param useFp16 whether to use FP16 model for reduced memory (currently not supported)
      */
     public GlmOcrModel(final String modelRootDir,
                        final String modelName,
@@ -92,6 +96,10 @@ public class GlmOcrModel implements AutoCloseable {
                        final boolean useFp16) {
         if (!MODEL_NAMES.contains(modelName)) {
             throw new FluxException("not supported model: " + modelName);
+        }
+        
+        if (useFp16) {
+            System.err.println("Warning: FP16 mode not yet supported, using FP32 models");
         }
 
         final String modelDir = modelRootDir + File.separator + modelName;
@@ -104,12 +112,13 @@ public class GlmOcrModel implements AutoCloseable {
                     new File(modelDir, "embedding.onnx").getAbsolutePath(),
                     gpuIndex, env);
             
-            String llmModelName = useFp16 ? "llm_unified_fp16.onnx" : "llm_unified.onnx";
+            // Use separate prefill and decode models (unified model has fixed seq_len=1)
             this.decoderModel = new GlmOcrDecoderModel(
-                    new File(modelDir, llmModelName).getAbsolutePath(),
+                    new File(modelDir, "llm_prefill.onnx").getAbsolutePath(),
+                    new File(modelDir, "llm_decode.onnx").getAbsolutePath(),
                     gpuIndex,
                     env,
-                    4096  // max length
+                    32  // max length
             );
             
             this.tokenizer = HuggingFaceTokenizer.newInstance(Paths.get(modelDir));
@@ -136,12 +145,16 @@ public class GlmOcrModel implements AutoCloseable {
             // Encode image
             float[][] imageFeatures = encoderModel.predict(ppResult.pixelValues, ppResult.imageGridThw);
             
-            // Build prompt with image placeholders
-            String imgPadStr = "<|image_pad|>".repeat(imageFeatures.length);  // One per output token
-            String fullPrompt = "<|system|>\nYou are an OCR assistant.<|end|>\n"
-                    + "<|user|>\n<|begin_of_image|>" + imgPadStr + "<|end_of_image|>\n"
-                    + prompt + "<|end|>\n"
-                    + "<|assistant|>\n";
+            // Calculate number of image tokens after merging
+            // Python: num_image_tokens = (h_patches / merge_size) * (w_patches / merge_size)
+            int hPatches = ppResult.imageGridThw[1];
+            int wPatches = ppResult.imageGridThw[2];
+            int numImageTokens = (hPatches / MERGE_SIZE) * (wPatches / MERGE_SIZE);
+            
+            // Build prompt with correct number of image placeholders
+            String imgPadStr = "<|image|>".repeat(numImageTokens);
+            String fullPrompt = "[gMASK]<sop><|user|>\n"
+                    + "<|begin_of_image|>" + imgPadStr + "<|end_of_image|>" + prompt + "<|assistant|>\n";
             
             // Tokenize prompt
             long[] inputIds = tokenizer.encode(fullPrompt).getIds();
@@ -154,7 +167,7 @@ public class GlmOcrModel implements AutoCloseable {
             
             // Generate output tokens
             long[][] genIds = decoderModel.predict(
-                    new float[][][]{expandToHidden(imageFeatures)},  // Wrap for batch
+                    expandToHidden(imageFeatures),  // Wrap for batch
                     new long[][]{inputIds},
                     inputsEmbeds,
                     embedModel,
@@ -201,7 +214,7 @@ public class GlmOcrModel implements AutoCloseable {
     private void mergeImageFeatures(long[] inputIds, float[][] inputsEmbeds, float[][] imageFeatures) {
         int imageFeatureIdx = 0;
         for (int pos = 0; pos < inputIds.length; pos++) {
-            if (inputIds[pos] == IMAGE_PAD_TOKEN_ID) {
+            if (inputIds[pos] == IMAGE_TOKEN_ID) {
                 if (imageFeatureIdx < imageFeatures.length) {
                     // Copy image features to embedding position
                     System.arraycopy(imageFeatures[imageFeatureIdx], 0, 

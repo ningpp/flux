@@ -15,10 +15,7 @@
  */
 package io.github.flux.glmocr;
 
-import ai.djl.ndarray.NDArray;
 import ai.djl.ndarray.NDManager;
-import ai.djl.ndarray.types.DataType;
-import ai.djl.ndarray.types.Shape;
 import ai.onnxruntime.OnnxTensor;
 import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtException;
@@ -35,23 +32,36 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Unified LLM decoder model for GLM-OCR.
- * Handles both prefill and decode phases with KV-cache.
+ * LLM decoder for GLM-OCR using separate prefill and decode models.
+ * 
+ * The prefill model has dynamic sequence length and is used for initial prompt processing.
+ * The decode model has fixed seq_len=1 and is used for autoregressive token generation.
  * 
  * GLM-OCR specific: Uses 3D position_ids [3, batch, seq_len] for rotary embeddings.
  */
 public class GlmOcrDecoderModel implements AutoCloseable {
 
     private final OrtEnvironment env;
-    private final OrtSession session;
+    private final OrtSession prefillSession;
+    private final OrtSession decodeSession;
     private final int maxLength;
-    
+
     // Model architecture constants
     private static final int NUM_LAYERS = 16;
     private static final int NUM_KV_HEADS = 8;
     private static final int HEAD_DIM = 128;
 
-    public GlmOcrDecoderModel(final String modelFile,
+    /**
+     * Create decoder model with separate prefill and decode sessions.
+     *
+     * @param prefillModelFile path to llm_prefill.onnx
+     * @param decodeModelFile path to llm_decode.onnx
+     * @param gpuIndex GPU index (-1 for CPU)
+     * @param env ONNX Runtime environment
+     * @param maxLength maximum generation length
+     */
+    public GlmOcrDecoderModel(final String prefillModelFile,
+                              final String decodeModelFile,
                               final int gpuIndex,
                               final OrtEnvironment env,
                               final int maxLength) {
@@ -62,7 +72,8 @@ public class GlmOcrDecoderModel implements AutoCloseable {
             if (gpuIndex > -1) {
                 options.addCUDA(gpuIndex);
             }
-            this.session = env.createSession(modelFile, options);
+            this.prefillSession = env.createSession(prefillModelFile, options);
+            this.decodeSession = env.createSession(decodeModelFile, options);
         } catch (Exception e) {
             throw new FluxException(e);
         }
@@ -71,7 +82,7 @@ public class GlmOcrDecoderModel implements AutoCloseable {
     /**
      * Generate tokens autoregressively.
      *
-     * @param imageFeatures vision encoder output [batch, num_patches, hidden]
+     * @param imageFeatures vision encoder output [batch, num_patches, hidden] (unused, for API compat)
      * @param inputIds initial input token IDs [batch][seq_len]
      * @param inputsEmbeds initial embeddings with image features merged [batch][seq_len][hidden]
      * @param embedModel embedding model for decoding new tokens
@@ -83,14 +94,13 @@ public class GlmOcrDecoderModel implements AutoCloseable {
                             float[][][] inputsEmbeds,
                             GlmOcrEmbedModel embedModel,
                             NDManager ndManager) throws OrtException {
-        int batchSize = imageFeatures.length;
-        int seqLen = inputIds[0].length;
+        int batchSize = inputsEmbeds.length;
+        int seqLen = inputsEmbeds[0].length;
 
         // Create attention mask [batch, seq_len]
         long[][] attentionMask = ArrayUtil.ones(batchSize, seqLen);
 
         // Create position_ids [3, batch, seq_len] for GLM-OCR's rotary embeddings
-        // [position, block_position, is_image] format
         long[][][] positionIds = new long[3][batchSize][seqLen];
         for (int b = 0; b < batchSize; b++) {
             for (int i = 0; i < seqLen; i++) {
@@ -100,35 +110,29 @@ public class GlmOcrDecoderModel implements AutoCloseable {
             }
         }
 
-        // Initialize empty KV cache
+        // Prefill inputs (no KV cache needed for prefill model)
         Map<String, OnnxTensor> prefillInputs = new HashMap<>();
-        prefillInputs.put("inputs_embeds", ArrayUtil.createOnnxTensor(inputsEmbeds, env));
+        prefillInputs.put("inputs_embeds", createFloatTensor3D(inputsEmbeds));
         prefillInputs.put("attention_mask", ArrayUtil.createOnnxTensor(attentionMask, env));
         prefillInputs.put("position_ids", createPositionIdsTensor(positionIds));
-        
-        // Add empty KV cache for prefill
+
+        // Prefill phase - get initial logits and KV cache
+        Result prefillResult = prefillSession.run(prefillInputs);
+        float[][][] logits = (float[][][]) prefillResult.get(0).getValue();
+
+        // Extract KV cache from prefill output: present_key_0, present_value_0, ...
+        float[][][][][] pkvs = new float[NUM_LAYERS * 2][][][][];
         for (int i = 0; i < NUM_LAYERS; i++) {
-            NDArray emptyKV = ndManager.zeros(new Shape(batchSize, NUM_KV_HEADS, 0, HEAD_DIM), DataType.FLOAT32);
-            FloatBuffer buffer = emptyKV.toByteBuffer().asFloatBuffer();
-            long[] shape = emptyKV.getShape().getShape();
-            prefillInputs.put("past_key_" + i, OnnxTensor.createTensor(env, buffer, shape));
-            prefillInputs.put("past_value_" + i, OnnxTensor.createTensor(env, buffer, shape));
+            pkvs[2 * i] = (float[][][][]) prefillResult.get(2 * i + 1).getValue();      // present_key_i
+            pkvs[2 * i + 1] = (float[][][][]) prefillResult.get(2 * i + 2).getValue();  // present_value_i
         }
 
-        // Prefill phase
-        Result prefillResult = session.run(prefillInputs);
-        float[][][] logits = (float[][][]) prefillResult.get(0).getValue();
-        
-        // Extract KV cache from prefill output
-        float[][][][][] pkvs = new float[NUM_LAYERS * 2][][][][];
-        for (int i = 0; i < NUM_LAYERS * 2; i++) {
-            pkvs[i] = (float[][][][]) prefillResult.get(i + 1).getValue();
-        }
+        OnnxUtil.closeTensors(prefillInputs);
 
         // Get first predicted token from prefill
         long eosTokenId = 151643L;  // GLM-OCR EOS token
         long start = ArrayUtil.argmax(logits[0][logits[0].length - 1]);
-        
+
         long[][] generatedTokens = new long[batchSize][];
         for (int i = 0; i < batchSize; i++) {
             generatedTokens[i] = new long[]{start};
@@ -149,23 +153,26 @@ public class GlmOcrDecoderModel implements AutoCloseable {
             }
         }
 
+        IOUtil.close(prefillResult);
+
         // Autoregressive decode loop
         for (int step = 0; step < maxLength; step++) {
             if (ArrayUtil.allTrue(finished)) {
                 break;
             }
+            System.out.println(String.format("%6d", step) + " ".repeat(11) + java.time.LocalDateTime.now());
 
             currLen += 1;
-            
+
             // Get embeddings for next tokens
             float[][][] nextEmbed = embedModel.predict(nextTokenIds);
 
             Map<String, OnnxTensor> decodeInputs = new HashMap<>();
-            decodeInputs.put("inputs_embeds", ArrayUtil.createOnnxTensor(nextEmbed, env));
-            
+            decodeInputs.put("inputs_embeds", createFloatTensor3D(nextEmbed));
+
             // Update attention mask for current length
             decodeInputs.put("attention_mask", ArrayUtil.createOnnxTensor(ArrayUtil.ones(batchSize, currLen), env));
-            
+
             // Position IDs for single token decode: [3, batch, 1]
             long[][][] nextPosIds = new long[3][batchSize][1];
             for (int b = 0; b < batchSize; b++) {
@@ -177,18 +184,19 @@ public class GlmOcrDecoderModel implements AutoCloseable {
 
             // Add KV cache from previous step
             for (int j = 0; j < NUM_LAYERS; j++) {
-                decodeInputs.put("past_key_" + j, ArrayUtil.createOnnxTensor(pkvs[2 * j], env));
-                decodeInputs.put("past_value_" + j, ArrayUtil.createOnnxTensor(pkvs[2 * j + 1], env));
+                decodeInputs.put("past_key_" + j, createFloatTensor4D(pkvs[2 * j]));
+                decodeInputs.put("past_value_" + j, createFloatTensor4D(pkvs[2 * j + 1]));
             }
 
-            Result stepOut = session.run(decodeInputs);
+            Result stepOut = decodeSession.run(decodeInputs);
             logits = (float[][][]) stepOut.get(0).getValue();
-            
-            // Update KV cache
-            for (int o = 0; o < NUM_LAYERS * 2; o++) {
-                pkvs[o] = (float[][][][]) stepOut.get(o + 1).getValue();
+
+            // Update KV cache: decode model outputs present_key_i, present_value_i
+            for (int i = 0; i < NUM_LAYERS; i++) {
+                pkvs[2 * i] = (float[][][][]) stepOut.get(2 * i + 1).getValue();
+                pkvs[2 * i + 1] = (float[][][][]) stepOut.get(2 * i + 2).getValue();
             }
-            
+
             IOUtil.close(stepOut);
             OnnxUtil.closeTensors(decodeInputs);
 
@@ -215,13 +223,36 @@ public class GlmOcrDecoderModel implements AutoCloseable {
     }
 
     /**
+     * Create a 3D float tensor.
+     */
+    private OnnxTensor createFloatTensor3D(float[][][] data) throws OrtException {
+        int d1 = data.length;
+        int d2 = data[0].length;
+        int d3 = data[0][0].length;
+        float[] flat = ArrayUtil.flat(data);
+        return OnnxTensor.createTensor(env, FloatBuffer.wrap(flat), new long[]{d1, d2, d3});
+    }
+
+    /**
+     * Create a 4D float tensor.
+     */
+    private OnnxTensor createFloatTensor4D(float[][][][] data) throws OrtException {
+        int d1 = data.length;
+        int d2 = data[0].length;
+        int d3 = data[0][0].length;
+        int d4 = data[0][0][0].length;
+        float[] flat = ArrayUtil.flat(data);
+        return OnnxTensor.createTensor(env, FloatBuffer.wrap(flat), new long[]{d1, d2, d3, d4});
+    }
+
+    /**
      * Create position_ids tensor with shape [3, batch, seq_len]
      */
     private OnnxTensor createPositionIdsTensor(long[][][] positionIds) throws OrtException {
         int d1 = positionIds.length;        // 3
         int d2 = positionIds[0].length;     // batch
         int d3 = positionIds[0][0].length;  // seq_len
-        
+
         long[] flat = new long[d1 * d2 * d3];
         int idx = 0;
         for (int i = 0; i < d1; i++) {
@@ -236,6 +267,7 @@ public class GlmOcrDecoderModel implements AutoCloseable {
 
     @Override
     public void close() throws Exception {
-        session.close();
+        prefillSession.close();
+        decodeSession.close();
     }
 }

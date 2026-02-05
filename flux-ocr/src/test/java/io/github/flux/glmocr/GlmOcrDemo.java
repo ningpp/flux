@@ -22,20 +22,31 @@ import io.github.flux.core.TextResult;
 import io.github.flux.util.ImageUtil;
 import org.opencv.core.Mat;
 
+import java.util.Arrays;
+
 /**
  * Demo for GLM-OCR ONNX inference.
  */
 public class GlmOcrDemo {
 
+    public static void main1(String[] args) throws Exception {
+        String imagePath = args.length > 0 ? args[0] : "D:\\tmp\\formula_2025-8-2_17-28-16.jpg";
+        try (OrtEnvironment env = OrtEnvironment.getEnvironment();
+             MatManager matManager = new MatManager();
+             NDManager ndManager = NDManager.newBaseManager()) {
+            Mat rgbMat = ImageUtil.readToRgb(matManager, imagePath);
+            GlmOcrImageProcessor.PreprocessResult ppResult =
+                    GlmOcrImageProcessor.process(rgbMat, matManager, ndManager);
+            System.out.println(ppResult);
+        }
+    }
+
     public static void main(String[] args) throws Exception {
-        // Load OpenCV native library
-        nu.pattern.OpenCV.loadLocally();
-        
         // Model and image paths
         String modelRootDir = "D:\\models\\onnx";
         String imagePath = args.length > 0 ? args[0] : "D:\\tmp\\formula_2025-8-2_17-28-16.jpg";
-        boolean useFp16 = true;  // Use FP16 model for reduced memory
-        int gpuIndex = -1;       // -1 for CPU, 0 for first GPU
+        boolean useFp16 = false;  // Use FP16 model for reduced memory
+        int gpuIndex = 0;       // -1 for CPU, 0 for first GPU
         
         System.out.println("GLM-OCR ONNX Inference Demo");
         System.out.println("===========================");
@@ -61,7 +72,7 @@ public class GlmOcrDemo {
             
             // Run inference
             long inferStart = System.currentTimeMillis();
-            TextResult result = model.predict(rgbMat, matManager, ndManager, "Please perform OCR on this image:");
+            TextResult result = model.predict(rgbMat, matManager, ndManager, "Formula Recognition:");
             long inferTime = System.currentTimeMillis() - inferStart;
             
             System.out.println("\nInference time: " + inferTime + " ms");
@@ -69,6 +80,7 @@ public class GlmOcrDemo {
             System.out.println("\n--- OCR Result ---");
             System.out.println(result.text());
             System.out.println("------------------");
+            System.out.println(Arrays.toString(result.tokens()));
         }
         
         long totalTime = System.currentTimeMillis() - startTime;
