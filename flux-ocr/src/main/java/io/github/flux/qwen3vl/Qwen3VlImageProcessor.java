@@ -5,13 +5,20 @@ import org.opencv.core.Mat;
 import org.opencv.core.Size;
 import org.opencv.imgproc.Imgproc;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
- * Image preprocessing for Qwen3-VL-2B-Instruct.
- * Matches the transformers Qwen2VLImageProcessorFast._preprocess pipeline:
- *   1. smart_resize (factor=32, min=65536, max=16777216 pixels)
+ * Image preprocessing for Qwen3-VL.
+ * Pipeline:
+ *   1. constrained_resize — pick (H, W) from valid options where grid_h * grid_w == EXPORT_PATCHES,
+ *      choosing the aspect ratio closest to the input image.
  *   2. Rescale ÷255, normalize with mean=0.5 std=0.5
  *   3. Temporal duplication (temporal_patch_size=2)
  *   4. Patch extraction with merge_size=2 grouping
+ *
+ * The ONNX vision encoder has position embeddings baked in for EXPORT_PATCHES total patches.
+ * All images must be resized to produce exactly that many patches.
  *
  * Output: pixel_values [num_patches, 1536], image_grid_thw [1, 3].
  */
@@ -20,14 +27,31 @@ public class Qwen3VlImageProcessor {
     private static final int PATCH_SIZE = 16;
     private static final int TEMPORAL_PATCH_SIZE = 2;
     private static final int MERGE_SIZE = 2;
-    private static final int FACTOR = PATCH_SIZE * MERGE_SIZE;  // 32
 
-    private static final int MIN_PIXELS = 65536;
-    private static final int MAX_PIXELS = 16777216;
+    /**
+     * Total patch count the ONNX vision encoder was exported with.
+     * Export grid [1, 12, 24] → 288 patches.  Change if you re-export.
+     */
+    private static final int EXPORT_PATCHES = 288;
+    private static final int MIN_GRID_DIM = 4;  // minimum grid_h or grid_w (= 64 px)
+    private static final int MAX_GRID_DIM = 24; // max(export_grid_h, export_grid_w) — rotary table size
 
     private static final float RESCALE_FACTOR = 1.0f / 255.0f;
     private static final float IMAGE_MEAN = 0.5f;
     private static final float IMAGE_STD = 0.5f;
+
+    /** Pre-computed valid (pixelH, pixelW) options. */
+    private static final int[][] VALID_SIZES;
+    static {
+        List<int[]> list = new ArrayList<>();
+        for (int gh = MIN_GRID_DIM; gh <= Math.min(EXPORT_PATCHES, MAX_GRID_DIM); gh += MERGE_SIZE) {
+            if (EXPORT_PATCHES % gh != 0) continue;
+            int gw = EXPORT_PATCHES / gh;
+            if (gw < MIN_GRID_DIM || gw > MAX_GRID_DIM || gw % MERGE_SIZE != 0) continue;
+            list.add(new int[]{gh * PATCH_SIZE, gw * PATCH_SIZE});
+        }
+        VALID_SIZES = list.toArray(new int[0][]);
+    }
 
     /**
      * Result of image preprocessing, ready for the vision encoder.
@@ -39,26 +63,24 @@ public class Qwen3VlImageProcessor {
     ) {}
 
     /**
-     * Resize dimensions to multiples of factor, respecting pixel count limits.
+     * Pick the (H, W) from valid options that best matches the input aspect ratio.
+     * The ONNX vision encoder only supports images producing exactly EXPORT_PATCHES.
      */
-    public static int[] smartResize(int height, int width) {
-        if (height < FACTOR || width < FACTOR) {
-            throw new IllegalArgumentException(
-                    "Image too small: " + height + "x" + width + ", min factor=" + FACTOR);
+    public static int[] constrainedResize(int height, int width) {
+        if (height <= 0 || width <= 0) {
+            throw new IllegalArgumentException("Invalid image size: " + height + "x" + width);
         }
-        int hBar = (int) (Math.round((double) height / FACTOR) * FACTOR);
-        int wBar = (int) (Math.round((double) width / FACTOR) * FACTOR);
-        if ((long) hBar * wBar < MIN_PIXELS) {
-            double beta = Math.sqrt((double) MIN_PIXELS / ((long) height * width));
-            hBar = (int) (Math.ceil(height * beta / FACTOR) * FACTOR);
-            wBar = (int) (Math.ceil(width * beta / FACTOR) * FACTOR);
+        double aspect = (double) width / height;
+        int[] best = VALID_SIZES[0];
+        double bestDiff = Double.MAX_VALUE;
+        for (int[] hw : VALID_SIZES) {
+            double diff = Math.abs((double) hw[1] / hw[0] - aspect);
+            if (diff < bestDiff) {
+                bestDiff = diff;
+                best = hw;
+            }
         }
-        if ((long) hBar * wBar > MAX_PIXELS) {
-            double beta = Math.sqrt((double) MAX_PIXELS / ((long) height * width));
-            hBar = (int) (Math.floor(height * beta / FACTOR) * FACTOR);
-            wBar = (int) (Math.floor(width * beta / FACTOR) * FACTOR);
-        }
-        return new int[]{hBar, wBar};
+        return new int[]{best[0], best[1]};
     }
 
     /**
@@ -67,7 +89,7 @@ public class Qwen3VlImageProcessor {
     public static ImageProcessResult process(Mat rgbMat, MatManager matManager) {
         int origH = rgbMat.rows();
         int origW = rgbMat.cols();
-        int[] newSize = smartResize(origH, origW);
+        int[] newSize = constrainedResize(origH, origW);
         int newH = newSize[0];
         int newW = newSize[1];
 

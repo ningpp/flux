@@ -14,7 +14,6 @@ Deepstack count and model constants are read from config.json.
 """
 import json
 import os
-import math
 import time
 import numpy as np
 import onnxruntime as ort
@@ -54,26 +53,44 @@ EOS_TOKENS = {IM_END, ENDOFTEXT}
 # Preprocessing
 IMAGE_MEAN = np.array([0.5, 0.5, 0.5], dtype=np.float32)
 IMAGE_STD = np.array([0.5, 0.5, 0.5], dtype=np.float32)
-MIN_PIXELS = 65536
-MAX_PIXELS = 16777216
+
+# The ONNX vision encoder has position embeddings baked in for a specific total
+# patch count (from the export dummy_grid_thw).  All images MUST be resized to
+# produce exactly EXPORT_PATCHES patches.
+# Export grid [1, 12, 24] → 288 patches.  Change this if you re-export.
+EXPORT_PATCHES = 288
+MIN_GRID_DIM = 4   # minimum grid_h or grid_w (=64 pixels)
+MAX_GRID_DIM = 24  # max(export_grid_h, export_grid_w) — rotary embedding table size
 
 
-def smart_resize(height: int, width: int, factor: int = FACTOR,
-                 min_pixels: int = MIN_PIXELS, max_pixels: int = MAX_PIXELS):
-    """Resize dimensions to multiples of factor, respecting pixel count limits."""
-    if height < factor or width < factor:
-        raise ValueError(f"Image too small: {height}x{width}, min factor={factor}")
-    h_bar = round(height / factor) * factor
-    w_bar = round(width / factor) * factor
-    if h_bar * w_bar < min_pixels:
-        beta = math.sqrt(min_pixels / (height * width))
-        h_bar = math.ceil(height * beta / factor) * factor
-        w_bar = math.ceil(width * beta / factor) * factor
-    if h_bar * w_bar > max_pixels:
-        beta = math.sqrt(max_pixels / (height * width))
-        h_bar = math.floor(height * beta / factor) * factor
-        w_bar = math.floor(width * beta / factor) * factor
-    return h_bar, w_bar
+def _build_valid_grids(target_patches: int, merge_size: int, min_dim: int, max_dim: int):
+    """All (grid_h, grid_w) pairs where grid_h*grid_w == target_patches,
+    both divisible by merge_size, and both in [min_dim, max_dim]."""
+    grids = []
+    for gh in range(min_dim, min(target_patches, max_dim) + 1, merge_size):
+        if target_patches % gh == 0:
+            gw = target_patches // gh
+            if min_dim <= gw <= max_dim and gw % merge_size == 0:
+                grids.append((gh, gw))
+    return grids
+
+
+_VALID_GRIDS = _build_valid_grids(EXPORT_PATCHES, MERGE_SIZE, MIN_GRID_DIM, MAX_GRID_DIM)
+# Pre-compute (pixel_h, pixel_w) options
+_VALID_SIZES = [(gh * PATCH_SIZE, gw * PATCH_SIZE) for gh, gw in _VALID_GRIDS]
+
+
+def constrained_resize(height: int, width: int):
+    """Pick the (H, W) from valid options that best matches the input aspect ratio.
+
+    The ONNX vision encoder only supports images whose grid_h * grid_w equals
+    EXPORT_PATCHES.  This function selects the closest aspect-ratio match.
+    """
+    if height <= 0 or width <= 0:
+        raise ValueError(f"Invalid image size: {height}x{width}")
+    aspect = width / height
+    best = min(_VALID_SIZES, key=lambda hw: abs((hw[1] / hw[0]) - aspect))
+    return best  # (new_h, new_w)
 
 
 def preprocess_image(image_path: str):
@@ -84,9 +101,9 @@ def preprocess_image(image_path: str):
     """
     img = Image.open(image_path).convert("RGB")
     orig_w, orig_h = img.size
-    new_h, new_w = smart_resize(orig_h, orig_w)
+    new_h, new_w = constrained_resize(orig_h, orig_w)
     img = img.resize((new_w, new_h), Image.BICUBIC)
-    print(f"  Image: {orig_w}x{orig_h} -> {new_w}x{new_h}")
+    print(f"  Image: {orig_w}x{orig_h} -> {new_w}x{new_h} (patches={EXPORT_PATCHES})")
 
     # Normalize: [0,255] -> [0,1] -> (x - 0.5) / 0.5
     pixels = np.array(img, dtype=np.float32) / 255.0

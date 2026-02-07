@@ -15,6 +15,11 @@ Weight tying: lm_head.weight == embed_tokens.weight
 Key design: Deepstack uses PRE-SCATTERED tensors [batch, seq, hidden] to avoid
 boolean indexing (which doesn't export dynamically via torch.onnx.export).
 The caller scatters vision features into the right positions before calling decoder.
+
+IMPORTANT: The vision encoder's position embeddings are baked as constants during
+torch.onnx.export.  The exported model only supports images whose grid_h * grid_w
+equals the dummy_grid_thw used here (288 patches for [1,12,24]).  Callers must
+constrain image resizing to produce exactly 288 patches (see constrained_resize).
 """
 import json
 import os

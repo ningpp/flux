@@ -11,6 +11,11 @@ Architecture: Decoder layers, heads, hidden size etc. read from config.json.
 DeepStack: N extra vision feature tensors (from config vision_config.deepstack_visual_indexes) injected into first N decoder layers.
 MRoPE: 3D position_ids [3, batch, seq] with interleaved sections [24,20,20]
 Weight tying: lm_head.weight == embed_tokens.weight
+
+IMPORTANT: The vision encoder's position embeddings are baked as constants during
+torch.onnx.export.  The exported model only supports images whose grid_h * grid_w
+equals the dummy_grid_thw used here (288 patches for [1,12,24]).  Callers must
+constrain image resizing to produce exactly 288 patches (see constrained_resize).
 """
 import json
 import os
