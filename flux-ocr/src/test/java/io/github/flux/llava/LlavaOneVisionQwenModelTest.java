@@ -13,6 +13,20 @@ import java.util.List;
 /**
  * Test for LLaVA-OneVision-Qwen2-0.5B Java ONNX inference.
  * Tests single image inference and measures performance.
+ * 
+ * This test outputs detailed validation information that can be compared
+ * with the Python reference implementation to ensure correctness.
+ * 
+ * Validation workflow:
+ * 1. Run this test and save output: java LlavaOneVisionQwenModelTest > java_output.log
+ * 2. Run Python script: python llava_onevision_onnx_infer.py > python_output.log
+ * 3. Compare outputs: python validate_llava_outputs.py java_output.log python_output.log
+ * 
+ * Or use the automated script: scripts\validate_llava.bat
+ * 
+ * @see scripts/llava_onevision_onnx_infer.py - Python reference implementation
+ * @see scripts/validate_llava_outputs.py - Validation comparison script
+ * @see scripts/VALIDATION_LLAVA.md - Detailed validation guide
  */
 public class LlavaOneVisionQwenModelTest {
 
@@ -37,18 +51,47 @@ public class LlavaOneVisionQwenModelTest {
 
             long t1 = System.currentTimeMillis();
             Mat rgbMat = ImageUtil.readToRgb(matManager, imagePath);
-            System.out.println("Image: " + rgbMat.cols() + "x" + rgbMat.rows());
+            System.out.println("\nImage: " + rgbMat.cols() + "x" + rgbMat.rows());
 
             ImageProcessResult ppr = model.processRgb(matManager, rgbMat, ndManager);
+            
+            // Print preprocessing details for validation
+            System.out.println("\n--- Preprocessing Details ---");
+            float[][] pixelValues = ppr.pixelValues();
+            System.out.println("Pixel values shape: [" + pixelValues.length + ", " + pixelValues[0].length + "]");
+            float minVal = Float.MAX_VALUE, maxVal = Float.MIN_VALUE;
+            for (float[] row : pixelValues) {
+                for (float val : row) {
+                    if (val < minVal) minVal = val;
+                    if (val > maxVal) maxVal = val;
+                }
+            }
+            System.out.printf("Pixel values range: [%.3f, %.3f]\n", minVal, maxVal);
+            
+            // Print first few pixel values for debugging
+            System.out.print("First 10 pixel values (channel 0): [");
+            for (int i = 0; i < Math.min(10, pixelValues[0].length); i++) {
+                if (i > 0) System.out.print(", ");
+                System.out.printf("%.3f", pixelValues[0][i]);
+            }
+            System.out.println("]");
+
+            // Configure parameters
+            // Use default prompt "OCR" or customize with: params.put("prompt", "Describe this image in detail.");
+            java.util.Map<String, Object> params = new java.util.HashMap<>();
+            params.put("debug", true);
+            params.put("prompt", "Convert this image to Latex.");
+            params.put("prompt", "Describe this image");
 
             List<TextResult> results = model.doBatchPredict(
-                    List.of(ppr), matManager, ndManager, null);
+                    List.of(ppr), matManager, ndManager, params);
 
             long totalTime = System.currentTimeMillis() - t1;
 
             for (TextResult result : results) {
                 long[] tokens = result.tokens();
-                System.out.println("\nGenerated " + tokens.length + " tokens in " + totalTime + "ms");
+                System.out.println("\n--- Generation Results ---");
+                System.out.println("Generated " + tokens.length + " tokens in " + totalTime + "ms");
 
                 System.out.print("Token IDs: [");
                 for (int i = 0; i < Math.min(20, tokens.length); i++) {
@@ -59,8 +102,15 @@ public class LlavaOneVisionQwenModelTest {
                     System.out.print(", ... (" + (tokens.length - 20) + " more)");
                 }
                 System.out.println("]");
+                
+                // Print all token IDs for validation
+                System.out.println("\nAll token IDs:");
+                for (int i = 0; i < tokens.length; i++) {
+                    if (i > 0 && i % 20 == 0) System.out.println();
+                    System.out.print(tokens[i] + " ");
+                }
 
-                System.out.println("\n--- GENERATED TEXT ---");
+                System.out.println("\n\n--- GENERATED TEXT ---");
                 System.out.println(result.text());
                 System.out.println("--- END ---");
             }

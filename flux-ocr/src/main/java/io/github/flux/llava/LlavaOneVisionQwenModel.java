@@ -95,6 +95,10 @@ public class LlavaOneVisionQwenModel extends BatchPredictor<ImageProcessResult, 
                                            Map<String, Object> extraParameters) {
         try {
             int batchSize = imageResults.size();
+            boolean debug = Boolean.TRUE.equals(extraParameters != null ? extraParameters.get("debug") : false);
+            String prompt = extraParameters != null && extraParameters.get("prompt") instanceof String 
+                    ? (String) extraParameters.get("prompt") 
+                    : "OCR";
 
             // 1. Vision encode each image
             List<float[][]> encoderResults = new ArrayList<>(batchSize);
@@ -108,11 +112,41 @@ public class LlavaOneVisionQwenModel extends BatchPredictor<ImageProcessResult, 
             // All images produce the same token count (729 for SigLIP 384x384)
             int numImageTokens = encoderResults.get(0).length;  // 729
             int visionHiddenSize = encoderResults.get(0)[0].length;  // 1152
+            
+            if (debug) {
+                System.out.println("\n--- Vision Encoder Output ---");
+                System.out.println("Image features shape: [" + batchSize + ", " + numImageTokens + ", " + visionHiddenSize + "]");
+                System.out.println("Number of image tokens: " + numImageTokens);
+                System.out.println("Vision hidden size: " + visionHiddenSize);
+                
+                float[][] features = encoderResults.get(0);
+                System.out.print("First 5 features of first token: [");
+                for (int i = 0; i < Math.min(5, features[0].length); i++) {
+                    if (i > 0) System.out.print(", ");
+                    System.out.printf("%.6f", features[0][i]);
+                }
+                System.out.println("]");
+            }
 
             // 2. Build template input_ids (same for all images)
-            // Use a simple question format
-            long[] templateIds = buildInputIds(numImageTokens);
+            long[] templateIds = buildInputIds(numImageTokens, prompt);
             int seqLen = templateIds.length;
+            
+            if (debug) {
+                System.out.println("\n--- Input IDs ---");
+                System.out.println("Input IDs shape: [" + batchSize + ", " + seqLen + "]");
+                System.out.print("Input IDs: [");
+                for (int i = 0; i < Math.min(30, seqLen); i++) {
+                    if (i > 0) System.out.print(", ");
+                    System.out.print(templateIds[i]);
+                }
+                if (seqLen > 30) System.out.print(", ... (" + (seqLen - 30) + " more)");
+                System.out.println("]");
+                
+                // Decode to show prompt
+                String decodedPrompt = tokenizer.decode(templateIds);
+                System.out.println("Decoded prompt:\n" + decodedPrompt);
+            }
 
             // 3. Batch embed tokens
             long[][] batchedIds = new long[batchSize][];
@@ -121,33 +155,76 @@ public class LlavaOneVisionQwenModel extends BatchPredictor<ImageProcessResult, 
             }
             float[][][] inputsEmbeds = embedModel.predict(batchedIds);
 
-            // 4. Replace IMAGE_TOKEN embeddings with vision features per image
-            // Note: Vision features need to be projected to text hidden_size (896)
-            // For now, we assume the ONNX model handles this projection internally
-            for (int b = 0; b < batchSize; b++) {
-                float[][] features = encoderResults.get(b);
-                int featureIdx = 0;
-                for (int pos = 0; pos < seqLen; pos++) {
-                    if (templateIds[pos] == IMAGE_TOKEN) {
-                        if (featureIdx < features.length) {
-                            // Vision features may need projection - let's use them as-is for now
-                            // If dimensions don't match, we may need a projection layer
-                            if (features[featureIdx].length == hiddenSize) {
-                                System.arraycopy(features[featureIdx], 0, inputsEmbeds[b][pos], 0, hiddenSize);
-                            } else {
-                                // Dimension mismatch - vision hidden size (1152) != text hidden size (896)
-                                // This indicates we need a projection layer
-                                // For now, pad or truncate as a workaround
-                                int copyLen = Math.min(features[featureIdx].length, hiddenSize);
-                                System.arraycopy(features[featureIdx], 0, inputsEmbeds[b][pos], 0, copyLen);
-                            }
-                            featureIdx++;
-                        }
-                    }
+            // 4. Find IMAGE_TOKEN position (should be single token at position ~14)
+            int imageTokenPos = -1;
+            for (int pos = 0; pos < seqLen; pos++) {
+                if (templateIds[pos] == IMAGE_TOKEN) {
+                    imageTokenPos = pos;
+                    break;
                 }
             }
+            
+            if (imageTokenPos == -1) {
+                throw new FluxException("IMAGE_TOKEN not found in prompt");
+            }
 
-            // 5. Compute 2D position_ids (simple incrementing sequence)
+            // 5. Expand sequence: replace single IMAGE_TOKEN with all vision feature embeddings
+            // New sequence length: original - 1 (remove IMAGE_TOKEN) + numImageTokens (add vision features)
+            int expandedSeqLen = seqLen - 1 + numImageTokens;
+            
+            if (debug) {
+                System.out.println("\n--- Merging Vision Features ---");
+                System.out.println("IMAGE_TOKEN position: " + imageTokenPos);
+                System.out.println("Original sequence length: " + seqLen);
+                System.out.println("Expanded sequence length: " + expandedSeqLen);
+                System.out.println("Vision features to insert: " + numImageTokens);
+            }
+            
+            float[][][] expandedEmbeds = new float[batchSize][expandedSeqLen][hiddenSize];
+            
+            for (int b = 0; b < batchSize; b++) {
+                float[][] features = encoderResults.get(b);
+                
+                // Copy embeddings before IMAGE_TOKEN
+                for (int i = 0; i < imageTokenPos; i++) {
+                    System.arraycopy(inputsEmbeds[b][i], 0, expandedEmbeds[b][i], 0, hiddenSize);
+                }
+                
+                // Insert all vision feature embeddings
+                for (int i = 0; i < numImageTokens; i++) {
+                    System.arraycopy(features[i], 0, expandedEmbeds[b][imageTokenPos + i], 0, hiddenSize);
+                }
+                
+                // Copy embeddings after IMAGE_TOKEN
+                for (int i = imageTokenPos + 1; i < seqLen; i++) {
+                    int targetPos = imageTokenPos + numImageTokens + (i - imageTokenPos - 1);
+                    System.arraycopy(inputsEmbeds[b][i], 0, expandedEmbeds[b][targetPos], 0, hiddenSize);
+                }
+            }
+            
+            inputsEmbeds = expandedEmbeds;
+            seqLen = expandedSeqLen;
+            
+            if (debug) {
+                System.out.println("Final inputs_embeds shape: [" + batchSize + ", " + seqLen + ", " + hiddenSize + "]");
+                
+                // Print sample embedding values for comparison
+                System.out.print("First 5 embedding values at position 0: [");
+                for (int i = 0; i < Math.min(5, hiddenSize); i++) {
+                    if (i > 0) System.out.print(", ");
+                    System.out.printf("%.6f", expandedEmbeds[0][0][i]);
+                }
+                System.out.println("]");
+                
+                System.out.print("First 5 embedding values at position " + imageTokenPos + " (first vision feature): [");
+                for (int i = 0; i < Math.min(5, hiddenSize); i++) {
+                    if (i > 0) System.out.print(", ");
+                    System.out.printf("%.6f", expandedEmbeds[0][imageTokenPos][i]);
+                }
+                System.out.println("]");
+            }
+
+            // 6. Compute 2D position_ids (simple incrementing sequence)
             long[][] positionIds = new long[batchSize][seqLen];
             for (int b = 0; b < batchSize; b++) {
                 for (int i = 0; i < seqLen; i++) {
@@ -155,7 +232,7 @@ public class LlavaOneVisionQwenModel extends BatchPredictor<ImageProcessResult, 
                 }
             }
 
-            // 6. Attention mask [batchSize, seqLen]
+            // 7. Attention mask [batchSize, seqLen]
             long[][] attentionMask = new long[batchSize][seqLen];
             for (int b = 0; b < batchSize; b++) {
                 for (int i = 0; i < seqLen; i++) {
@@ -163,11 +240,11 @@ public class LlavaOneVisionQwenModel extends BatchPredictor<ImageProcessResult, 
                 }
             }
 
-            // 7. Decode (batched)
+            // 8. Decode (batched)
             long[][] generatedIds = decoderModel.predict(
                     inputsEmbeds, attentionMask, positionIds, embedModel);
 
-            // 8. Decode tokens to text
+            // 9. Decode tokens to text
             List<TextResult> results = new ArrayList<>();
             for (long[] tokens : generatedIds) {
                 String text = tokenizer.decode(tokens);
@@ -181,47 +258,54 @@ public class LlavaOneVisionQwenModel extends BatchPredictor<ImageProcessResult, 
 
     /**
      * Build prompt input_ids with the LLaVA chat template.
+     * 
+     * Format:
+     * <|im_start|>system
+     * You are a helpful assistant.<|im_end|>
+     * <|im_start|>user
+     * <image>
+     * {prompt}<|im_end|>
+     * <|im_start|>assistant
+     * 
+     * @param numImageTokens Number of image tokens (unused, kept for API compatibility)
+     * @param prompt The user prompt/question about the image
      */
-    private long[] buildInputIds(int numImageTokens) {
-        // Build the chat template:
-        // <|im_start|>system
-        // You are a helpful assistant.<|im_end|>
-        // <|im_start|>user
-        // <image>
-        // {question}<|im_end|>
-        // <|im_start|>assistant
-
+    private long[] buildInputIds(int numImageTokens, String prompt) {
         List<Long> ids = new ArrayList<>();
-
-        // <|im_start|>system
-        ids.add(IM_START);
-        long[] systemText = tokenizer.encode("system\nYou are a helpful assistant.").getIds();
-        for (long id : systemText) ids.add(id);
-        ids.add(IM_END);
-
-        // <|im_start|>user
-        long[] newline = tokenizer.encode("\n").getIds();
-        for (long id : newline) ids.add(id);
-        ids.add(IM_START);
-        long[] userPrefix = tokenizer.encode("user\n").getIds();
-        for (long id : userPrefix) ids.add(id);
-
-        // <image> token repeated numImageTokens times
-        ids.add(IMAGE_TOKEN);
-
-        // {question} - using a default question about the image
-        long[] userText = tokenizer.encode("Describe this image in detail.").getIds();
-        for (long id : userText) ids.add(id);
-
-        ids.add(IM_END);
-
-        // <|im_start|>assistant
-        for (long id : newline) ids.add(id);
-        ids.add(IM_START);
-        long[] assistantText = tokenizer.encode("assistant\n").getIds();
-        for (long id : assistantText) ids.add(id);
-
+        
+        // System message
+        addTurnStart(ids, "system", false);  // No leading newline for first turn
+        addEncoded(ids, "You are a helpful assistant.");
+        addTurnEnd(ids);
+        
+        // User message with image
+        addTurnStart(ids, "user", true);
+        ids.add(IMAGE_TOKEN);  // Single token, expanded to 729 features during embedding merge
+        addEncoded(ids, prompt);
+        addTurnEnd(ids);
+        
+        // Assistant turn start (generation begins here)
+        addTurnStart(ids, "assistant", true);
+        
         return ids.stream().mapToLong(Long::longValue).toArray();
+    }
+    
+    private void addTurnStart(List<Long> ids, String role, boolean addNewline) {
+        if (addNewline) {
+            addEncoded(ids, "\n");
+        }
+        ids.add(IM_START);
+        addEncoded(ids, role + "\n");
+    }
+    
+    private void addTurnEnd(List<Long> ids) {
+        ids.add(IM_END);
+    }
+    
+    private void addEncoded(List<Long> ids, String text) {
+        for (long id : tokenizer.encode(text).getIds()) {
+            ids.add(id);
+        }
     }
 
     @Override
