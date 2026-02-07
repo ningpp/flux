@@ -40,7 +40,7 @@ public class Qwen3VlEncoderModel implements AutoCloseable {
             }
             this.session = env.createSession(modelFile, options);
             // Detect deepstack count from ONNX model outputs: total outputs - 1 (image_features)
-            this.numDeepstack = session.getNumOutputs() - 1;
+            this.numDeepstack = (int) (session.getNumOutputs() - 1);
         } catch (Exception e) {
             throw new FluxException(e);
         }

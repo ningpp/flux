@@ -55,8 +55,8 @@ public class Qwen3VlModel extends BatchPredictor<PreProcessResult, TextResult> {
     private final HuggingFaceTokenizer tokenizer;
     private final int hiddenSize;
 
-    /** Stored from preprocessing for use during prediction. */
-    private ImageProcessResult lastImageResult;
+    /** Stored from preprocessing for use during prediction (supports batch). */
+    private final List<ImageProcessResult> lastImageResults = new ArrayList<>();
 
     public Qwen3VlModel(final String modelRootDir,
                         final String modelName,
@@ -103,55 +103,77 @@ public class Qwen3VlModel extends BatchPredictor<PreProcessResult, TextResult> {
                                            NDManager ndManager,
                                            Map<String, Object> extraParameters) {
         try {
-            if (pprs.size() != 1) {
-                throw new FluxException("Qwen3-VL currently only supports batch size 1");
+            int batchSize = pprs.size();
+
+            // Retrieve the ImageProcessResults stored during processRgb
+            List<ImageProcessResult> imageResults = new ArrayList<>(lastImageResults);
+            lastImageResults.clear();
+            if (imageResults.size() != batchSize) {
+                throw new FluxException("Preprocessed image count (" + imageResults.size()
+                        + ") does not match batch size (" + batchSize + ")");
             }
 
-            // The ImageProcessResult was stored during processRgb
-            ImageProcessResult imageResult = lastImageResult;
-            if (imageResult == null) {
-                throw new FluxException("Image not preprocessed. Call processRgb first.");
+            // 1. Vision encode each image individually
+            List<EncoderResult> encoderResults = new ArrayList<>(batchSize);
+            for (ImageProcessResult ir : imageResults) {
+                encoderResults.add(encoderModel.predict(ir.pixelValues(), ir.imageGridThw()));
             }
 
-            // 1. Vision encoder
-            EncoderResult encoderResult = encoderModel.predict(
-                    imageResult.pixelValues(), imageResult.imageGridThw());
+            // All images produce the same merged token count (constrained resize ensures this)
+            int numMergedTokens = encoderResults.get(0).imageFeatures().length;
 
-            float[][] imageFeatures = encoderResult.imageFeatures();
-            int numMergedTokens = imageFeatures.length;
+            // 2. Build template input_ids (same for all images)
+            long[] templateIds = buildInputIds(numMergedTokens);
+            int seqLen = templateIds.length;
 
-            // 2. Build input_ids
-            long[] inputIds = buildInputIds(numMergedTokens);
-            int seqLen = inputIds.length;
+            // 3. Batch embed tokens
+            long[][] batchedIds = new long[batchSize][];
+            for (int b = 0; b < batchSize; b++) {
+                batchedIds[b] = templateIds.clone();
+            }
+            float[][][] inputsEmbeds = embedModel.predict(batchedIds);
 
-            // 3. Compute MRoPE position_ids [3, 1, seqLen]
-            long[][][] positionIds = computePositionIds(inputIds, imageResult.imageGridThw());
-
-            // 4. Embed tokens
-            long[][] inputIds2D = new long[][]{inputIds};
-            float[][][] inputsEmbeds = embedModel.predict(inputIds2D);
-
-            // 5. Replace IMAGE_PAD embeddings with vision features
-            int featureIdx = 0;
-            for (int pos = 0; pos < seqLen; pos++) {
-                if (inputIds[pos] == IMAGE_PAD) {
-                    System.arraycopy(imageFeatures[featureIdx], 0, inputsEmbeds[0][pos], 0, hiddenSize);
-                    featureIdx++;
+            // 4. Replace IMAGE_PAD embeddings with vision features per image
+            for (int b = 0; b < batchSize; b++) {
+                float[][] features = encoderResults.get(b).imageFeatures();
+                int featureIdx = 0;
+                for (int pos = 0; pos < seqLen; pos++) {
+                    if (templateIds[pos] == IMAGE_PAD) {
+                        System.arraycopy(features[featureIdx], 0, inputsEmbeds[b][pos], 0, hiddenSize);
+                        featureIdx++;
+                    }
                 }
             }
 
-            // 6. Scatter deepstack features
-            float[][][][] deepstackScattered = scatterDeepstack(
-                    inputIds, seqLen,
-                    encoderResult.deepstackFeatures());
-
-            // 7. Attention mask
-            long[][] attentionMask = new long[1][seqLen];
-            for (int i = 0; i < seqLen; i++) {
-                attentionMask[0][i] = 1L;
+            // 5. Compute MRoPE position_ids per image → [3, batchSize, seqLen]
+            long[][][] positionIds = new long[3][batchSize][seqLen];
+            for (int b = 0; b < batchSize; b++) {
+                long[][][] perImage = computePositionIds(templateIds, imageResults.get(b).imageGridThw());
+                for (int d = 0; d < 3; d++) {
+                    System.arraycopy(perImage[d][0], 0, positionIds[d][b], 0, seqLen);
+                }
             }
 
-            // 8. Decode
+            // 6. Scatter deepstack per image → [numDs][batchSize][seqLen][hiddenSize]
+            int numDs = encoderResults.get(0).deepstackFeatures().length;
+            float[][][][] deepstackScattered = new float[numDs][batchSize][][];
+            for (int b = 0; b < batchSize; b++) {
+                float[][][][] perImage = scatterDeepstack(
+                        templateIds, seqLen, encoderResults.get(b).deepstackFeatures());
+                for (int d = 0; d < numDs; d++) {
+                    deepstackScattered[d][b] = perImage[d][0]; // [seqLen][hiddenSize]
+                }
+            }
+
+            // 7. Attention mask [batchSize, seqLen]
+            long[][] attentionMask = new long[batchSize][seqLen];
+            for (int b = 0; b < batchSize; b++) {
+                for (int i = 0; i < seqLen; i++) {
+                    attentionMask[b][i] = 1L;
+                }
+            }
+
+            // 8. Decode (batched)
             long[][] generatedIds = decoderModel.predict(
                     inputsEmbeds, attentionMask, positionIds,
                     deepstackScattered, embedModel);
@@ -327,7 +349,7 @@ public class Qwen3VlModel extends BatchPredictor<PreProcessResult, TextResult> {
 
     @Override
     public PreProcessResult processRgb(MatManager matManager, Mat rgbMat, NDManager ndManager) {
-        this.lastImageResult = Qwen3VlImageProcessor.process(rgbMat, matManager);
+        this.lastImageResults.add(Qwen3VlImageProcessor.process(rgbMat, matManager));
         // Return a PreProcessResult with null mat/ndarray - we stored the result internally
         return new PreProcessResult(null, null);
     }
