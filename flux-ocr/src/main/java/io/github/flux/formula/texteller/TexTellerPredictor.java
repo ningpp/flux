@@ -21,7 +21,7 @@ import ai.djl.huggingface.tokenizers.HuggingFaceTokenizer;
 import ai.djl.ndarray.NDManager;
 import ai.onnxruntime.OrtEnvironment;
 import io.github.flux.core.BatchPredictor;
-import io.github.flux.core.FormulaRecognitionResult;
+import io.github.flux.core.TextResult;
 import io.github.flux.core.MatManager;
 import io.github.flux.core.PreProcessResult;
 import io.github.flux.exception.FluxException;
@@ -33,7 +33,7 @@ import java.nio.file.Paths;
 import java.util.List;
 import java.util.Map;
 
-public class TexTellerPredictor extends BatchPredictor<PreProcessResult, FormulaRecognitionResult> {
+public class TexTellerPredictor extends BatchPredictor<PreProcessResult, TextResult> {
 
     public static final List<String> MODEL_NAMES = List.of(
             "TexTeller"
@@ -67,7 +67,7 @@ public class TexTellerPredictor extends BatchPredictor<PreProcessResult, Formula
     }
 
     @Override
-    public List<FormulaRecognitionResult> doBatchPredict(List<PreProcessResult> mats,
+    public List<TextResult> doBatchPredict(List<PreProcessResult> mats,
                                                          MatManager matManager, NDManager ndManager,
                                                          Map<String, Object> extraParameters) {
         try {

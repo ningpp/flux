@@ -3,7 +3,7 @@ package io.github.flux.model;
 import ai.djl.ndarray.NDManager;
 import ai.onnxruntime.OrtEnvironment;
 import io.github.flux.core.BatchPredictor;
-import io.github.flux.core.FormulaRecognitionResult;
+import io.github.flux.core.TextResult;
 import io.github.flux.core.MatManager;
 import io.github.flux.core.ModelParam;
 import io.github.flux.core.PreProcessResult;
@@ -25,9 +25,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-public class FormulaRecognitionModel extends BatchPredictor<PreProcessResult, FormulaRecognitionResult> {
+public class FormulaRecognitionModel extends BatchPredictor<PreProcessResult, TextResult> {
 
-    private final BatchPredictor<PreProcessResult, FormulaRecognitionResult> predictor;
+    private final BatchPredictor<PreProcessResult, TextResult> predictor;
 
     public static final Set<String> MODEL_NAMES = CollectionUtil.distinct(List.of(
             ByteDanceDolphinElementModel.MODEL_NAMES,
@@ -73,7 +73,7 @@ public class FormulaRecognitionModel extends BatchPredictor<PreProcessResult, Fo
     }
 
     @Override
-    public List<FormulaRecognitionResult> doBatchPredict(List<PreProcessResult> pprs, MatManager matManager, NDManager manager, Map<String, Object> extraParameters) {
+    public List<TextResult> doBatchPredict(List<PreProcessResult> pprs, MatManager matManager, NDManager manager, Map<String, Object> extraParameters) {
         return predictor.doBatchPredict(pprs, matManager, manager, extraParameters);
     }
 

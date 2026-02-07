@@ -26,7 +26,7 @@ import ai.onnxruntime.OnnxValue;
 import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtSession;
 import io.github.flux.core.BatchPredictor;
-import io.github.flux.core.FormulaRecognitionResult;
+import io.github.flux.core.TextResult;
 import io.github.flux.core.MatManager;
 import io.github.flux.core.PreProcessResult;
 import io.github.flux.exception.FluxException;
@@ -46,7 +46,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
-public class PaddleFormulaRecognitionPredictor extends BatchPredictor<PreProcessResult, FormulaRecognitionResult> {
+public class PaddleFormulaRecognitionPredictor extends BatchPredictor<PreProcessResult, TextResult> {
     public static final List<String> MODEL_NAMES = List.of(
             "PP-FormulaNet-S",
             "PP-FormulaNet-L",
@@ -115,7 +115,7 @@ public class PaddleFormulaRecognitionPredictor extends BatchPredictor<PreProcess
     }
 
     @Override
-    public List<FormulaRecognitionResult> doBatchPredict(List<PreProcessResult> inputNDArrays, MatManager matManager, NDManager manager, Map<String, Object> extraParameters) {
+    public List<TextResult> doBatchPredict(List<PreProcessResult> inputNDArrays, MatManager matManager, NDManager manager, Map<String, Object> extraParameters) {
         try {
             NDList ndList = new NDList();
             ndList.addAll(PreProcessResult.getNDArrays(inputNDArrays));
@@ -143,11 +143,11 @@ public class PaddleFormulaRecognitionPredictor extends BatchPredictor<PreProcess
                 texts = postProcessor.call(preds);
                 preds.close();
             }
-            List<FormulaRecognitionResult> results = new ArrayList<>();
+            List<TextResult> results = new ArrayList<>();
             if (preditResult != null && texts != null) {
                 for (int i = 0; i < preditResult.length; i++) {
                     long[] tokens = preditResult[i];
-                    results.add(new FormulaRecognitionResult(List.of(texts.get(i)), tokens, -1));
+                    results.add(new TextResult(texts.get(i), tokens, -1));
                 }
             }
             return results;

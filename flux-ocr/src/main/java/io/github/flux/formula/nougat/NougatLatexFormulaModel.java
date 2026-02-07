@@ -23,7 +23,7 @@ import ai.djl.ndarray.NDManager;
 import ai.onnxruntime.OnnxTensor;
 import ai.onnxruntime.OrtEnvironment;
 import io.github.flux.core.BatchPredictor;
-import io.github.flux.core.FormulaRecognitionResult;
+import io.github.flux.core.TextResult;
 import io.github.flux.core.MatManager;
 import io.github.flux.core.PreProcessResult;
 import io.github.flux.exception.FluxException;
@@ -36,7 +36,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-public class NougatLatexFormulaModel extends BatchPredictor<PreProcessResult, FormulaRecognitionResult> {
+public class NougatLatexFormulaModel extends BatchPredictor<PreProcessResult, TextResult> {
 
     public static final Set<String> MODEL_NAMES = Set.of(
             "nougat-latex-base"
@@ -75,7 +75,7 @@ public class NougatLatexFormulaModel extends BatchPredictor<PreProcessResult, Fo
     }
 
     @Override
-    public List<FormulaRecognitionResult> doBatchPredict(List<PreProcessResult> batch, MatManager matManager, NDManager manager, Map<String, Object> extraParameters) {
+    public List<TextResult> doBatchPredict(List<PreProcessResult> batch, MatManager matManager, NDManager manager, Map<String, Object> extraParameters) {
         try (OnnxTensor encodeResult = encoderModel.batchPredict(PreProcessResult.getNDArrays(batch), manager)) {
             return decoderModel.batchPredict(encodeResult);
         } catch (Exception e) {

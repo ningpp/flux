@@ -23,7 +23,7 @@ import ai.onnxruntime.OnnxValue;
 import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtException;
 import ai.onnxruntime.OrtSession;
-import io.github.flux.core.FormulaRecognitionResult;
+import io.github.flux.core.TextResult;
 import io.github.flux.exception.FluxException;
 import io.github.flux.util.ArrayUtil;
 import io.github.flux.util.IOUtil;
@@ -74,7 +74,7 @@ public class Pix2TextDecoderModel implements AutoCloseable {
         }
     }
 
-    public List<FormulaRecognitionResult> batchPredict(float[][][] encodeResultFloats) throws OrtException {
+    public List<TextResult> batchPredict(float[][][] encodeResultFloats) throws OrtException {
         FloatBuffer dataBuffer = FloatBuffer.wrap(ArrayUtil.flat(encodeResultFloats));
         long[] shape = new long[] {
                 encodeResultFloats.length,
@@ -127,10 +127,10 @@ public class Pix2TextDecoderModel implements AutoCloseable {
 
         IOUtil.close(encoderHiddenStates);
 
-        List<FormulaRecognitionResult> results = new ArrayList<>();
+        List<TextResult> results = new ArrayList<>();
         for (long[] tokens : generated_tokens) {
             String text = tokenizer.decode(tokens, true);
-            results.add(new FormulaRecognitionResult(List.of(text), tokens, -1));
+            results.add(new TextResult(text, tokens, -1));
         }
         return results;
     }

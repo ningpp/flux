@@ -7,7 +7,7 @@ import ai.onnxruntime.OnnxTensor;
 import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtException;
 import ai.onnxruntime.OrtSession;
-import io.github.flux.core.FormulaRecognitionResult;
+import io.github.flux.core.TextResult;
 import io.github.flux.exception.FluxException;
 import io.github.flux.util.ArrayUtil;
 import io.github.flux.util.IOUtil;
@@ -63,7 +63,7 @@ public class TexTellerDecoderModel implements AutoCloseable {
         }
     }
 
-    public List<FormulaRecognitionResult> batchPredict(float[][][] encodeResultFloats, NDManager ndManager) throws OrtException {
+    public List<TextResult> batchPredict(float[][][] encodeResultFloats, NDManager ndManager) throws OrtException {
         int layers = 12;
         int num_attention_heads = 16;
         int embed_size_per_head = 64;
@@ -182,11 +182,11 @@ public class TexTellerDecoderModel implements AutoCloseable {
         OnnxUtil.closeTensors(emptyPastKV);
         cross_attention_kvs.forEach(OnnxUtil::closeTensors);
 
-        List<FormulaRecognitionResult> results = new ArrayList<>();
+        List<TextResult> results = new ArrayList<>();
         for (var generatedIds : allGeneratedIds) {
             long[] tokens = generatedIds.stream().mapToLong(Long::longValue).toArray();
             String text = tokenizer.decode(tokens, true);
-            results.add(new FormulaRecognitionResult(List.of(addNewlines(removeStyle(text))), tokens, -1));
+            results.add(new TextResult(addNewlines(removeStyle(text)), tokens, -1));
         }
         return results;
     }

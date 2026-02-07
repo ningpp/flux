@@ -28,7 +28,7 @@ import ai.djl.ndarray.types.Shape;
 import ai.onnxruntime.OnnxJavaType;
 import ai.onnxruntime.OrtEnvironment;
 import io.github.flux.core.BatchPredictor;
-import io.github.flux.core.FormulaRecognitionResult;
+import io.github.flux.core.TextResult;
 import io.github.flux.core.MatManager;
 import io.github.flux.core.PreProcessResult;
 import io.github.flux.exception.FluxException;
@@ -46,7 +46,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
-public class GraniteDoclingFormulaModel extends BatchPredictor<PreProcessResult, FormulaRecognitionResult> {
+public class GraniteDoclingFormulaModel extends BatchPredictor<PreProcessResult, TextResult> {
 
     public static final Set<String> MODEL_NAMES = Set.of(
             "CodeFormulaV2",
@@ -107,8 +107,8 @@ public class GraniteDoclingFormulaModel extends BatchPredictor<PreProcessResult,
     }
 
     @Override
-    public List<FormulaRecognitionResult> doBatchPredict(List<PreProcessResult> mats, MatManager matManager, NDManager manager, Map<String, Object> extraParameters) {
-        List<FormulaRecognitionResult> results = new ArrayList<>();
+    public List<TextResult> doBatchPredict(List<PreProcessResult> mats, MatManager matManager, NDManager manager, Map<String, Object> extraParameters) {
+        List<TextResult> results = new ArrayList<>();
         for (PreProcessResult ppr : mats) {
             results.add(_predict(chat_template, matManager, ppr.mat(), manager));
         }
@@ -120,7 +120,7 @@ public class GraniteDoclingFormulaModel extends BatchPredictor<PreProcessResult,
         return new PreProcessResult(rgbMat, null);
     }
 
-    private FormulaRecognitionResult _predict(String chat_template, MatManager matManager, Mat image, NDManager manager) {
+    private TextResult _predict(String chat_template, MatManager matManager, Mat image, NDManager manager) {
         try {
             long image_token_id = 100270;
             int num_hidden_layers = 30;
@@ -197,7 +197,7 @@ public class GraniteDoclingFormulaModel extends BatchPredictor<PreProcessResult,
             IOUtil.close(imgNdArray);
             IOUtil.close(input_ids);
             IOUtil.close(attention_mask);
-            return new FormulaRecognitionResult(List.of(tokenizer.decode(generated_tokens, false)), generated_tokens, -1);
+            return new TextResult(tokenizer.decode(generated_tokens, false), generated_tokens, -1);
         } catch (Exception e) {
             throw new FluxException(e);
         }

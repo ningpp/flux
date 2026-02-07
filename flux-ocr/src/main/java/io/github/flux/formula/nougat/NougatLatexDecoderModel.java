@@ -28,7 +28,7 @@ import ai.onnxruntime.OnnxValue;
 import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtException;
 import ai.onnxruntime.OrtSession;
-import io.github.flux.core.FormulaRecognitionResult;
+import io.github.flux.core.TextResult;
 import io.github.flux.exception.FluxException;
 import io.github.flux.util.ArrayUtil;
 import io.github.flux.util.IOUtil;
@@ -86,7 +86,7 @@ public class NougatLatexDecoderModel implements AutoCloseable {
         }
     }
 
-    public List<FormulaRecognitionResult> batchPredict(OnnxTensor encoder_hidden_states) throws OrtException {
+    public List<TextResult> batchPredict(OnnxTensor encoder_hidden_states) throws OrtException {
         int batchSize = Math.toIntExact(encoder_hidden_states.getInfo().getShape()[0]);
         long[][] inputIds = new long[batchSize][];
         for (int i = 0; i < batchSize; i++) {
@@ -138,15 +138,15 @@ public class NougatLatexDecoderModel implements AutoCloseable {
             IOUtil.close(input_ids_tensor);
         }
 
-        List<FormulaRecognitionResult> results = new ArrayList<>();
+        List<TextResult> results = new ArrayList<>();
         for (long[] tokens : generated_tokens) {
             String text = tokenizer.decode(tokens, true);
-            results.add(new FormulaRecognitionResult(List.of(text), tokens, -1));
+            results.add(new TextResult(text, tokens, -1));
         }
         return results;
     }
 
-    public FormulaRecognitionResult predict(float[][][] encodeResultFloats, NDManager manager) throws OrtException {
+    public TextResult predict(float[][][] encodeResultFloats, NDManager manager) throws OrtException {
         NDArray inputNdArray = ArrayUtil.toNDArray(manager, encodeResultFloats);
         FloatBuffer dataBuffer = inputNdArray.toByteBuffer().asFloatBuffer();
         long[] shape = inputNdArray.getShape().getShape();
@@ -186,13 +186,13 @@ public class NougatLatexDecoderModel implements AutoCloseable {
         String text = tokenizer.decode(inputIds, true);
         NDArray _sequences = manager.create(inputIds);
         NDArray sequences = _sequences.reshape(1, inputIds.length);
-        var r = new FormulaRecognitionResult(List.of(text), inputIds, -1);
+        var r = new TextResult(text, inputIds, -1);
         sequences.close();
         _sequences.close();
         return r;
     }
 
-    public FormulaRecognitionResult predict(float[][][] encodeResultFloats, long[] decoder_input_ids, NDManager manager) throws OrtException {
+    public TextResult predict(float[][][] encodeResultFloats, long[] decoder_input_ids, NDManager manager) throws OrtException {
         long[] inputIds = ArrayUtil.clone(decoder_input_ids);
         List<float[]> scores = new ArrayList<>();
 
@@ -247,7 +247,7 @@ public class NougatLatexDecoderModel implements AutoCloseable {
         for (float[] flat : scores) {
             scoresNdList.add(manager.create(flat, new Shape(1, flat.length)));
         }
-        var result = new FormulaRecognitionResult(List.of(text), inputIds, -1);
+        var result = new TextResult(text, inputIds, -1);
         sequences.close();
         _sequences.close();
         scoresNdList.close();

@@ -21,3 +21,4 @@ settings.xml
 git.properties
 .vscode
 hs_err_*.log
+.claude/

@@ -20,7 +20,7 @@ package io.github.flux.dolphin;
 import ai.djl.ndarray.NDManager;
 import ai.onnxruntime.OrtEnvironment;
 import io.github.flux.core.BatchPredictor;
-import io.github.flux.core.FormulaRecognitionResult;
+import io.github.flux.core.TextResult;
 import io.github.flux.core.MatManager;
 import io.github.flux.core.PreProcessResult;
 import io.github.flux.util.IOUtil;
@@ -29,7 +29,7 @@ import org.opencv.core.Mat;
 import java.util.List;
 import java.util.Map;
 
-public class ByteDanceDolphinFormulaModel extends BatchPredictor<PreProcessResult, FormulaRecognitionResult> {
+public class ByteDanceDolphinFormulaModel extends BatchPredictor<PreProcessResult, TextResult> {
 
     private final ByteDanceDolphinElementModel model;
 
@@ -45,11 +45,11 @@ public class ByteDanceDolphinFormulaModel extends BatchPredictor<PreProcessResul
     }
 
     @Override
-    public List<FormulaRecognitionResult> doBatchPredict(List<PreProcessResult> mats, MatManager matManager, NDManager manager, Map<String, Object> extraParameters) {
+    public List<TextResult> doBatchPredict(List<PreProcessResult> mats, MatManager matManager, NDManager manager, Map<String, Object> extraParameters) {
         extraParameters.put("prompt", "Read formula in the image.");
         var elementResults = model.doBatchPredict(mats, matManager, manager, extraParameters);
-        return elementResults.stream().map(r -> new FormulaRecognitionResult(
-                List.of(removeDollar(r.text())), r.tokens(), r.score())).toList();
+        return elementResults.stream().map(r -> new TextResult(
+                removeDollar(r.text()), r.tokens(), r.score())).toList();
     }
 
     private String removeDollar(String text) {

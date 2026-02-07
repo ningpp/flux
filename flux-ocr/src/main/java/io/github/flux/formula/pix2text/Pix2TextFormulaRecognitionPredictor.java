@@ -21,7 +21,7 @@ import ai.djl.huggingface.tokenizers.HuggingFaceTokenizer;
 import ai.djl.ndarray.NDManager;
 import ai.onnxruntime.OrtEnvironment;
 import io.github.flux.core.BatchPredictor;
-import io.github.flux.core.FormulaRecognitionResult;
+import io.github.flux.core.TextResult;
 import io.github.flux.core.MatManager;
 import io.github.flux.core.PreProcessResult;
 import io.github.flux.exception.FluxException;
@@ -33,7 +33,7 @@ import java.nio.file.Paths;
 import java.util.List;
 import java.util.Map;
 
-public class Pix2TextFormulaRecognitionPredictor extends BatchPredictor<PreProcessResult, FormulaRecognitionResult> {
+public class Pix2TextFormulaRecognitionPredictor extends BatchPredictor<PreProcessResult, TextResult> {
 
     public static final List<String> MODEL_NAMES = List.of(
             "pix2text-mfr",
@@ -81,7 +81,7 @@ public class Pix2TextFormulaRecognitionPredictor extends BatchPredictor<PreProce
     }
 
     @Override
-    public List<FormulaRecognitionResult> doBatchPredict(List<PreProcessResult> inputNDArrays, MatManager matManager, NDManager manager, Map<String, Object> extraParameters) {
+    public List<TextResult> doBatchPredict(List<PreProcessResult> inputNDArrays, MatManager matManager, NDManager manager, Map<String, Object> extraParameters) {
         try {
             float[][][] encoderHiddenStates = encoderModel.batchPredict(PreProcessResult.getNDArrays(inputNDArrays));
             return decoderModel.batchPredict(encoderHiddenStates);

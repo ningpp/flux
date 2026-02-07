@@ -19,7 +19,7 @@ package io.github.flux.unirec;
 
 import ai.djl.ndarray.NDManager;
 import io.github.flux.core.BatchPredictor;
-import io.github.flux.core.FormulaRecognitionResult;
+import io.github.flux.core.TextResult;
 import io.github.flux.core.MatManager;
 import io.github.flux.core.PreProcessResult;
 import io.github.flux.util.IOUtil;
@@ -28,7 +28,7 @@ import org.opencv.core.Mat;
 import java.util.List;
 import java.util.Map;
 
-public class UnirecFormulaModel extends BatchPredictor<PreProcessResult, FormulaRecognitionResult> {
+public class UnirecFormulaModel extends BatchPredictor<PreProcessResult, TextResult> {
 
     private final UnirecPredictor predictor;
 
@@ -37,9 +37,9 @@ public class UnirecFormulaModel extends BatchPredictor<PreProcessResult, Formula
     }
 
     @Override
-    public List<FormulaRecognitionResult> doBatchPredict(List<PreProcessResult> mats, MatManager matManager, NDManager manager, Map<String, Object> extraParameters) {
+    public List<TextResult> doBatchPredict(List<PreProcessResult> mats, MatManager matManager, NDManager manager, Map<String, Object> extraParameters) {
         return predictor.doBatchPredict(mats, matManager, manager, extraParameters).stream()
-                .map(r -> new FormulaRecognitionResult(List.of(r.text()), r.tokens(), r.score())).toList();
+                .map(r -> new TextResult(r.text(), r.tokens(), r.score())).toList();
     }
 
     @Override
