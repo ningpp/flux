@@ -54,9 +54,7 @@ public class GraniteDoclingFormulaModel extends BatchPredictor<PreProcessResult,
             "granite-docling-258M"
     );
 
-    static {
-        FormulaRecognitionModel.getRegistry().register(MODEL_NAMES, GraniteDoclingFormulaModel::new);
-    }
+    // Note: This model is registered in FormulaRecognitionModel with special handling for maxLength parameter
 
     private final GraniteDoclingEncoderModel encoderModel;
     private final GraniteDoclingEmbedModel embedModel;
