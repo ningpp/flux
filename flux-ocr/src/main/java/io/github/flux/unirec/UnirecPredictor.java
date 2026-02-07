@@ -20,6 +20,7 @@ package io.github.flux.unirec;
 import ai.djl.ndarray.NDManager;
 import ai.onnxruntime.OrtEnvironment;
 import io.github.flux.core.BatchPredictor;
+import io.github.flux.core.InstanceKey;
 import io.github.flux.core.MatManager;
 import io.github.flux.core.PreProcessResult;
 import io.github.flux.core.TextResult;
@@ -45,12 +46,6 @@ public class UnirecPredictor extends BatchPredictor<PreProcessResult, TextResult
 
     static {
         FormulaRecognitionModel.getRegistry().register(MODEL_NAMES, UnirecFormulaModel::new);
-    }
-
-    /**
-     * Key for caching shared instances based on model configuration.
-     */
-    record InstanceKey(String modelRootDir, String modelName, int gpuIndex) {
     }
 
     private final UnirecEncoderModel encoderModel;

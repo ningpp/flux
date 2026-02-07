@@ -22,6 +22,7 @@ import ai.djl.ndarray.NDManager;
 import ai.onnxruntime.OnnxTensor;
 import ai.onnxruntime.OrtEnvironment;
 import io.github.flux.core.BatchPredictor;
+import io.github.flux.core.InstanceKey;
 import io.github.flux.core.MatManager;
 import io.github.flux.core.PreProcessResult;
 import io.github.flux.core.TextResult;
@@ -51,12 +52,6 @@ public class ByteDanceDolphinElementModel extends BatchPredictor<PreProcessResul
     static {
         FormulaRecognitionModel.getRegistry().register(MODEL_NAMES, ByteDanceDolphinFormulaModel::new);
         TableModel.getRegistry().register(MODEL_NAMES, ByteDanceDolphinTableModel::new);
-    }
-
-    /**
-     * Key for caching shared instances based on model configuration.
-     */
-    record InstanceKey(String modelRootDir, String modelName, int gpuIndex) {
     }
 
     private final DolphinEncoderModel encoderModel;
