@@ -3,6 +3,8 @@ package io.github.flux.qwen3vl;
 import ai.djl.huggingface.tokenizers.HuggingFaceTokenizer;
 import ai.djl.ndarray.NDManager;
 import ai.onnxruntime.OrtEnvironment;
+import com.google.gson.Gson;
+import com.google.gson.reflect.TypeToken;
 import io.github.flux.core.BatchPredictor;
 import io.github.flux.core.MatManager;
 import io.github.flux.core.PreProcessResult;
@@ -14,6 +16,9 @@ import io.github.flux.util.IOUtil;
 import org.opencv.core.Mat;
 
 import java.io.File;
+import java.lang.reflect.Type;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
@@ -21,11 +26,12 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Qwen3-VL-2B-Instruct model orchestrator.
+ * Qwen3-VL model orchestrator.
  * Pipeline: image → vision encoder (+ deepstack) → embed tokens → merge image features
  *           → compute MRoPE position_ids → scatter deepstack → decoder (KV-cache) → text
  *
- * Architecture: Qwen3 ViT (24 layers, DeepStack at 5,11,17) + Qwen3 decoder (28 layers).
+ * Architecture: Qwen3 ViT + DeepStack + Qwen3 decoder.
+ * DeepStack count and model constants are determined dynamically from the ONNX models.
  * Image tokens use 3D MRoPE (T/H/W) for position encoding.
  */
 public class Qwen3VlModel extends BatchPredictor<PreProcessResult, TextResult> {
@@ -42,12 +48,12 @@ public class Qwen3VlModel extends BatchPredictor<PreProcessResult, TextResult> {
     private static final long IMAGE_PAD = 151655L;
 
     private static final int MERGE_SIZE = 2;
-    private static final int HIDDEN_SIZE = 2048;
 
     private final Qwen3VlEncoderModel encoderModel;
     private final Qwen3VlEmbedModel embedModel;
     private final Qwen3VlDecoderModel decoderModel;
     private final HuggingFaceTokenizer tokenizer;
+    private final int hiddenSize;
 
     /** Stored from preprocessing for use during prediction. */
     private ImageProcessResult lastImageResult;
@@ -68,9 +74,24 @@ public class Qwen3VlModel extends BatchPredictor<PreProcessResult, TextResult> {
                     new File(modelDir, "embed_tokens.onnx").getAbsolutePath(),
                     gpuIndex, env);
             this.tokenizer = HuggingFaceTokenizer.newInstance(Paths.get(modelDir));
+
+            // Read model config for dynamic architecture constants
+            Type mapType = new TypeToken<Map<String, Object>>() {}.getType();
+            Map<String, Object> config = new Gson().fromJson(
+                    Files.readString(new File(modelDir, "config.json").toPath(), StandardCharsets.UTF_8),
+                    mapType);
+            @SuppressWarnings("unchecked")
+            Map<String, Object> textConfig = (Map<String, Object>) config.getOrDefault("text_config", Map.of());
+            int numLayers = ((Number) textConfig.getOrDefault("num_hidden_layers", 28)).intValue();
+            int numKvHeads = ((Number) textConfig.getOrDefault("num_key_value_heads", 8)).intValue();
+            int headDim = ((Number) textConfig.getOrDefault("head_dim", 128)).intValue();
+            this.hiddenSize = ((Number) textConfig.getOrDefault("hidden_size", 2048)).intValue();
+            int numDeepstack = encoderModel.getNumDeepstack();
+
             this.decoderModel = new Qwen3VlDecoderModel(
                     new File(modelDir, "decoder_model_merged.onnx").getAbsolutePath(),
-                    gpuIndex, env, 4096);
+                    gpuIndex, env, 4096,
+                    numLayers, numKvHeads, headDim, this.hiddenSize, numDeepstack);
         } catch (Exception e) {
             throw new FluxException(e);
         }
@@ -114,7 +135,7 @@ public class Qwen3VlModel extends BatchPredictor<PreProcessResult, TextResult> {
             int featureIdx = 0;
             for (int pos = 0; pos < seqLen; pos++) {
                 if (inputIds[pos] == IMAGE_PAD) {
-                    System.arraycopy(imageFeatures[featureIdx], 0, inputsEmbeds[0][pos], 0, HIDDEN_SIZE);
+                    System.arraycopy(imageFeatures[featureIdx], 0, inputsEmbeds[0][pos], 0, hiddenSize);
                     featureIdx++;
                 }
             }
@@ -122,9 +143,7 @@ public class Qwen3VlModel extends BatchPredictor<PreProcessResult, TextResult> {
             // 6. Scatter deepstack features
             float[][][][] deepstackScattered = scatterDeepstack(
                     inputIds, seqLen,
-                    encoderResult.deepstack0(),
-                    encoderResult.deepstack1(),
-                    encoderResult.deepstack2());
+                    encoderResult.deepstackFeatures());
 
             // 7. Attention mask
             long[][] attentionMask = new long[1][seqLen];
@@ -282,19 +301,23 @@ public class Qwen3VlModel extends BatchPredictor<PreProcessResult, TextResult> {
     }
 
     /**
-     * Scatter deepstack features [num_vis, 2048] to [1, seqLen, 2048] at IMAGE_PAD positions.
-     * Returns [3][1][seqLen][2048] for the 3 deepstack levels.
+     * Scatter deepstack features [num_vis, hidden_size] to [1, seqLen, hidden_size] at IMAGE_PAD positions.
+     * Returns [N][1][seqLen][hidden_size] for the N deepstack levels.
+     *
+     * @param inputIds     input token IDs
+     * @param seqLen       sequence length
+     * @param deepstackFeatures [N][num_vis][hidden_size] deepstack feature tensors
      */
     private float[][][][] scatterDeepstack(long[] inputIds, int seqLen,
-                                           float[][] ds0, float[][] ds1, float[][] ds2) {
-        float[][][][] result = new float[3][1][seqLen][HIDDEN_SIZE];
-        float[][][] dsList = {ds0, ds1, ds2};
+                                           float[][][] deepstackFeatures) {
+        int numDs = deepstackFeatures.length;
+        float[][][][] result = new float[numDs][1][seqLen][hiddenSize];
 
         int featureIdx = 0;
         for (int pos = 0; pos < seqLen; pos++) {
             if (inputIds[pos] == IMAGE_PAD) {
-                for (int d = 0; d < 3; d++) {
-                    System.arraycopy(dsList[d][featureIdx], 0, result[d][0][pos], 0, HIDDEN_SIZE);
+                for (int d = 0; d < numDs; d++) {
+                    System.arraycopy(deepstackFeatures[d][featureIdx], 0, result[d][0][pos], 0, hiddenSize);
                 }
                 featureIdx++;
             }

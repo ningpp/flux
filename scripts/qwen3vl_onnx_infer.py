@@ -10,7 +10,9 @@ Uses 3 ONNX models:
 Key design: Deepstack uses PRE-SCATTERED tensors [batch, seq, hidden].
 The caller scatters vision features into the right positions before calling decoder.
 During decode steps, deepstack tensors are all zeros.
+Deepstack count and model constants are read from config.json.
 """
+import json
 import os
 import math
 import time
@@ -23,12 +25,18 @@ MODEL_DIR = r"D:\models\Qwen3-VL-2B-Instruct"
 ONNX_DIR = r"D:\models\onnx\Qwen3-VL-2B-Instruct"
 IMAGE_PATH = r"D:\tmp\formula_2025-8-2_17-28-16.jpg"
 
-# Model constants
-NUM_LAYERS = 28
-NUM_KV_HEADS = 8
-HEAD_DIM = 128
-HIDDEN_SIZE = 2048
-VOCAB_SIZE = 151936
+# Read model config for dynamic constants
+with open(os.path.join(ONNX_DIR, "config.json"), "r", encoding="utf-8") as f:
+    _config = json.load(f)
+_deepstack_indexes = _config.get("vision_config", {}).get("deepstack_visual_indexes", [8, 16, 24])
+NUM_DEEPSTACK = len(_deepstack_indexes)
+
+# Model constants (from config)
+NUM_LAYERS = _config.get("text_config", {}).get("num_hidden_layers", 28)
+NUM_KV_HEADS = _config.get("text_config", {}).get("num_key_value_heads", 8)
+HEAD_DIM = _config.get("text_config", {}).get("head_dim", 128)
+HIDDEN_SIZE = _config.get("text_config", {}).get("hidden_size", 2048)
+VOCAB_SIZE = _config.get("text_config", {}).get("vocab_size", 151936)
 PATCH_SIZE = 16
 TEMPORAL_PATCH_SIZE = 2
 MERGE_SIZE = 2
@@ -247,8 +255,9 @@ def main():
         "pixel_values": pixel_values,
         "image_grid_thw": image_grid_thw,
     })
-    image_features, ds0, ds1, ds2 = vision_out
-    print(f"  image_features: {image_features.shape}, time: {time.time() - t1:.2f}s")
+    image_features = vision_out[0]
+    deepstack_features = [vision_out[1 + i] for i in range(NUM_DEEPSTACK)]
+    print(f"  image_features: {image_features.shape}, deepstack_count: {NUM_DEEPSTACK}, time: {time.time() - t1:.2f}s")
 
     # 3. Build input_ids
     print("\n--- Building Input IDs ---")
@@ -273,9 +282,7 @@ def main():
     print(f"  Replaced {len(vis_positions)} image_pad embeddings")
 
     # 7. Scatter deepstack
-    ds0_sc = scatter_deepstack(ds0, input_ids, seq_len)
-    ds1_sc = scatter_deepstack(ds1, input_ids, seq_len)
-    ds2_sc = scatter_deepstack(ds2, input_ids, seq_len)
+    ds_scattered = [scatter_deepstack(deepstack_features[i], input_ids, seq_len) for i in range(NUM_DEEPSTACK)]
 
     # 8. Autoregressive decoding
     print("\n--- Decoding ---")
@@ -295,10 +302,9 @@ def main():
             "inputs_embeds": inputs_embeds.astype(np.float32),
             "attention_mask": attention_mask,
             "position_ids": position_ids,
-            "deepstack_scattered_0": ds0_sc.astype(np.float32),
-            "deepstack_scattered_1": ds1_sc.astype(np.float32),
-            "deepstack_scattered_2": ds2_sc.astype(np.float32),
         }
+        for di in range(NUM_DEEPSTACK):
+            feeds[f"deepstack_scattered_{di}"] = ds_scattered[di].astype(np.float32)
         feeds.update(past_kv)
 
         t_step = time.time()
@@ -335,9 +341,7 @@ def main():
         attention_mask = np.ones((1, total_len), dtype=np.int64)
 
         # Deepstack: zeros for decode steps
-        ds0_sc = np.zeros((1, 1, HIDDEN_SIZE), dtype=np.float32)
-        ds1_sc = np.zeros((1, 1, HIDDEN_SIZE), dtype=np.float32)
-        ds2_sc = np.zeros((1, 1, HIDDEN_SIZE), dtype=np.float32)
+        ds_scattered = [np.zeros((1, 1, HIDDEN_SIZE), dtype=np.float32) for _ in range(NUM_DEEPSTACK)]
 
     gen_time = time.time() - t_gen
     print(f"\n  Generated {len(generated_ids)} tokens in {gen_time:.2f}s")

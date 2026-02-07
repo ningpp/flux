@@ -16,26 +16,29 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Autoregressive decoder for Qwen3-VL-2B-Instruct with KV-cache and pre-scattered DeepStack.
- * Uses decoder_model_merged.onnx (Qwen3, 28 layers, 8 KV heads, head_dim 128, hidden 2048).
+ * Autoregressive decoder for Qwen3-VL with KV-cache and pre-scattered DeepStack.
+ * Uses decoder_model_merged.onnx.
  *
  * Inputs:
- *   inputs_embeds [batch, seq, 2048]
+ *   inputs_embeds [batch, seq, hidden_size]
  *   attention_mask [batch, total_seq]
  *   position_ids [3, batch, seq]  (MRoPE: T/H/W)
- *   deepstack_scattered_0/1/2 [batch, seq, 2048]
- *   past_key_values.{0-27}.{key,value} [batch, 8, past_seq, 128]
+ *   deepstack_scattered_0..N-1 [batch, seq, hidden_size]
+ *   past_key_values.{0-L}.{key,value} [batch, num_kv_heads, past_seq, head_dim]
  *
  * Outputs:
- *   logits [batch, seq, 151936]
- *   present.{0-27}.{key,value} [batch, 8, total_seq, 128]
+ *   logits [batch, seq, vocab_size]
+ *   present.{0-L}.{key,value} [batch, num_kv_heads, total_seq, head_dim]
+ *
+ * Architecture constants and deepstack count are configurable.
  */
 public class Qwen3VlDecoderModel implements AutoCloseable {
 
-    private static final int NUM_LAYERS = 28;
-    private static final int NUM_KV_HEADS = 8;
-    private static final int HEAD_DIM = 128;
-    private static final int HIDDEN_SIZE = 2048;
+    private final int numLayers;
+    private final int numKvHeads;
+    private final int headDim;
+    private final int hiddenSize;
+    private final int numDeepstack;
 
     private static final long STOP_TOKEN_IM_END = 151645L;
     private static final long STOP_TOKEN_ENDOFTEXT = 151643L;
@@ -48,8 +51,18 @@ public class Qwen3VlDecoderModel implements AutoCloseable {
     public Qwen3VlDecoderModel(final String modelFile,
                                final int gpuIndex,
                                final OrtEnvironment env,
-                               final int maxNewTokens) {
+                               final int maxNewTokens,
+                               final int numLayers,
+                               final int numKvHeads,
+                               final int headDim,
+                               final int hiddenSize,
+                               final int numDeepstack) {
         this.maxNewTokens = maxNewTokens;
+        this.numLayers = numLayers;
+        this.numKvHeads = numKvHeads;
+        this.headDim = headDim;
+        this.hiddenSize = hiddenSize;
+        this.numDeepstack = numDeepstack;
         try {
             this.env = env;
             OrtSession.SessionOptions options = new OrtSession.SessionOptions();
@@ -66,10 +79,10 @@ public class Qwen3VlDecoderModel implements AutoCloseable {
     /**
      * Autoregressive decoding with KV-cache.
      *
-     * @param inputsEmbeds    [batch, seq, 2048] with vision features already merged
+     * @param inputsEmbeds    [batch, seq, hidden_size] with vision features already merged
      * @param attentionMask   [batch, seq]
      * @param positionIds     [3, batch, seq] MRoPE position IDs
-     * @param deepstackScattered 3 tensors each [batch, seq, 2048], pre-scattered
+     * @param deepstackScattered N tensors each [1][seq][hidden_size], pre-scattered (N = numDeepstack)
      * @param embedModel      for embedding subsequent tokens
      * @return generated token IDs for each batch element (excluding EOS)
      */
@@ -85,17 +98,18 @@ public class Qwen3VlDecoderModel implements AutoCloseable {
         prefillInputs.put("inputs_embeds", ArrayUtil.createOnnxTensor(inputsEmbeds, env));
         prefillInputs.put("attention_mask", createLongTensor2D(attentionMask));
         prefillInputs.put("position_ids", createLongTensor3D(positionIds));
-        prefillInputs.put("deepstack_scattered_0", ArrayUtil.createOnnxTensor(deepstackScattered[0], env));
-        prefillInputs.put("deepstack_scattered_1", ArrayUtil.createOnnxTensor(deepstackScattered[1], env));
-        prefillInputs.put("deepstack_scattered_2", ArrayUtil.createOnnxTensor(deepstackScattered[2], env));
+        for (int d = 0; d < numDeepstack; d++) {
+            prefillInputs.put(String.format(Locale.ROOT, "deepstack_scattered_%d", d),
+                    ArrayUtil.createOnnxTensor(deepstackScattered[d], env));
+        }
 
-        for (int i = 0; i < NUM_LAYERS; i++) {
+        for (int i = 0; i < numLayers; i++) {
             OnnxTensor emptyK = OnnxTensor.createTensor(env,
                     FloatBuffer.wrap(new float[0]),
-                    new long[]{batchSize, NUM_KV_HEADS, 0, HEAD_DIM});
+                    new long[]{batchSize, numKvHeads, 0, headDim});
             OnnxTensor emptyV = OnnxTensor.createTensor(env,
                     FloatBuffer.wrap(new float[0]),
-                    new long[]{batchSize, NUM_KV_HEADS, 0, HEAD_DIM});
+                    new long[]{batchSize, numKvHeads, 0, headDim});
             prefillInputs.put(String.format(Locale.ROOT, "past_key_values.%d.key", i), emptyK);
             prefillInputs.put(String.format(Locale.ROOT, "past_key_values.%d.value", i), emptyV);
         }
@@ -103,8 +117,8 @@ public class Qwen3VlDecoderModel implements AutoCloseable {
         OrtSession.Result prefillResult = session.run(prefillInputs, outputNames);
 
         float[][][] logits = (float[][][]) prefillResult.get("logits").get().getValue();
-        float[][][][][] kvCache = new float[NUM_LAYERS * 2][][][][];
-        for (int i = 0; i < NUM_LAYERS; i++) {
+        float[][][][][] kvCache = new float[numLayers * 2][][][][];
+        for (int i = 0; i < numLayers; i++) {
             kvCache[2 * i] = (float[][][][]) prefillResult
                     .get(String.format(Locale.ROOT, "present.%d.key", i)).get().getValue();
             kvCache[2 * i + 1] = (float[][][][]) prefillResult
@@ -163,12 +177,13 @@ public class Qwen3VlDecoderModel implements AutoCloseable {
             inputs.put("position_ids", createLongTensor3D(decodePosIds));
 
             // Deepstack: zeros for decode steps
-            float[][][] zeros = new float[batchSize][1][HIDDEN_SIZE];
-            inputs.put("deepstack_scattered_0", ArrayUtil.createOnnxTensor(zeros, env));
-            inputs.put("deepstack_scattered_1", ArrayUtil.createOnnxTensor(zeros, env));
-            inputs.put("deepstack_scattered_2", ArrayUtil.createOnnxTensor(zeros, env));
+            for (int d = 0; d < numDeepstack; d++) {
+                float[][][] zeros = new float[batchSize][1][hiddenSize];
+                inputs.put(String.format(Locale.ROOT, "deepstack_scattered_%d", d),
+                        ArrayUtil.createOnnxTensor(zeros, env));
+            }
 
-            for (int i = 0; i < NUM_LAYERS; i++) {
+            for (int i = 0; i < numLayers; i++) {
                 inputs.put(String.format(Locale.ROOT, "past_key_values.%d.key", i),
                         ArrayUtil.createOnnxTensor(kvCache[2 * i], env));
                 inputs.put(String.format(Locale.ROOT, "past_key_values.%d.value", i),
@@ -178,7 +193,7 @@ public class Qwen3VlDecoderModel implements AutoCloseable {
             OrtSession.Result stepResult = session.run(inputs, outputNames);
 
             logits = (float[][][]) stepResult.get("logits").get().getValue();
-            for (int i = 0; i < NUM_LAYERS; i++) {
+            for (int i = 0; i < numLayers; i++) {
                 kvCache[2 * i] = (float[][][][]) stepResult
                         .get(String.format(Locale.ROOT, "present.%d.key", i)).get().getValue();
                 kvCache[2 * i + 1] = (float[][][][]) stepResult

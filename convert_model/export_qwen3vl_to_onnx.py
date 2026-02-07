@@ -3,15 +3,16 @@ Export Qwen3-VL-2B-Instruct to ONNX format.
 Run: D:\\conda\\envs\\qwen3vlonnx\\python convert_model\\export_qwen3vl_to_onnx.py
 
 Exports 3 ONNX files:
-  1. vision_encoder.onnx    — Qwen3VLVisionModel (pixel_values + image_grid_thw → image_features + deepstack_0/1/2)
+  1. vision_encoder.onnx    — Qwen3VLVisionModel (pixel_values + image_grid_thw → image_features + deepstack_*)
   2. embed_tokens.onnx      — Embedding layer (input_ids → inputs_embeds)
   3. decoder_model_merged.onnx — Text decoder with KV-cache + deepstack fusion (inputs_embeds + position_ids + ... → logits + present KV)
 
-Architecture: 28 decoder layers, 16 heads (8 KV heads, GQA), hidden=2048, head_dim=128, vocab=151936
-DeepStack: layers 5,11,17 → 3 extra vision feature tensors injected into decoder layers 0,1,2
+Architecture: Decoder layers, heads, hidden size etc. read from config.json.
+DeepStack: N extra vision feature tensors (from config vision_config.deepstack_visual_indexes) injected into first N decoder layers.
 MRoPE: 3D position_ids [3, batch, seq] with interleaved sections [24,20,20]
 Weight tying: lm_head.weight == embed_tokens.weight
 """
+import json
 import os
 import gc
 import torch
@@ -23,46 +24,68 @@ MODEL_DIR = r"D:\models\Qwen3-VL-2B-Instruct"
 ONNX_DIR = r"D:\models\onnx\Qwen3-VL-2B-Instruct"
 OPSET_VERSION = 17
 
-# Model constants
-NUM_LAYERS = 28
-NUM_KV_HEADS = 8
-HEAD_DIM = 128
-HIDDEN_SIZE = 2048
-VOCAB_SIZE = 151936
+# Read model config to determine deepstack count dynamically
+with open(os.path.join(MODEL_DIR, "config.json"), "r", encoding="utf-8") as f:
+    _config = json.load(f)
+_deepstack_indexes = _config.get("vision_config", {}).get("deepstack_visual_indexes", [8, 16, 24])
+NUM_DEEPSTACK = len(_deepstack_indexes)
+print(f"Config: deepstack_visual_indexes={_deepstack_indexes}, NUM_DEEPSTACK={NUM_DEEPSTACK}")
+
+# Model constants (from config)
+NUM_LAYERS = _config.get("text_config", {}).get("num_hidden_layers", 28)
+NUM_KV_HEADS = _config.get("text_config", {}).get("num_key_value_heads", 8)
+HEAD_DIM = _config.get("text_config", {}).get("head_dim", 128)
+HIDDEN_SIZE = _config.get("text_config", {}).get("hidden_size", 2048)
+VOCAB_SIZE = _config.get("text_config", {}).get("vocab_size", 151936)
 
 
 def export_vision_encoder(model):
-    """Export vision encoder: pixel_values + image_grid_thw → image_features + deepstack_0/1/2"""
+    """Export vision encoder: pixel_values + image_grid_thw → image_features + deepstack_features_*"""
     print("\n=== Exporting Vision Encoder ===")
+    print(f"  NUM_DEEPSTACK={NUM_DEEPSTACK} (from config deepstack_visual_indexes={_deepstack_indexes})")
+
+    num_deepstack = NUM_DEEPSTACK
 
     class VisionEncoderWrapper(nn.Module):
-        def __init__(self, visual):
+        def __init__(self, visual, num_ds):
             super().__init__()
             self.visual = visual
+            self.num_ds = num_ds
 
         def forward(self, hidden_states, grid_thw):
             output = self.visual(hidden_states, grid_thw=grid_thw, return_dict=True)
-            image_features = output.pooler_output  # merged features [num_merged, 2048]
-            ds0 = output.deepstack_features[0]  # [num_merged, 2048]
-            ds1 = output.deepstack_features[1]
-            ds2 = output.deepstack_features[2]
-            return image_features, ds0, ds1, ds2
+            image_features = output.pooler_output
+            results = [image_features]
+            for i in range(self.num_ds):
+                results.append(output.deepstack_features[i])
+            return tuple(results)
 
-    wrapper = VisionEncoderWrapper(model.model.visual).eval()
+    wrapper = VisionEncoderWrapper(model.model.visual, num_deepstack).eval()
 
-    # Dummy inputs: 1 image, grid_thw = [1, 12, 24] → 288 patches
-    # pixel_values shape: [num_patches, 1536] where 1536 = 3*2*16*16
-    num_patches = 288  # 1 * 12 * 24
-    dummy_pixel_values = torch.randn(num_patches, 1536, dtype=torch.float32)
+    # Dummy inputs: grid_thw determines num_patches = prod(grid_thw[0])
     dummy_grid_thw = torch.tensor([[1, 12, 24]], dtype=torch.long)
+    num_patches = int(dummy_grid_thw[0].prod().item())  # 1 * 12 * 24 = 288
+    dummy_pixel_values = torch.randn(num_patches, 1536, dtype=torch.float32)
+    print(f"  Dummy grid_thw={dummy_grid_thw.tolist()}, num_patches={num_patches}")
 
     # Test forward
     with torch.no_grad():
         out = wrapper(dummy_pixel_values, dummy_grid_thw)
         print(f"  image_features shape: {out[0].shape}")
-        print(f"  deepstack_0 shape: {out[1].shape}")
-        print(f"  deepstack_1 shape: {out[2].shape}")
-        print(f"  deepstack_2 shape: {out[3].shape}")
+        for i in range(num_deepstack):
+            print(f"  deepstack_{i} shape: {out[i + 1].shape}")
+
+    # Build output names and dynamic axes dynamically
+    output_names = ["image_features"]
+    dynamic_axes = {
+        "pixel_values": {0: "num_patches"},
+        "image_grid_thw": {0: "num_images"},
+        "image_features": {0: "num_merged_patches"},
+    }
+    for i in range(num_deepstack):
+        name = f"deepstack_features_{i}"
+        output_names.append(name)
+        dynamic_axes[name] = {0: "num_merged_patches"}
 
     onnx_path = os.path.join(ONNX_DIR, "vision_encoder.onnx")
     torch.onnx.export(
@@ -70,15 +93,8 @@ def export_vision_encoder(model):
         (dummy_pixel_values, dummy_grid_thw),
         onnx_path,
         input_names=["pixel_values", "image_grid_thw"],
-        output_names=["image_features", "deepstack_features_0", "deepstack_features_1", "deepstack_features_2"],
-        dynamic_axes={
-            "pixel_values": {0: "num_patches"},
-            "image_grid_thw": {0: "num_images"},
-            "image_features": {0: "num_merged_patches"},
-            "deepstack_features_0": {0: "num_merged_patches"},
-            "deepstack_features_1": {0: "num_merged_patches"},
-            "deepstack_features_2": {0: "num_merged_patches"},
-        },
+        output_names=output_names,
+        dynamic_axes=dynamic_axes,
         opset_version=OPSET_VERSION,
         do_constant_folding=True,
     )
@@ -116,6 +132,9 @@ def export_embed_tokens(model):
 def export_decoder(model):
     """Export decoder with KV-cache + deepstack fusion."""
     print("\n=== Exporting Decoder (merged prefill/decode with KV-cache + deepstack) ===")
+    print(f"  NUM_DEEPSTACK={NUM_DEEPSTACK}")
+
+    num_deepstack = NUM_DEEPSTACK
 
     class DecoderWrapper(nn.Module):
         """Wraps Qwen3VLTextModel + lm_head with explicit KV-cache I/O and deepstack.
@@ -126,29 +145,32 @@ def export_decoder(model):
           - deepstack_features_* = empty [0, hidden_size]
         This makes the boolean indexing a no-op (selects 0 elements).
         """
-        def __init__(self, language_model, lm_head):
+        def __init__(self, language_model, lm_head, num_ds):
             super().__init__()
             self.language_model = language_model
             self.lm_head = nn.Linear(HIDDEN_SIZE, VOCAB_SIZE, bias=False)
             self.lm_head.weight = lm_head.weight
+            self.num_ds = num_ds
 
         def forward(self, inputs_embeds, attention_mask, position_ids,
-                    deepstack_features_0, deepstack_features_1, deepstack_features_2,
-                    visual_pos_mask,
-                    *past_key_values_flat):
+                    *args):
             """
             Args:
-                inputs_embeds: [batch, seq_len, 2048]
+                inputs_embeds: [batch, seq_len, hidden]
                 attention_mask: [batch, total_len]
                 position_ids: [3, batch, seq_len] — T/H/W MRoPE positions
-                deepstack_features_0/1/2: [num_vis_tokens, 2048] — deepstack per layer
-                visual_pos_mask: [batch, seq_len] — bool mask (True = visual token position)
-                *past_key_values_flat: alternating key, value tensors for each layer
-                    each [batch, num_kv_heads, past_len, head_dim]
+                *args: first num_ds tensors are deepstack_features_i [num_vis_tokens, hidden],
+                       then visual_pos_mask [batch, seq_len],
+                       then NUM_LAYERS*2 past KV tensors
             Returns:
                 logits: [batch, seq_len, vocab_size]
                 present key/value tensors for each layer
             """
+            # Split args: deepstack tensors, visual_pos_mask, past KV
+            deepstack_features = list(args[:self.num_ds])
+            visual_pos_mask = args[self.num_ds]
+            past_key_values_flat = args[self.num_ds + 1:]
+
             # Reconstruct DynamicCache from flat KV tensors
             past_key_values = DynamicCache()
             for i in range(NUM_LAYERS):
@@ -160,11 +182,6 @@ def export_decoder(model):
 
             # Always pass deepstack — no conditional branching
             visual_pos_masks_bool = visual_pos_mask.bool()
-            deepstack_visual_embeds = [
-                deepstack_features_0,
-                deepstack_features_1,
-                deepstack_features_2,
-            ]
 
             outputs = self.language_model(
                 inputs_embeds=inputs_embeds,
@@ -174,7 +191,7 @@ def export_decoder(model):
                 use_cache=True,
                 return_dict=True,
                 visual_pos_masks=visual_pos_masks_bool,
-                deepstack_visual_embeds=deepstack_visual_embeds,
+                deepstack_visual_embeds=deepstack_features,
             )
 
             logits = self.lm_head(outputs.last_hidden_state)
@@ -188,7 +205,7 @@ def export_decoder(model):
 
             return (logits, *new_pkv)
 
-    wrapper = DecoderWrapper(model.model.language_model, model.lm_head).eval()
+    wrapper = DecoderWrapper(model.model.language_model, model.lm_head, num_deepstack).eval()
 
     # Dummy inputs for tracing — include visual tokens so deepstack path is traced
     batch_size = 1
@@ -200,10 +217,8 @@ def export_decoder(model):
     dummy_attention_mask = torch.ones(batch_size, seq_len + past_len, dtype=torch.long)
     dummy_position_ids = torch.zeros(3, batch_size, seq_len, dtype=torch.long)
 
-    # Deepstack features matching number of visual tokens
-    dummy_ds0 = torch.randn(num_vis_tokens, HIDDEN_SIZE)
-    dummy_ds1 = torch.randn(num_vis_tokens, HIDDEN_SIZE)
-    dummy_ds2 = torch.randn(num_vis_tokens, HIDDEN_SIZE)
+    # Deepstack features matching number of visual tokens — one per deepstack level
+    dummy_deepstack = [torch.randn(num_vis_tokens, HIDDEN_SIZE) for _ in range(num_deepstack)]
 
     # Visual position mask — positions 1 and 3 are visual tokens
     dummy_visual_mask = torch.zeros(batch_size, seq_len, dtype=torch.bool)
@@ -211,11 +226,10 @@ def export_decoder(model):
     dummy_visual_mask[0, 3] = True
 
     past_key_values = []
-    input_names = [
-        "inputs_embeds", "attention_mask", "position_ids",
-        "deepstack_features_0", "deepstack_features_1", "deepstack_features_2",
-        "visual_pos_mask",
-    ]
+    input_names = ["inputs_embeds", "attention_mask", "position_ids"]
+    for i in range(num_deepstack):
+        input_names.append(f"deepstack_features_{i}")
+    input_names.append("visual_pos_mask")
     output_names = ["logits"]
 
     for i in range(NUM_LAYERS):
@@ -230,7 +244,7 @@ def export_decoder(model):
         output_names.append(f"present.{i}.value")
 
     args = (dummy_inputs_embeds, dummy_attention_mask, dummy_position_ids,
-            dummy_ds0, dummy_ds1, dummy_ds2, dummy_visual_mask,
+            *dummy_deepstack, dummy_visual_mask,
             *past_key_values)
 
     # Test forward
@@ -243,12 +257,11 @@ def export_decoder(model):
         "inputs_embeds": {0: "batch_size", 1: "sequence_length"},
         "attention_mask": {0: "batch_size", 1: "total_sequence_length"},
         "position_ids": {1: "batch_size", 2: "sequence_length"},
-        "deepstack_features_0": {0: "num_visual_tokens"},
-        "deepstack_features_1": {0: "num_visual_tokens"},
-        "deepstack_features_2": {0: "num_visual_tokens"},
         "visual_pos_mask": {0: "batch_size", 1: "sequence_length"},
         "logits": {0: "batch_size", 1: "sequence_length"},
     }
+    for i in range(num_deepstack):
+        dynamic_axes[f"deepstack_features_{i}"] = {0: "num_visual_tokens"}
     for i in range(NUM_LAYERS):
         dynamic_axes[f"past_key_values.{i}.key"] = {0: "batch_size", 2: "past_sequence_length"}
         dynamic_axes[f"past_key_values.{i}.value"] = {0: "batch_size", 2: "past_sequence_length"}
