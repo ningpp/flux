@@ -20,7 +20,7 @@ package io.github.flux.unirec;
 import ai.djl.ndarray.NDManager;
 import ai.onnxruntime.OrtEnvironment;
 import io.github.flux.core.BatchPredictor;
-import io.github.flux.core.InstanceKey;
+import io.github.flux.core.ModelInstanceKey;
 import io.github.flux.core.MatManager;
 import io.github.flux.core.PreProcessResult;
 import io.github.flux.core.TextResult;
@@ -42,7 +42,7 @@ public class UnirecPredictor extends BatchPredictor<PreProcessResult, TextResult
     );
 
     // Shared instance cache to avoid creating multiple expensive model instances
-    private static final Map<InstanceKey, UnirecPredictor> INSTANCE_CACHE = new ConcurrentHashMap<>();
+    private static final Map<ModelInstanceKey, UnirecPredictor> INSTANCE_CACHE = new ConcurrentHashMap<>();
 
     static {
         FormulaRecognitionModel.getRegistry().register(MODEL_NAMES, UnirecFormulaModel::new);
@@ -60,15 +60,17 @@ public class UnirecPredictor extends BatchPredictor<PreProcessResult, TextResult
      * @param modelName the name of the model
      * @param gpuIndex the GPU index to use (-1 for CPU)
      * @param env the ONNX runtime environment
+     * @param customParams custom initialization parameters (e.g., encoder GPU, decoder GPU)
      * @return a shared instance of the model
      */
     public static UnirecPredictor getSharedInstance(final String modelRootDir,
                                                      final String modelName,
                                                      final int gpuIndex,
-                                                     final OrtEnvironment env) {
-        InstanceKey key = new InstanceKey(modelRootDir, modelName, gpuIndex);
+                                                     final OrtEnvironment env,
+                                                     final Map<String, Object> customParams) {
+        ModelInstanceKey key = new ModelInstanceKey(modelRootDir, modelName, gpuIndex, customParams);
         return INSTANCE_CACHE.computeIfAbsent(key, k ->
-            new UnirecPredictor(modelRootDir, modelName, gpuIndex, env));
+            new UnirecPredictor(modelRootDir, modelName, gpuIndex, env, customParams));
     }
 
     /**
@@ -77,7 +79,8 @@ public class UnirecPredictor extends BatchPredictor<PreProcessResult, TextResult
     private UnirecPredictor(final String modelRootDir,
                             final String modelName,
                             final int gpuIndex,
-                            final OrtEnvironment env) {
+                            final OrtEnvironment env,
+                            final Map<String, Object> customParams) {
         if (!MODEL_NAMES.contains(modelName)) {
             throw new FluxException("not supported unirec model: " + modelName);
         }

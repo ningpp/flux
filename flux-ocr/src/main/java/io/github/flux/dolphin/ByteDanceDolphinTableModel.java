@@ -40,8 +40,9 @@ public class ByteDanceDolphinTableModel extends BatchPredictor<PreProcessResult,
     public ByteDanceDolphinTableModel(final String modelRootDir,
                                       final String modelName,
                                       final int gpuIndex,
-                                      final OrtEnvironment env) {
-        this.model = ByteDanceDolphinElementModel.getSharedInstance(modelRootDir, modelName, gpuIndex, env);
+                                      final OrtEnvironment env,
+                                      final Map<String, Object> customParams) {
+        this.model = ByteDanceDolphinElementModel.getSharedInstance(modelRootDir, modelName, gpuIndex, env, customParams);
     }
 
     @Override

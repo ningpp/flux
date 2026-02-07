@@ -22,7 +22,7 @@ import ai.djl.ndarray.NDManager;
 import ai.onnxruntime.OnnxTensor;
 import ai.onnxruntime.OrtEnvironment;
 import io.github.flux.core.BatchPredictor;
-import io.github.flux.core.InstanceKey;
+import io.github.flux.core.ModelInstanceKey;
 import io.github.flux.core.MatManager;
 import io.github.flux.core.PreProcessResult;
 import io.github.flux.core.TextResult;
@@ -47,7 +47,7 @@ public class ByteDanceDolphinElementModel extends BatchPredictor<PreProcessResul
     );
 
     // Shared instance cache to avoid creating multiple expensive model instances
-    private static final Map<InstanceKey, ByteDanceDolphinElementModel> INSTANCE_CACHE = new ConcurrentHashMap<>();
+    private static final Map<ModelInstanceKey, ByteDanceDolphinElementModel> INSTANCE_CACHE = new ConcurrentHashMap<>();
 
     static {
         FormulaRecognitionModel.getRegistry().register(MODEL_NAMES, ByteDanceDolphinFormulaModel::new);
@@ -70,15 +70,17 @@ public class ByteDanceDolphinElementModel extends BatchPredictor<PreProcessResul
      * @param modelName the name of the model
      * @param gpuIndex the GPU index to use (-1 for CPU)
      * @param env the ONNX runtime environment
+     * @param customParams custom initialization parameters (e.g., encoder GPU, decoder GPU)
      * @return a shared instance of the model
      */
     public static ByteDanceDolphinElementModel getSharedInstance(final String modelRootDir,
                                                                   final String modelName,
                                                                   final int gpuIndex,
-                                                                  final OrtEnvironment env) {
-        InstanceKey key = new InstanceKey(modelRootDir, modelName, gpuIndex);
+                                                                  final OrtEnvironment env,
+                                                                  final Map<String, Object> customParams) {
+        ModelInstanceKey key = new ModelInstanceKey(modelRootDir, modelName, gpuIndex, customParams);
         return INSTANCE_CACHE.computeIfAbsent(key, k ->
-            new ByteDanceDolphinElementModel(modelRootDir, modelName, gpuIndex, env));
+            new ByteDanceDolphinElementModel(modelRootDir, modelName, gpuIndex, env, customParams));
     }
 
     /**
@@ -87,7 +89,8 @@ public class ByteDanceDolphinElementModel extends BatchPredictor<PreProcessResul
     private ByteDanceDolphinElementModel(final String modelRootDir,
                                          final String modelName,
                                          final int gpuIndex,
-                                         final OrtEnvironment env) {
+                                         final OrtEnvironment env,
+                                         final Map<String, Object> customParams) {
         if (!MODEL_NAMES.contains(modelName)) {
             throw new FluxException("not supported pix2text model: " + modelName);
         }

@@ -53,7 +53,8 @@ public class TexTellerPredictor extends BatchPredictor<PreProcessResult, TextRes
     public TexTellerPredictor(final String modelRootDir,
                               final String modelName,
                               final int gpuIndex,
-                              final OrtEnvironment env) {
+                              final OrtEnvironment env,
+                              final Map<String, Object> customParams) {
         if (!MODEL_NAMES.contains(modelName)) {
             throw new FluxException("not supported TexTeller model: " + modelName);
         }

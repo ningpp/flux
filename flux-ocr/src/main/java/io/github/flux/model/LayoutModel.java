@@ -18,6 +18,7 @@ import org.opencv.core.Mat;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.HashMap;
 
 public class LayoutModel extends BatchPredictor<ProcessedMat, List<ObjectDetectionResult>> {
 
@@ -41,16 +42,24 @@ public class LayoutModel extends BatchPredictor<ProcessedMat, List<ObjectDetecti
     private final BatchPredictor<ProcessedMat, List<ObjectDetectionResult>> predictor;
 
     public LayoutModel(ModelParam param) {
-        this(param.modelRootDir(), param.modelName(), param.gpuIndex(), param.env());
+        this(param.modelRootDir(), param.modelName(), param.gpuIndex(), param.env(), new HashMap<>());
     }
 
     public LayoutModel(final String modelRootDir,
                        final String modelName,
                        final int gpuIndex,
                        final OrtEnvironment env) {
+        this(modelRootDir, modelName, gpuIndex, env, new HashMap<>());
+    }
+
+    public LayoutModel(final String modelRootDir,
+                       final String modelName,
+                       final int gpuIndex,
+                       final OrtEnvironment env,
+                       final Map<String, Object> customParams) {
         ModelFactory<BatchPredictor<ProcessedMat, List<ObjectDetectionResult>>> factory = REGISTRY.getFactory(modelName)
                 .orElseThrow(() -> new FluxException("not supported layout model: " + modelName));
-        predictor = factory.create(modelRootDir, modelName, gpuIndex, env);
+        predictor = factory.create(modelRootDir, modelName, gpuIndex, env, customParams);
     }
 
     public static ModelRegistry<BatchPredictor<ProcessedMat, List<ObjectDetectionResult>>> getRegistry() {

@@ -71,7 +71,8 @@ public class GraniteDoclingFormulaModel extends BatchPredictor<PreProcessResult,
                                       final String modelName,
                                       final int gpuIndex,
                                       final OrtEnvironment env,
-                                      final int maxLength) {
+                                      final int maxLength,
+                                      final Map<String, Object> customParams) {
         if (!MODEL_NAMES.contains(modelName)) {
             throw new FluxException("not supported model: " + modelName);
         }

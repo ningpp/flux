@@ -17,6 +17,8 @@ package io.github.flux.core;
 
 import ai.onnxruntime.OrtEnvironment;
 
+import java.util.Map;
+
 /**
  * Factory interface for creating model instances.
  *
@@ -32,7 +34,8 @@ public interface ModelFactory<T> {
      * @param modelName the name of the model
      * @param gpuIndex the GPU index to use (-1 for CPU)
      * @param env the OrtEnvironment for ONNX Runtime
+     * @param customParams custom initialization parameters (e.g., encoder GPU, decoder GPU)
      * @return a new model instance
      */
-    T create(String modelRootDir, String modelName, int gpuIndex, OrtEnvironment env);
+    T create(String modelRootDir, String modelName, int gpuIndex, OrtEnvironment env, Map<String, Object> customParams);
 }

@@ -21,6 +21,7 @@ import org.opencv.core.Mat;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.HashMap;
 
 public class TableModel extends BatchPredictor<PreProcessResult, TableResult> {
 
@@ -37,7 +38,7 @@ public class TableModel extends BatchPredictor<PreProcessResult, TableResult> {
 
         // UnirecTableModel needs special handling as it wraps UnirecPredictor
         REGISTRY.register(UnirecPredictor.MODEL_NAMES,
-                (dir, name, gpu, env) -> new UnirecTableModel(UnirecPredictor.getSharedInstance(dir, name, gpu, env)));
+                (dir, name, gpu, env, customParams) -> new UnirecTableModel(UnirecPredictor.getSharedInstance(dir, name, gpu, env, customParams)));
     }
 
     private final BatchPredictor<PreProcessResult, TableResult> predictor;
@@ -48,16 +49,24 @@ public class TableModel extends BatchPredictor<PreProcessResult, TableResult> {
     ));
 
     public TableModel(ModelParam param) {
-        this(param.modelRootDir(), param.modelName(), param.gpuIndex(), param.env());
+        this(param.modelRootDir(), param.modelName(), param.gpuIndex(), param.env(), new HashMap<>());
     }
 
     public TableModel(final String modelRootDir,
                       final String modelName,
                       final int gpuIndex,
                       final OrtEnvironment env) {
+        this(modelRootDir, modelName, gpuIndex, env, new HashMap<>());
+    }
+
+    public TableModel(final String modelRootDir,
+                      final String modelName,
+                      final int gpuIndex,
+                      final OrtEnvironment env,
+                      final Map<String, Object> customParams) {
         ModelFactory<BatchPredictor<PreProcessResult, TableResult>> factory = REGISTRY.getFactory(modelName)
                 .orElseThrow(() -> new FluxException("not supported table model: " + modelName));
-        this.predictor = factory.create(modelRootDir, modelName, gpuIndex, env);
+        this.predictor = factory.create(modelRootDir, modelName, gpuIndex, env, customParams);
     }
 
     public static ModelRegistry<BatchPredictor<PreProcessResult, TableResult>> getRegistry() {

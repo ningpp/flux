@@ -52,7 +52,8 @@ public class Pix2TextFormulaRecognitionPredictor extends BatchPredictor<PreProce
     public Pix2TextFormulaRecognitionPredictor(final String modelRootDir,
                                                final String modelName,
                                                final int gpuIndex,
-                                               final OrtEnvironment env) {
+                                               final OrtEnvironment env,
+                                               final Map<String, Object> customParams) {
         if (!MODEL_NAMES.contains(modelName)) {
             throw new FluxException("not supported pix2text model: " + modelName);
         }

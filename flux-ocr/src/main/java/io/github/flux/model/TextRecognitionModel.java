@@ -20,6 +20,7 @@ import java.io.File;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.HashMap;
 
 public class TextRecognitionModel extends BatchPredictor<PreProcessResult, List<RecognitionResult>> {
 
@@ -27,7 +28,7 @@ public class TextRecognitionModel extends BatchPredictor<PreProcessResult, List<
 
     static {
         ModelFactory<BatchPredictor<PreProcessResult, List<RecognitionResult>>> factory =
-                (modelDir, modelName, gpuIndex, env) -> {
+                (modelDir, modelName, gpuIndex, env, customParams) -> {
                     List<ImageProcessor> preProcessors = List.of(
                             new OCRResizeNormImg()
                     );
@@ -60,13 +61,17 @@ public class TextRecognitionModel extends BatchPredictor<PreProcessResult, List<
     }
 
     public TextRecognitionModel(ModelParam param) {
-        this(param.modelRootDir(), param.modelName(), param.env(), param.gpuIndex());
+        this(param.modelRootDir(), param.modelName(), param.env(), param.gpuIndex(), new HashMap<>());
     }
 
     public TextRecognitionModel(String modelDir, String modelName, OrtEnvironment env, int gpuIndex) {
+        this(modelDir, modelName, env, gpuIndex, new HashMap<>());
+    }
+
+    public TextRecognitionModel(String modelDir, String modelName, OrtEnvironment env, int gpuIndex, Map<String, Object> customParams) {
         ModelFactory<BatchPredictor<PreProcessResult, List<RecognitionResult>>> factory = REGISTRY.getFactory(modelName)
                 .orElseThrow(() -> new FluxException("Not Supported Model: " + modelName));
-        BatchPredictor<PreProcessResult, List<RecognitionResult>> temp = factory.create(modelDir, modelName, gpuIndex, env);
+        BatchPredictor<PreProcessResult, List<RecognitionResult>> temp = factory.create(modelDir, modelName, gpuIndex, env, customParams);
         if (temp instanceof TextRecognitionPredictor) {
             this.predictor = ((TextRecognitionPredictor) temp).getPredictor();
         } else {

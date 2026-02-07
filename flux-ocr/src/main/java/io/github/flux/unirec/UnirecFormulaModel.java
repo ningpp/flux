@@ -40,8 +40,9 @@ public class UnirecFormulaModel extends BatchPredictor<PreProcessResult, TextRes
     public UnirecFormulaModel(final String modelRootDir,
                               final String modelName,
                               final int gpuIndex,
-                              final OrtEnvironment env) {
-        this.predictor = UnirecPredictor.getSharedInstance(modelRootDir, modelName, gpuIndex, env);
+                              final OrtEnvironment env,
+                              final Map<String, Object> customParams) {
+        this.predictor = UnirecPredictor.getSharedInstance(modelRootDir, modelName, gpuIndex, env, customParams);
     }
 
     @Override

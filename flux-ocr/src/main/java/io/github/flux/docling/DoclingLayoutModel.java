@@ -73,7 +73,8 @@ public class DoclingLayoutModel extends BatchPredictor<ProcessedMat, List<Object
     public DoclingLayoutModel(final String modelDir,
                               final String modelName,
                               final int gpuIndex,
-                              final OrtEnvironment env) {
+                              final OrtEnvironment env,
+                              final Map<String, Object> customParams) {
         try {
             this.env = env;
             OrtSession.SessionOptions options = new OrtSession.SessionOptions();

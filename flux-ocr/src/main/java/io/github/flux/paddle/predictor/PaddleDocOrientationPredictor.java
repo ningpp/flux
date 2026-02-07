@@ -55,7 +55,7 @@ public class PaddleDocOrientationPredictor extends BatchPredictor<PreProcessResu
         this(param.modelRootDir(), param.modelName(), param.env(), param.gpuIndex());
     }
 
-    public PaddleDocOrientationPredictor(String modelRootDir, String modelName, OrtEnvironment env, int gpuIndex) {
+    public PaddleDocOrientationPredictor(String modelRootDir, String modelName, OrtEnvironment env, int gpuIndex, Map<String, Object> customParams) {
         if (!MODEL_NAMES.contains(modelName)) {
             throw new FluxException("Not Supported Model: " + modelName);
         }

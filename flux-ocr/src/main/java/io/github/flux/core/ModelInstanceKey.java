@@ -15,6 +15,8 @@
  */
 package io.github.flux.core;
 
+import java.util.Map;
+
 /**
  * Key for caching shared model instances based on configuration parameters.
  * Used by models that implement instance sharing to avoid creating multiple
@@ -23,6 +25,7 @@ package io.github.flux.core;
  * @param modelRootDir the root directory containing model files
  * @param modelName the name of the model
  * @param gpuIndex the GPU index to use (-1 for CPU)
+ * @param customParams custom initialization parameters (e.g., encoder GPU, decoder GPU)
  */
-public record InstanceKey(String modelRootDir, String modelName, int gpuIndex) {
+public record ModelInstanceKey(String modelRootDir, String modelName, int gpuIndex, Map<String, Object> customParams) {
 }

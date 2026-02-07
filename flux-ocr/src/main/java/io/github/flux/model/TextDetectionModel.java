@@ -24,6 +24,7 @@ import java.io.File;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.HashMap;
 
 public class TextDetectionModel extends BatchPredictor<PreProcessResult, TextDetectionResult> {
 
@@ -31,7 +32,7 @@ public class TextDetectionModel extends BatchPredictor<PreProcessResult, TextDet
 
     static {
         ModelFactory<BatchPredictor<PreProcessResult, TextDetectionResult>> factory =
-                (modelDir, modelName, gpuIndex, env) -> {
+                (modelDir, modelName, gpuIndex, env, customParams) -> {
                     DetResize detResize = new DetResize(0, 960, LimitType.MAX);
                     List<ImageProcessor> preProcessors = List.of(
                             new Normalize(
@@ -73,13 +74,17 @@ public class TextDetectionModel extends BatchPredictor<PreProcessResult, TextDet
     }
 
     public TextDetectionModel(ModelParam param) {
-        this(param.modelRootDir(), param.modelName(), param.env(), param.gpuIndex());
+        this(param.modelRootDir(), param.modelName(), param.env(), param.gpuIndex(), new HashMap<>());
     }
 
     public TextDetectionModel(String modelDir, String modelName, OrtEnvironment env, int gpuIndex) {
+        this(modelDir, modelName, env, gpuIndex, new HashMap<>());
+    }
+
+    public TextDetectionModel(String modelDir, String modelName, OrtEnvironment env, int gpuIndex, Map<String, Object> customParams) {
         ModelFactory<BatchPredictor<PreProcessResult, TextDetectionResult>> factory = REGISTRY.getFactory(modelName)
                 .orElseThrow(() -> new FluxException("Not Supported Model: " + modelName));
-        BatchPredictor<PreProcessResult, TextDetectionResult> temp = factory.create(modelDir, modelName, gpuIndex, env);
+        BatchPredictor<PreProcessResult, TextDetectionResult> temp = factory.create(modelDir, modelName, gpuIndex, env, customParams);
         if (temp instanceof TextDetectionPredictor) {
             this.predictor = ((TextDetectionPredictor) temp).getPredictor();
         } else {

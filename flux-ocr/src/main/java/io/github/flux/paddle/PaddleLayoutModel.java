@@ -127,7 +127,8 @@ public class PaddleLayoutModel extends BatchPredictor<ProcessedMat, List<ObjectD
     public PaddleLayoutModel(final String modelDir,
                              final String modelName,
                              final int gpuIndex,
-                             final OrtEnvironment env) {
+                             final OrtEnvironment env,
+                             final Map<String, Object> customParams) {
         int resizeSize;
         Normalize normalize;
         DetPostProcessor detPostProcessor;

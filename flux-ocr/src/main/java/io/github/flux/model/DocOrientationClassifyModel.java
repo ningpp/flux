@@ -17,6 +17,7 @@ import org.opencv.core.Mat;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.HashMap;
 
 public class DocOrientationClassifyModel extends BatchPredictor<PreProcessResult, ClassificationResult> {
 
@@ -43,13 +44,17 @@ public class DocOrientationClassifyModel extends BatchPredictor<PreProcessResult
     private final BatchPredictor<PreProcessResult, ClassificationResult> predictor;
 
     public DocOrientationClassifyModel(ModelParam param) {
-        this(param.modelRootDir(), param.modelName(), param.env(), param.gpuIndex());
+        this(param.modelRootDir(), param.modelName(), param.env(), param.gpuIndex(), new HashMap<>());
     }
 
     public DocOrientationClassifyModel(String modelRootDir, String modelName, OrtEnvironment env, int gpuIndex) {
+        this(modelRootDir, modelName, env, gpuIndex, new HashMap<>());
+    }
+
+    public DocOrientationClassifyModel(String modelRootDir, String modelName, OrtEnvironment env, int gpuIndex, Map<String, Object> customParams) {
         ModelFactory<BatchPredictor<PreProcessResult, ClassificationResult>> factory = REGISTRY.getFactory(modelName)
                 .orElseThrow(() -> new FluxException("not supported doc orientation model: " + modelName));
-        predictor = factory.create(modelRootDir, modelName, gpuIndex, env);
+        predictor = factory.create(modelRootDir, modelName, gpuIndex, env, customParams);
     }
 
     public static ModelRegistry<BatchPredictor<PreProcessResult, ClassificationResult>> getRegistry() {

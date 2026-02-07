@@ -26,6 +26,7 @@ import org.opencv.core.Mat;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.HashMap;
 
 public class FormulaRecognitionModel extends BatchPredictor<PreProcessResult, TextResult> {
 
@@ -46,7 +47,7 @@ public class FormulaRecognitionModel extends BatchPredictor<PreProcessResult, Te
 
         // GraniteDoclingFormulaModel needs special handling due to extra maxLength parameter
         REGISTRY.register(GraniteDoclingFormulaModel.MODEL_NAMES,
-                (dir, name, gpu, env) -> new GraniteDoclingFormulaModel(dir, name, gpu, env, 8192));
+                (dir, name, gpu, env, customParams) -> new GraniteDoclingFormulaModel(dir, name, gpu, env, 8192, customParams));
     }
 
     private final BatchPredictor<PreProcessResult, TextResult> predictor;
@@ -62,16 +63,24 @@ public class FormulaRecognitionModel extends BatchPredictor<PreProcessResult, Te
     ));
 
     public FormulaRecognitionModel(ModelParam param) {
-        this(param.modelRootDir(), param.modelName(), param.gpuIndex(), param.env());
+        this(param.modelRootDir(), param.modelName(), param.gpuIndex(), param.env(), new HashMap<>());
     }
 
     public FormulaRecognitionModel(final String modelRootDir,
                                    final String modelName,
                                    final int gpuIndex,
                                    final OrtEnvironment env) {
+        this(modelRootDir, modelName, gpuIndex, env, new HashMap<>());
+    }
+
+    public FormulaRecognitionModel(final String modelRootDir,
+                                   final String modelName,
+                                   final int gpuIndex,
+                                   final OrtEnvironment env,
+                                   final Map<String, Object> customParams) {
         ModelFactory<BatchPredictor<PreProcessResult, TextResult>> factory = REGISTRY.getFactory(modelName)
                 .orElseThrow(() -> new FluxException("not supported formula model: " + modelName));
-        this.predictor = factory.create(modelRootDir, modelName, gpuIndex, env);
+        this.predictor = factory.create(modelRootDir, modelName, gpuIndex, env, customParams);
     }
 
     public static ModelRegistry<BatchPredictor<PreProcessResult, TextResult>> getRegistry() {
