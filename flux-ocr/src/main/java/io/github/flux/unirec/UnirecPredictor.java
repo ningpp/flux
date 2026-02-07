@@ -27,6 +27,7 @@ import io.github.flux.exception.FluxException;
 import io.github.flux.util.IOUtil;
 import org.opencv.core.Mat;
 
+import io.github.flux.model.FormulaRecognitionModel;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
@@ -37,6 +38,10 @@ public class UnirecPredictor extends BatchPredictor<PreProcessResult, TextResult
     public static final List<String> MODEL_NAMES = List.of(
             "unirec-0.1b"
     );
+
+    static {
+        FormulaRecognitionModel.getRegistry().register(MODEL_NAMES, UnirecPredictor::new);
+    }
 
     private final UnirecEncoderModel encoderModel;
     private final UnirecDecoderModel decoderModel;

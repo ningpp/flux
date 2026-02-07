@@ -28,6 +28,7 @@ import io.github.flux.core.MatManager;
 import io.github.flux.core.ObjectDetectionResult;
 import io.github.flux.core.ProcessedMat;
 import io.github.flux.exception.FluxException;
+import io.github.flux.model.LayoutModel;
 import io.github.flux.paddle.processor.ImageProcessor;
 import io.github.flux.paddle.processor.Rescale;
 import io.github.flux.paddle.processor.Resize;
@@ -47,6 +48,18 @@ import java.util.Optional;
 import java.util.Set;
 
 public class DoclingLayoutModel extends BatchPredictor<ProcessedMat, List<ObjectDetectionResult>> {
+
+    public static final Set<String> MODEL_NAMES = Set.of(
+            "docling-layout-egret-large",
+            "docling-layout-egret-medium",
+            "docling-layout-egret-xlarge",
+            "docling-layout-heron",
+            "docling-layout-heron-101"
+    );
+
+    static {
+        LayoutModel.getRegistry().register(MODEL_NAMES, DoclingLayoutModel::new);
+    }
 
     private final OrtEnvironment env;
     private final OrtSession session;
@@ -75,14 +88,6 @@ public class DoclingLayoutModel extends BatchPredictor<ProcessedMat, List<Object
             throw new FluxException(e);
         }
     }
-
-    public static Set<String> MODEL_NAMES = Set.of(
-            "docling-layout-egret-large",
-            "docling-layout-egret-medium",
-            "docling-layout-egret-xlarge",
-            "docling-layout-heron",
-            "docling-layout-heron-101"
-    );
 
     private static final List<ImageProcessor> PREPROCESSORS = List.of(
             new Resize(640, 640, Imgproc.INTER_AREA),

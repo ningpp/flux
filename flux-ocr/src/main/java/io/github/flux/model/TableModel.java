@@ -27,7 +27,14 @@ public class TableModel extends BatchPredictor<PreProcessResult, TableResult> {
     private static final ModelRegistry<BatchPredictor<PreProcessResult, TableResult>> REGISTRY = new ModelRegistry<>();
 
     static {
-        REGISTRY.register(ByteDanceDolphinElementModel.MODEL_NAMES, ByteDanceDolphinTableModel::new);
+        // Trigger class loading to ensure models register themselves
+        try {
+            Class.forName(ByteDanceDolphinElementModel.class.getName());
+        } catch (ClassNotFoundException e) {
+            throw new FluxException("Failed to load model classes", e);
+        }
+
+        // UnirecTableModel needs special handling as it wraps UnirecPredictor
         REGISTRY.register(UnirecPredictor.MODEL_NAMES,
                 (dir, name, gpu, env) -> new UnirecTableModel(new UnirecPredictor(dir, name, gpu, env)));
     }

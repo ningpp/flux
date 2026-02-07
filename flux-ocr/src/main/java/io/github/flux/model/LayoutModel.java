@@ -24,8 +24,13 @@ public class LayoutModel extends BatchPredictor<ProcessedMat, List<ObjectDetecti
     private static final ModelRegistry<BatchPredictor<ProcessedMat, List<ObjectDetectionResult>>> REGISTRY = new ModelRegistry<>();
 
     static {
-        REGISTRY.register(DoclingLayoutModel.MODEL_NAMES, DoclingLayoutModel::new);
-        REGISTRY.register(PaddleLayoutModel.MODEL_NAMES, PaddleLayoutModel::new);
+        // Trigger class loading to ensure models register themselves
+        try {
+            Class.forName(DoclingLayoutModel.class.getName());
+            Class.forName(PaddleLayoutModel.class.getName());
+        } catch (ClassNotFoundException e) {
+            throw new FluxException("Failed to load model classes", e);
+        }
     }
 
     public static final Set<String> MODEL_NAMES = CollectionUtil.distinct(List.of(

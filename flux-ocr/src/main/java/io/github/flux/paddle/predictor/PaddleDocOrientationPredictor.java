@@ -26,6 +26,7 @@ import io.github.flux.core.MatManager;
 import io.github.flux.core.ModelParam;
 import io.github.flux.core.PreProcessResult;
 import io.github.flux.exception.FluxException;
+import io.github.flux.model.DocOrientationClassifyModel;
 import io.github.flux.paddle.processor.Crop;
 import io.github.flux.paddle.processor.ImageProcessor;
 import io.github.flux.paddle.processor.Normalize;
@@ -43,6 +44,10 @@ import java.util.Set;
 public class PaddleDocOrientationPredictor extends BatchPredictor<PreProcessResult, ClassificationResult> {
 
     public static final Set<String> MODEL_NAMES = Set.of("PP-LCNet_x1_0_doc_ori");
+
+    static {
+        DocOrientationClassifyModel.getRegistry().register(MODEL_NAMES, PaddleDocOrientationPredictor::new);
+    }
 
     private final PaddleClassificationPredictor predictor;
 

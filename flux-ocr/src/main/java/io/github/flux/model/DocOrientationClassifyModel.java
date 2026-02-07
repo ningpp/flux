@@ -23,7 +23,12 @@ public class DocOrientationClassifyModel extends BatchPredictor<PreProcessResult
     private static final ModelRegistry<BatchPredictor<PreProcessResult, ClassificationResult>> REGISTRY = new ModelRegistry<>();
 
     static {
-        REGISTRY.register(PaddleDocOrientationPredictor.MODEL_NAMES, PaddleDocOrientationPredictor::new);
+        // Trigger class loading to ensure models register themselves
+        try {
+            Class.forName(PaddleDocOrientationPredictor.class.getName());
+        } catch (ClassNotFoundException e) {
+            throw new FluxException("Failed to load model classes", e);
+        }
     }
 
     public static final Set<String> MODEL_NAMES = CollectionUtil.distinct(List.of(

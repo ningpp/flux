@@ -32,15 +32,21 @@ public class FormulaRecognitionModel extends BatchPredictor<PreProcessResult, Te
     private static final ModelRegistry<BatchPredictor<PreProcessResult, TextResult>> REGISTRY = new ModelRegistry<>();
 
     static {
-        REGISTRY.register(ByteDanceDolphinElementModel.MODEL_NAMES, ByteDanceDolphinFormulaModel::new);
+        // Trigger class loading to ensure models register themselves
+        try {
+            Class.forName(ByteDanceDolphinElementModel.class.getName());
+            Class.forName(NougatLatexFormulaModel.class.getName());
+            Class.forName(PaddleFormulaRecognitionPredictor.class.getName());
+            Class.forName(Pix2TextFormulaRecognitionPredictor.class.getName());
+            Class.forName(TexTellerPredictor.class.getName());
+            Class.forName(UnirecPredictor.class.getName());
+        } catch (ClassNotFoundException e) {
+            throw new FluxException("Failed to load model classes", e);
+        }
+
+        // GraniteDoclingFormulaModel needs special handling due to extra maxLength parameter
         REGISTRY.register(GraniteDoclingFormulaModel.MODEL_NAMES,
                 (dir, name, gpu, env) -> new GraniteDoclingFormulaModel(dir, name, gpu, env, 8192));
-        REGISTRY.register(NougatLatexFormulaModel.MODEL_NAMES, NougatLatexFormulaModel::new);
-        REGISTRY.register(PaddleFormulaRecognitionPredictor.MODEL_NAMES, PaddleFormulaRecognitionPredictor::new);
-        REGISTRY.register(Pix2TextFormulaRecognitionPredictor.MODEL_NAMES, Pix2TextFormulaRecognitionPredictor::new);
-        REGISTRY.register(TexTellerPredictor.MODEL_NAMES, TexTellerPredictor::new);
-        REGISTRY.register(UnirecPredictor.MODEL_NAMES,
-                (dir, name, gpu, env) -> new UnirecFormulaModel(new UnirecPredictor(dir, name, gpu, env)));
     }
 
     private final BatchPredictor<PreProcessResult, TextResult> predictor;

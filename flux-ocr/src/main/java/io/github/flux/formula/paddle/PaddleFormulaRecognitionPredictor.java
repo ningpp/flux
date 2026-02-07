@@ -37,6 +37,7 @@ import org.opencv.core.Size;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.github.flux.model.FormulaRecognitionModel;
 import java.io.File;
 import java.nio.FloatBuffer;
 import java.util.ArrayList;
@@ -54,6 +55,10 @@ public class PaddleFormulaRecognitionPredictor extends BatchPredictor<PreProcess
             "PP-FormulaNet_plus-M",
             "PP-FormulaNet_plus-L"
     );
+
+    static {
+        FormulaRecognitionModel.getRegistry().register(MODEL_NAMES, PaddleFormulaRecognitionPredictor::new);
+    }
     private static final Logger LOGGER = LoggerFactory.getLogger(PaddleFormulaRecognitionPredictor.class);
 
     private final Set<String> inputNames;

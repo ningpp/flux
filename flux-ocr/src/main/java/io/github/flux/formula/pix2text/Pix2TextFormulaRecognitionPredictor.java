@@ -28,6 +28,7 @@ import io.github.flux.exception.FluxException;
 import io.github.flux.util.IOUtil;
 import org.opencv.core.Mat;
 
+import io.github.flux.model.FormulaRecognitionModel;
 import java.io.File;
 import java.nio.file.Paths;
 import java.util.List;
@@ -39,6 +40,10 @@ public class Pix2TextFormulaRecognitionPredictor extends BatchPredictor<PreProce
             "pix2text-mfr",
             "pix2text-mfr-1.5"
     );
+
+    static {
+        FormulaRecognitionModel.getRegistry().register(MODEL_NAMES, Pix2TextFormulaRecognitionPredictor::new);
+    }
 
     private final Pix2TextEncoderModel encoderModel;
     private final Pix2TextDecoderModel decoderModel;

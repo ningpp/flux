@@ -37,6 +37,7 @@ import io.github.flux.util.IOUtil;
 import io.github.flux.util.ImageUtil;
 import org.opencv.core.Mat;
 
+import io.github.flux.model.FormulaRecognitionModel;
 import java.io.File;
 import java.nio.file.Paths;
 import java.util.ArrayList;
@@ -52,6 +53,10 @@ public class GraniteDoclingFormulaModel extends BatchPredictor<PreProcessResult,
             "CodeFormulaV2",
             "granite-docling-258M"
     );
+
+    static {
+        FormulaRecognitionModel.getRegistry().register(MODEL_NAMES, GraniteDoclingFormulaModel::new);
+    }
 
     private final GraniteDoclingEncoderModel encoderModel;
     private final GraniteDoclingEmbedModel embedModel;

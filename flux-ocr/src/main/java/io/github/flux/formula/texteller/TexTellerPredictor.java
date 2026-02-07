@@ -28,6 +28,7 @@ import io.github.flux.exception.FluxException;
 import io.github.flux.util.IOUtil;
 import org.opencv.core.Mat;
 
+import io.github.flux.model.FormulaRecognitionModel;
 import java.io.File;
 import java.nio.file.Paths;
 import java.util.List;
@@ -38,6 +39,10 @@ public class TexTellerPredictor extends BatchPredictor<PreProcessResult, TextRes
     public static final List<String> MODEL_NAMES = List.of(
             "TexTeller"
     );
+
+    static {
+        FormulaRecognitionModel.getRegistry().register(MODEL_NAMES, TexTellerPredictor::new);
+    }
 
     private final TexTellerEncoderModel encoderModel;
     private final TexTellerDecoderModel decoderModel;

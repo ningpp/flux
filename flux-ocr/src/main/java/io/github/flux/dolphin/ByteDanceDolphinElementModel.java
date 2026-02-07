@@ -26,6 +26,8 @@ import io.github.flux.core.MatManager;
 import io.github.flux.core.PreProcessResult;
 import io.github.flux.core.TextResult;
 import io.github.flux.exception.FluxException;
+import io.github.flux.model.FormulaRecognitionModel;
+import io.github.flux.model.TableModel;
 import io.github.flux.util.IOUtil;
 import org.opencv.core.Mat;
 
@@ -41,6 +43,11 @@ public class ByteDanceDolphinElementModel extends BatchPredictor<PreProcessResul
             "Dolphin",
             "Dolphin-1.5"
     );
+
+    static {
+        FormulaRecognitionModel.getRegistry().register(MODEL_NAMES, ByteDanceDolphinFormulaModel::new);
+        TableModel.getRegistry().register(MODEL_NAMES, ByteDanceDolphinTableModel::new);
+    }
 
     private final DolphinEncoderModel encoderModel;
     private final DolphinDecoderModel decoderModel;

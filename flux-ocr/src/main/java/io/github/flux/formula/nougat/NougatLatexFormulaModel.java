@@ -30,6 +30,7 @@ import io.github.flux.exception.FluxException;
 import io.github.flux.util.IOUtil;
 import org.opencv.core.Mat;
 
+import io.github.flux.model.FormulaRecognitionModel;
 import java.io.File;
 import java.nio.file.Paths;
 import java.util.List;
@@ -41,6 +42,10 @@ public class NougatLatexFormulaModel extends BatchPredictor<PreProcessResult, Te
     public static final Set<String> MODEL_NAMES = Set.of(
             "nougat-latex-base"
     );
+
+    static {
+        FormulaRecognitionModel.getRegistry().register(MODEL_NAMES, NougatLatexFormulaModel::new);
+    }
 
     private final NougatLatexEncoderModel encoderModel;
     private final NougatLatexDecoderModel decoderModel;
