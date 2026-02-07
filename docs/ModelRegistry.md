@@ -121,6 +121,105 @@ Supports: Dolphin and Unirec table models
 ### DocOrientationClassifyModel
 Supports: PaddlePaddle orientation classification models
 
+## Model Instance Sharing
+
+For expensive models that are used across multiple task types (e.g., formula recognition and table parsing), the framework implements instance caching to optimize memory usage and initialization time.
+
+### How Instance Sharing Works
+
+Models like **ByteDanceDolphinElementModel** and **UnirecPredictor** load large ONNX models (encoder and decoder) that are expensive to initialize. When these models are used for multiple tasks, the framework automatically shares a single instance:
+
+```java
+// Both models automatically share the same ByteDanceDolphinElementModel instance
+FormulaRecognitionModel formulaModel = new FormulaRecognitionModel(modelDir, "Dolphin", gpuIndex, env);
+TableModel tableModel = new TableModel(modelDir, "Dolphin", gpuIndex, env);
+```
+
+### Implementation Pattern
+
+Models implement instance sharing using:
+
+1. **Static instance cache** using `ConcurrentHashMap<InstanceKey, ModelInstance>`
+2. **Record-based InstanceKey** with configuration parameters (modelRootDir, modelName, gpuIndex)
+3. **Static factory method** `getSharedInstance()` that uses `computeIfAbsent`
+4. **Private constructor** to enforce factory method usage
+
+Example implementation:
+
+```java
+public class ExpensiveModel {
+    private static final Map<InstanceKey, ExpensiveModel> INSTANCE_CACHE = new ConcurrentHashMap<>();
+
+    record InstanceKey(String modelRootDir, String modelName, int gpuIndex) {}
+
+    public static ExpensiveModel getSharedInstance(String modelRootDir, String modelName,
+                                                   int gpuIndex, OrtEnvironment env) {
+        InstanceKey key = new InstanceKey(modelRootDir, modelName, gpuIndex);
+        return INSTANCE_CACHE.computeIfAbsent(key, k ->
+            new ExpensiveModel(modelRootDir, modelName, gpuIndex, env));
+    }
+
+    private ExpensiveModel(String modelRootDir, String modelName,
+                           int gpuIndex, OrtEnvironment env) {
+        // Load expensive ONNX models
+    }
+}
+```
+
+### Models with Instance Sharing
+
+- **ByteDanceDolphinElementModel**: Shared between FormulaRecognitionModel and TableModel
+- **UnirecPredictor**: Shared between FormulaRecognitionModel (UnirecFormulaModel) and TableModel (UnirecTableModel)
+
+### Future Considerations: Custom Initialization Parameters
+
+The current architecture uses `ModelFactory<T>` with a fixed signature:
+```java
+T create(String modelRootDir, String modelName, int gpuIndex, OrtEnvironment env);
+```
+
+For models requiring custom initialization parameters (e.g., encoder on CPU, decoder on GPU), there are several approaches:
+
+#### Option 1: Extended Factory Interface
+```java
+@FunctionalInterface
+public interface ExtendedModelFactory<T> {
+    T create(String modelRootDir, String modelName, int gpuIndex,
+             OrtEnvironment env, Map<String, Object> customParams);
+}
+```
+
+#### Option 2: Configuration Objects
+```java
+record ModelConfig(String modelRootDir, String modelName,
+                   int gpuIndex, OrtEnvironment env,
+                   int encoderGpu, int decoderGpu) {}
+
+@FunctionalInterface
+public interface ConfigurableModelFactory<T> {
+    T create(ModelConfig config);
+}
+```
+
+#### Option 3: Builder Pattern
+```java
+ExpensiveModel model = ExpensiveModel.builder()
+    .modelRootDir(dir)
+    .modelName(name)
+    .encoderGpu(0)   // CPU
+    .decoderGpu(1)   // GPU 1
+    .build();
+```
+
+The instance caching InstanceKey would need to include these additional parameters to ensure correct cache key differentiation:
+
+```java
+record InstanceKey(String modelRootDir, String modelName,
+                   int gpuIndex, int encoderGpu, int decoderGpu) {}
+```
+
+These patterns allow for flexible model initialization while maintaining instance sharing benefits.
+
 ## Backward Compatibility
 
 The model registry is implemented in a backward-compatible way:
