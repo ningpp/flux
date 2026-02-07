@@ -18,6 +18,7 @@
 package io.github.flux.unirec;
 
 import ai.djl.ndarray.NDManager;
+import ai.onnxruntime.OrtEnvironment;
 import io.github.flux.core.BatchPredictor;
 import io.github.flux.core.TextResult;
 import io.github.flux.core.MatManager;
@@ -34,6 +35,13 @@ public class UnirecFormulaModel extends BatchPredictor<PreProcessResult, TextRes
 
     public UnirecFormulaModel(UnirecPredictor predictor) {
         this.predictor = predictor;
+    }
+
+    public UnirecFormulaModel(final String modelRootDir,
+                              final String modelName,
+                              final int gpuIndex,
+                              final OrtEnvironment env) {
+        this.predictor = UnirecPredictor.getSharedInstance(modelRootDir, modelName, gpuIndex, env);
     }
 
     @Override

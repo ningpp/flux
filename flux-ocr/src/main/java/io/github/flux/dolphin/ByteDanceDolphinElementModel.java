@@ -35,7 +35,6 @@ import java.io.File;
 import java.nio.file.Paths;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -57,31 +56,7 @@ public class ByteDanceDolphinElementModel extends BatchPredictor<PreProcessResul
     /**
      * Key for caching shared instances based on model configuration.
      */
-    private static class InstanceKey {
-        private final String modelRootDir;
-        private final String modelName;
-        private final int gpuIndex;
-
-        InstanceKey(String modelRootDir, String modelName, int gpuIndex) {
-            this.modelRootDir = modelRootDir;
-            this.modelName = modelName;
-            this.gpuIndex = gpuIndex;
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
-            InstanceKey that = (InstanceKey) o;
-            return gpuIndex == that.gpuIndex &&
-                    Objects.equals(modelRootDir, that.modelRootDir) &&
-                    Objects.equals(modelName, that.modelName);
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hash(modelRootDir, modelName, gpuIndex);
-        }
+    record InstanceKey(String modelRootDir, String modelName, int gpuIndex) {
     }
 
     private final DolphinEncoderModel encoderModel;
