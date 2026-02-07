@@ -4,7 +4,9 @@ import ai.djl.ndarray.NDManager;
 import ai.onnxruntime.OrtEnvironment;
 import io.github.flux.core.BatchPredictor;
 import io.github.flux.core.MatManager;
+import io.github.flux.core.ModelFactory;
 import io.github.flux.core.ModelParam;
+import io.github.flux.core.ModelRegistry;
 import io.github.flux.core.PreProcessResult;
 import io.github.flux.core.TableResult;
 import io.github.flux.dolphin.ByteDanceDolphinElementModel;
@@ -22,6 +24,14 @@ import java.util.Set;
 
 public class TableModel extends BatchPredictor<PreProcessResult, TableResult> {
 
+    private static final ModelRegistry<BatchPredictor<PreProcessResult, TableResult>> REGISTRY = new ModelRegistry<>();
+
+    static {
+        REGISTRY.register(ByteDanceDolphinElementModel.MODEL_NAMES, ByteDanceDolphinTableModel::new);
+        REGISTRY.register(UnirecPredictor.MODEL_NAMES,
+                (dir, name, gpu, env) -> new UnirecTableModel(new UnirecPredictor(dir, name, gpu, env)));
+    }
+
     private final BatchPredictor<PreProcessResult, TableResult> predictor;
 
     public static final Set<String> MODEL_NAMES = CollectionUtil.distinct(List.of(
@@ -37,13 +47,13 @@ public class TableModel extends BatchPredictor<PreProcessResult, TableResult> {
                       final String modelName,
                       final int gpuIndex,
                       final OrtEnvironment env) {
-        if (ByteDanceDolphinElementModel.MODEL_NAMES.contains(modelName)) {
-            this.predictor = new ByteDanceDolphinTableModel(modelRootDir, modelName, gpuIndex, env);
-        } else if (UnirecPredictor.MODEL_NAMES.contains(modelName)) {
-            this.predictor = new UnirecTableModel(new UnirecPredictor(modelRootDir, modelName, gpuIndex, env));
-        } else {
-            throw new FluxException("not supported table model: " + modelName);
-        }
+        ModelFactory<BatchPredictor<PreProcessResult, TableResult>> factory = REGISTRY.getFactory(modelName)
+                .orElseThrow(() -> new FluxException("not supported table model: " + modelName));
+        this.predictor = factory.create(modelRootDir, modelName, gpuIndex, env);
+    }
+
+    public static ModelRegistry<BatchPredictor<PreProcessResult, TableResult>> getRegistry() {
+        return REGISTRY;
     }
 
 

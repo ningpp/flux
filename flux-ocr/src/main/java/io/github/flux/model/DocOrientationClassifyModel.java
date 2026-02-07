@@ -5,8 +5,11 @@ import ai.onnxruntime.OrtEnvironment;
 import io.github.flux.core.BatchPredictor;
 import io.github.flux.core.ClassificationResult;
 import io.github.flux.core.MatManager;
+import io.github.flux.core.ModelFactory;
 import io.github.flux.core.ModelParam;
+import io.github.flux.core.ModelRegistry;
 import io.github.flux.core.PreProcessResult;
+import io.github.flux.exception.FluxException;
 import io.github.flux.paddle.predictor.PaddleDocOrientationPredictor;
 import io.github.flux.util.CollectionUtil;
 import org.opencv.core.Mat;
@@ -16,6 +19,12 @@ import java.util.Map;
 import java.util.Set;
 
 public class DocOrientationClassifyModel extends BatchPredictor<PreProcessResult, ClassificationResult> {
+
+    private static final ModelRegistry<BatchPredictor<PreProcessResult, ClassificationResult>> REGISTRY = new ModelRegistry<>();
+
+    static {
+        REGISTRY.register(PaddleDocOrientationPredictor.MODEL_NAMES, PaddleDocOrientationPredictor::new);
+    }
 
     public static final Set<String> MODEL_NAMES = CollectionUtil.distinct(List.of(
             PaddleDocOrientationPredictor.MODEL_NAMES
@@ -33,7 +42,13 @@ public class DocOrientationClassifyModel extends BatchPredictor<PreProcessResult
     }
 
     public DocOrientationClassifyModel(String modelRootDir, String modelName, OrtEnvironment env, int gpuIndex) {
-        predictor = new PaddleDocOrientationPredictor(modelRootDir, modelName, env, gpuIndex);
+        ModelFactory<BatchPredictor<PreProcessResult, ClassificationResult>> factory = REGISTRY.getFactory(modelName)
+                .orElseThrow(() -> new FluxException("not supported doc orientation model: " + modelName));
+        predictor = factory.create(modelRootDir, modelName, gpuIndex, env);
+    }
+
+    public static ModelRegistry<BatchPredictor<PreProcessResult, ClassificationResult>> getRegistry() {
+        return REGISTRY;
     }
 
     @Override

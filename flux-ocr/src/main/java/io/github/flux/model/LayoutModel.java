@@ -4,7 +4,9 @@ import ai.djl.ndarray.NDManager;
 import ai.onnxruntime.OrtEnvironment;
 import io.github.flux.core.BatchPredictor;
 import io.github.flux.core.MatManager;
+import io.github.flux.core.ModelFactory;
 import io.github.flux.core.ModelParam;
+import io.github.flux.core.ModelRegistry;
 import io.github.flux.core.ObjectDetectionResult;
 import io.github.flux.core.ProcessedMat;
 import io.github.flux.docling.DoclingLayoutModel;
@@ -18,6 +20,13 @@ import java.util.Map;
 import java.util.Set;
 
 public class LayoutModel extends BatchPredictor<ProcessedMat, List<ObjectDetectionResult>> {
+
+    private static final ModelRegistry<BatchPredictor<ProcessedMat, List<ObjectDetectionResult>>> REGISTRY = new ModelRegistry<>();
+
+    static {
+        REGISTRY.register(DoclingLayoutModel.MODEL_NAMES, DoclingLayoutModel::new);
+        REGISTRY.register(PaddleLayoutModel.MODEL_NAMES, PaddleLayoutModel::new);
+    }
 
     public static final Set<String> MODEL_NAMES = CollectionUtil.distinct(List.of(
             DoclingLayoutModel.MODEL_NAMES,
@@ -34,14 +43,13 @@ public class LayoutModel extends BatchPredictor<ProcessedMat, List<ObjectDetecti
                        final String modelName,
                        final int gpuIndex,
                        final OrtEnvironment env) {
-        if (!MODEL_NAMES.contains(modelName)) {
-            throw new FluxException("not supported formula model: " + modelName);
-        }
-        if (DoclingLayoutModel.MODEL_NAMES.contains(modelName)) {
-            predictor = new DoclingLayoutModel(modelRootDir, modelName, gpuIndex, env);
-        } else {
-            predictor = new PaddleLayoutModel(modelRootDir, modelName, gpuIndex, env);
-        }
+        ModelFactory<BatchPredictor<ProcessedMat, List<ObjectDetectionResult>>> factory = REGISTRY.getFactory(modelName)
+                .orElseThrow(() -> new FluxException("not supported layout model: " + modelName));
+        predictor = factory.create(modelRootDir, modelName, gpuIndex, env);
+    }
+
+    public static ModelRegistry<BatchPredictor<ProcessedMat, List<ObjectDetectionResult>>> getRegistry() {
+        return REGISTRY;
     }
 
     @Override

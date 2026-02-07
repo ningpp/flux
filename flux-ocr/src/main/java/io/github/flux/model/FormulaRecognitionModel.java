@@ -5,7 +5,9 @@ import ai.onnxruntime.OrtEnvironment;
 import io.github.flux.core.BatchPredictor;
 import io.github.flux.core.TextResult;
 import io.github.flux.core.MatManager;
+import io.github.flux.core.ModelFactory;
 import io.github.flux.core.ModelParam;
+import io.github.flux.core.ModelRegistry;
 import io.github.flux.core.PreProcessResult;
 import io.github.flux.dolphin.ByteDanceDolphinElementModel;
 import io.github.flux.dolphin.ByteDanceDolphinFormulaModel;
@@ -27,6 +29,20 @@ import java.util.Set;
 
 public class FormulaRecognitionModel extends BatchPredictor<PreProcessResult, TextResult> {
 
+    private static final ModelRegistry<BatchPredictor<PreProcessResult, TextResult>> REGISTRY = new ModelRegistry<>();
+
+    static {
+        REGISTRY.register(ByteDanceDolphinElementModel.MODEL_NAMES, ByteDanceDolphinFormulaModel::new);
+        REGISTRY.register(GraniteDoclingFormulaModel.MODEL_NAMES,
+                (dir, name, gpu, env) -> new GraniteDoclingFormulaModel(dir, name, gpu, env, 8192));
+        REGISTRY.register(NougatLatexFormulaModel.MODEL_NAMES, NougatLatexFormulaModel::new);
+        REGISTRY.register(PaddleFormulaRecognitionPredictor.MODEL_NAMES, PaddleFormulaRecognitionPredictor::new);
+        REGISTRY.register(Pix2TextFormulaRecognitionPredictor.MODEL_NAMES, Pix2TextFormulaRecognitionPredictor::new);
+        REGISTRY.register(TexTellerPredictor.MODEL_NAMES, TexTellerPredictor::new);
+        REGISTRY.register(UnirecPredictor.MODEL_NAMES,
+                (dir, name, gpu, env) -> new UnirecFormulaModel(new UnirecPredictor(dir, name, gpu, env)));
+    }
+
     private final BatchPredictor<PreProcessResult, TextResult> predictor;
 
     public static final Set<String> MODEL_NAMES = CollectionUtil.distinct(List.of(
@@ -47,23 +63,13 @@ public class FormulaRecognitionModel extends BatchPredictor<PreProcessResult, Te
                                    final String modelName,
                                    final int gpuIndex,
                                    final OrtEnvironment env) {
-        if (ByteDanceDolphinElementModel.MODEL_NAMES.contains(modelName)) {
-            this.predictor = new ByteDanceDolphinFormulaModel(modelRootDir, modelName, gpuIndex, env);
-        } else if (GraniteDoclingFormulaModel.MODEL_NAMES.contains(modelName)) {
-            this.predictor = new GraniteDoclingFormulaModel(modelRootDir, modelName, gpuIndex, env, 8192);
-        } else if (NougatLatexFormulaModel.MODEL_NAMES.contains(modelName)) {
-            this.predictor = new NougatLatexFormulaModel(modelRootDir, modelName, gpuIndex, env);
-        } else if (PaddleFormulaRecognitionPredictor.MODEL_NAMES.contains(modelName)) {
-            this.predictor = new PaddleFormulaRecognitionPredictor(modelRootDir, modelName, gpuIndex, env);
-        } else if (Pix2TextFormulaRecognitionPredictor.MODEL_NAMES.contains(modelName)) {
-            this.predictor = new Pix2TextFormulaRecognitionPredictor(modelRootDir, modelName, gpuIndex, env);
-        } else if (TexTellerPredictor.MODEL_NAMES.contains(modelName)) {
-            this.predictor = new TexTellerPredictor(modelRootDir, modelName, gpuIndex, env);
-        } else if (UnirecPredictor.MODEL_NAMES.contains(modelName)) {
-            this.predictor = new UnirecFormulaModel(new UnirecPredictor(modelRootDir, modelName, gpuIndex, env));
-        } else {
-            throw new FluxException("not supported formula model: " + modelName);
-        }
+        ModelFactory<BatchPredictor<PreProcessResult, TextResult>> factory = REGISTRY.getFactory(modelName)
+                .orElseThrow(() -> new FluxException("not supported formula model: " + modelName));
+        this.predictor = factory.create(modelRootDir, modelName, gpuIndex, env);
+    }
+
+    public static ModelRegistry<BatchPredictor<PreProcessResult, TextResult>> getRegistry() {
+        return REGISTRY;
     }
 
 
