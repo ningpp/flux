@@ -30,6 +30,13 @@ public class TextDetectionModel extends BatchPredictor<PreProcessResult, TextDet
 
     private static final ModelRegistry<BatchPredictor<PreProcessResult, TextDetectionResult>> REGISTRY = new ModelRegistry<>();
 
+    public static final Set<String> SUPPORT_MODELS = Set.of(
+            "PP-OCRv5_server_det",
+            "PP-OCRv5_mobile_det",
+            "PP-OCRv4_server_det",
+            "PP-OCRv4_mobile_det"
+    );
+
     static {
         ModelFactory<BatchPredictor<PreProcessResult, TextDetectionResult>> factory =
                 (modelDir, modelName, gpuIndex, env, customParams) -> {
@@ -59,13 +66,6 @@ public class TextDetectionModel extends BatchPredictor<PreProcessResult, TextDet
 
         REGISTRY.register(SUPPORT_MODELS, factory);
     }
-
-    public static final Set<String> SUPPORT_MODELS = Set.of(
-            "PP-OCRv5_server_det",
-            "PP-OCRv5_mobile_det",
-            "PP-OCRv4_server_det",
-            "PP-OCRv4_mobile_det"
-    );
 
     private final PaddleDetectionPredictor predictor;
 

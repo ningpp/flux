@@ -40,6 +40,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.HashMap;
 
 public class PaddleDocOrientationPredictor extends BatchPredictor<PreProcessResult, ClassificationResult> {
 
@@ -52,10 +53,10 @@ public class PaddleDocOrientationPredictor extends BatchPredictor<PreProcessResu
     private final PaddleClassificationPredictor predictor;
 
     public PaddleDocOrientationPredictor(ModelParam param) {
-        this(param.modelRootDir(), param.modelName(), param.env(), param.gpuIndex());
+        this(param.modelRootDir(), param.modelName(), param.gpuIndex(), param.env(), new HashMap<>());
     }
 
-    public PaddleDocOrientationPredictor(String modelRootDir, String modelName, OrtEnvironment env, int gpuIndex, Map<String, Object> customParams) {
+    public PaddleDocOrientationPredictor(String modelRootDir, String modelName, int gpuIndex, OrtEnvironment env, Map<String, Object> customParams) {
         if (!MODEL_NAMES.contains(modelName)) {
             throw new FluxException("Not Supported Model: " + modelName);
         }
