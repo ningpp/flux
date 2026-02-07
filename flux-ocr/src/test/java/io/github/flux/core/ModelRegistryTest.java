@@ -29,7 +29,7 @@ class ModelRegistryTest {
     @Test
     void testRegisterAndLookup() {
         ModelRegistry<String> registry = new ModelRegistry<>();
-        ModelFactory<String> factory = (dir, name, gpu, env) -> "TestModel-" + name;
+        ModelFactory<String> factory = (dir, name, gpu, env, customParams) -> "TestModel-" + name;
 
         registry.register("model1", factory);
 
@@ -38,13 +38,13 @@ class ModelRegistryTest {
 
         var result = registry.getFactory("model1");
         assertTrue(result.isPresent());
-        assertEquals("TestModel-model1", result.get().create("dir", "model1", -1, null));
+        assertEquals("TestModel-model1", result.get().create("dir", "model1", -1, null, null));
     }
 
     @Test
     void testRegisterMultipleNames() {
         ModelRegistry<String> registry = new ModelRegistry<>();
-        ModelFactory<String> factory = (dir, name, gpu, env) -> "Model-" + name;
+        ModelFactory<String> factory = (dir, name, gpu, env, customParams) -> "Model-" + name;
 
         registry.register(List.of("model1", "model2", "model3"), factory);
 
@@ -57,7 +57,7 @@ class ModelRegistryTest {
     @Test
     void testGetRegisteredModelNames() {
         ModelRegistry<String> registry = new ModelRegistry<>();
-        ModelFactory<String> factory = (dir, name, gpu, env) -> "Model";
+        ModelFactory<String> factory = (dir, name, gpu, env, customParams) -> "Model";
 
         registry.register("model1", factory);
         registry.register("model2", factory);
@@ -73,7 +73,7 @@ class ModelRegistryTest {
     @Test
     void testUnregister() {
         ModelRegistry<String> registry = new ModelRegistry<>();
-        ModelFactory<String> factory = (dir, name, gpu, env) -> "Model";
+        ModelFactory<String> factory = (dir, name, gpu, env, customParams) -> "Model";
 
         registry.register("model1", factory);
         assertTrue(registry.isRegistered("model1"));
@@ -89,7 +89,7 @@ class ModelRegistryTest {
     @Test
     void testClear() {
         ModelRegistry<String> registry = new ModelRegistry<>();
-        ModelFactory<String> factory = (dir, name, gpu, env) -> "Model";
+        ModelFactory<String> factory = (dir, name, gpu, env, customParams) -> "Model";
 
         registry.register("model1", factory);
         registry.register("model2", factory);
@@ -113,14 +113,14 @@ class ModelRegistryTest {
     void testFactoryCanCreateDifferentModels() {
         ModelRegistry<String> registry = new ModelRegistry<>();
 
-        ModelFactory<String> factory1 = (dir, name, gpu, env) -> "Factory1-" + name;
-        ModelFactory<String> factory2 = (dir, name, gpu, env) -> "Factory2-" + name;
+        ModelFactory<String> factory1 = (dir, name, gpu, env, customParams) -> "Factory1-" + name;
+        ModelFactory<String> factory2 = (dir, name, gpu, env, customParams) -> "Factory2-" + name;
 
         registry.register("model1", factory1);
         registry.register("model2", factory2);
 
-        String result1 = registry.getFactory("model1").get().create("", "model1", -1, null);
-        String result2 = registry.getFactory("model2").get().create("", "model2", -1, null);
+        String result1 = registry.getFactory("model1").get().create("", "model1", -1, null, null);
+        String result2 = registry.getFactory("model2").get().create("", "model2", -1, null, null);
 
         assertEquals("Factory1-model1", result1);
         assertEquals("Factory2-model2", result2);
