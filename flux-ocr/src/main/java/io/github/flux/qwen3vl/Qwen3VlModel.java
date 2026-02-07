@@ -7,7 +7,6 @@ import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
 import io.github.flux.core.BatchPredictor;
 import io.github.flux.core.MatManager;
-import io.github.flux.core.PreProcessResult;
 import io.github.flux.core.TextResult;
 import io.github.flux.exception.FluxException;
 import io.github.flux.qwen3vl.Qwen3VlEncoderModel.EncoderResult;
@@ -34,7 +33,7 @@ import java.util.Set;
  * DeepStack count and model constants are determined dynamically from the ONNX models.
  * Image tokens use 3D MRoPE (T/H/W) for position encoding.
  */
-public class Qwen3VlModel extends BatchPredictor<PreProcessResult, TextResult> {
+public class Qwen3VlModel extends BatchPredictor<ImageProcessResult, TextResult> {
 
     public static final Set<String> MODEL_NAMES = Set.of(
             "Qwen3-VL-2B-Instruct"
@@ -54,9 +53,6 @@ public class Qwen3VlModel extends BatchPredictor<PreProcessResult, TextResult> {
     private final Qwen3VlDecoderModel decoderModel;
     private final HuggingFaceTokenizer tokenizer;
     private final int hiddenSize;
-
-    /** Stored from preprocessing for use during prediction (supports batch). */
-    private final List<ImageProcessResult> lastImageResults = new ArrayList<>();
 
     public Qwen3VlModel(final String modelRootDir,
                         final String modelName,
@@ -98,20 +94,12 @@ public class Qwen3VlModel extends BatchPredictor<PreProcessResult, TextResult> {
     }
 
     @Override
-    public List<TextResult> doBatchPredict(List<PreProcessResult> pprs,
+    public List<TextResult> doBatchPredict(List<ImageProcessResult> imageResults,
                                            MatManager matManager,
                                            NDManager ndManager,
                                            Map<String, Object> extraParameters) {
         try {
-            int batchSize = pprs.size();
-
-            // Retrieve the ImageProcessResults stored during processRgb
-            List<ImageProcessResult> imageResults = new ArrayList<>(lastImageResults);
-            lastImageResults.clear();
-            if (imageResults.size() != batchSize) {
-                throw new FluxException("Preprocessed image count (" + imageResults.size()
-                        + ") does not match batch size (" + batchSize + ")");
-            }
+            int batchSize = imageResults.size();
 
             // 1. Vision encode each image individually
             List<EncoderResult> encoderResults = new ArrayList<>(batchSize);
@@ -348,10 +336,8 @@ public class Qwen3VlModel extends BatchPredictor<PreProcessResult, TextResult> {
     }
 
     @Override
-    public PreProcessResult processRgb(MatManager matManager, Mat rgbMat, NDManager ndManager) {
-        this.lastImageResults.add(Qwen3VlImageProcessor.process(rgbMat, matManager));
-        // Return a PreProcessResult with null mat/ndarray - we stored the result internally
-        return new PreProcessResult(null, null);
+    public ImageProcessResult processRgb(MatManager matManager, Mat rgbMat, NDManager ndManager) {
+        return Qwen3VlImageProcessor.process(rgbMat, matManager);
     }
 
     @Override

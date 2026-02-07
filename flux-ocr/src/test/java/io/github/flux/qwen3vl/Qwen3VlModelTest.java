@@ -3,8 +3,8 @@ package io.github.flux.qwen3vl;
 import ai.djl.ndarray.NDManager;
 import ai.onnxruntime.OrtEnvironment;
 import io.github.flux.core.MatManager;
-import io.github.flux.core.PreProcessResult;
 import io.github.flux.core.TextResult;
+import io.github.flux.qwen3vl.Qwen3VlImageProcessor.ImageProcessResult;
 import io.github.flux.util.ImageUtil;
 import org.opencv.core.Mat;
 
@@ -49,7 +49,7 @@ public class Qwen3VlModelTest {
             Mat rgbMat = ImageUtil.readToRgb(matManager, imagePath);
             System.out.println("Image: " + rgbMat.cols() + "x" + rgbMat.rows());
 
-            PreProcessResult ppr = model.processRgb(matManager, rgbMat, ndManager);
+            ImageProcessResult ppr = model.processRgb(matManager, rgbMat, ndManager);
 
             List<TextResult> results = model.doBatchPredict(
                     List.of(ppr), matManager, ndManager, null);

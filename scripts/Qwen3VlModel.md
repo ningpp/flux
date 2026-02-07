@@ -158,7 +158,7 @@ static void main() throws Exception {
         Qwen3VlModel model = new Qwen3VlModel(modelRootDir, modelName, -1, env);
 
         Mat rgbMat = ImageUtil.readToRgb(matManager, imagePath);
-        PreProcessResult ppr = model.processRgb(matManager, rgbMat, ndManager);
+        ImageProcessResult ppr = model.processRgb(matManager, rgbMat, ndManager);
 
         List<TextResult> results = model.doBatchPredict(
                 List.of(ppr), matManager, ndManager, null);

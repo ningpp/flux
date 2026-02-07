@@ -3,8 +3,8 @@ package io.github.flux.qwen3vl;
 import ai.djl.ndarray.NDManager;
 import ai.onnxruntime.OrtEnvironment;
 import io.github.flux.core.MatManager;
-import io.github.flux.core.PreProcessResult;
 import io.github.flux.core.TextResult;
+import io.github.flux.qwen3vl.Qwen3VlImageProcessor.ImageProcessResult;
 import io.github.flux.util.ImageUtil;
 import org.opencv.core.CvType;
 import org.opencv.core.Mat;
@@ -59,8 +59,8 @@ public class Qwen3VlBatchTest {
                 Mat img1 = createRandomRgbMat(matManager, 100, 200);
                 Mat img2 = createRandomRgbMat(matManager, 200, 100);
 
-                PreProcessResult ppr1 = model.processRgb(matManager, img1, ndManager);
-                PreProcessResult ppr2 = model.processRgb(matManager, img2, ndManager);
+                ImageProcessResult ppr1 = model.processRgb(matManager, img1, ndManager);
+                ImageProcessResult ppr2 = model.processRgb(matManager, img2, ndManager);
 
                 long t1 = System.currentTimeMillis();
                 List<TextResult> batchResults = model.doBatchPredict(
@@ -86,18 +86,18 @@ public class Qwen3VlBatchTest {
                 Mat img2 = createFilledRgbMat(matManager, 200, 100, 99);
 
                 // Batch inference
-                PreProcessResult ppr1 = model.processRgb(matManager, img1, ndManager);
-                PreProcessResult ppr2 = model.processRgb(matManager, img2, ndManager);
+                ImageProcessResult ppr1 = model.processRgb(matManager, img1, ndManager);
+                ImageProcessResult ppr2 = model.processRgb(matManager, img2, ndManager);
                 List<TextResult> batchResults = model.doBatchPredict(
                         List.of(ppr1, ppr2), matManager, ndManager, null);
 
                 // Sequential inference: image 1
-                PreProcessResult pprSeq1 = model.processRgb(matManager, img1, ndManager);
+                ImageProcessResult pprSeq1 = model.processRgb(matManager, img1, ndManager);
                 List<TextResult> seqResult1 = model.doBatchPredict(
                         List.of(pprSeq1), matManager, ndManager, null);
 
                 // Sequential inference: image 2
-                PreProcessResult pprSeq2 = model.processRgb(matManager, img2, ndManager);
+                ImageProcessResult pprSeq2 = model.processRgb(matManager, img2, ndManager);
                 List<TextResult> seqResult2 = model.doBatchPredict(
                         List.of(pprSeq2), matManager, ndManager, null);
 
@@ -130,7 +130,7 @@ public class Qwen3VlBatchTest {
                 Mat rgbMat = ImageUtil.readToRgb(matManager, imagePath);
                 System.out.println("  Image: " + rgbMat.cols() + "x" + rgbMat.rows());
 
-                PreProcessResult ppr = model.processRgb(matManager, rgbMat, ndManager);
+                ImageProcessResult ppr = model.processRgb(matManager, rgbMat, ndManager);
                 List<TextResult> results = model.doBatchPredict(
                         List.of(ppr), matManager, ndManager, null);
 
