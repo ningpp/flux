@@ -37,6 +37,7 @@ import io.github.flux.util.IOUtil;
 import io.github.flux.util.ImageUtil;
 import org.opencv.core.Mat;
 
+import io.github.flux.model.FormulaRecognitionModel;
 import java.io.File;
 import java.nio.file.Paths;
 import java.util.ArrayList;
@@ -53,6 +54,8 @@ public class GraniteDoclingFormulaModel extends BatchPredictor<PreProcessResult,
             "granite-docling-258M"
     );
 
+    // Note: This model is registered in FormulaRecognitionModel with special handling for maxLength parameter
+
     private final GraniteDoclingEncoderModel encoderModel;
     private final GraniteDoclingEmbedModel embedModel;
     private final GraniteDoclingDecoderModel decoderModel;
@@ -66,7 +69,8 @@ public class GraniteDoclingFormulaModel extends BatchPredictor<PreProcessResult,
                                       final String modelName,
                                       final int gpuIndex,
                                       final OrtEnvironment env,
-                                      final int maxLength) {
+                                      final int maxLength,
+                                      final Map<String, Object> customParams) {
         if (!MODEL_NAMES.contains(modelName)) {
             throw new FluxException("not supported model: " + modelName);
         }

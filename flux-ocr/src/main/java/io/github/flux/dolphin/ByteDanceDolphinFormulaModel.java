@@ -40,13 +40,15 @@ public class ByteDanceDolphinFormulaModel extends BatchPredictor<PreProcessResul
     public ByteDanceDolphinFormulaModel(final String modelRootDir,
                                         final String modelName,
                                         final int gpuIndex,
-                                        final OrtEnvironment env) {
-        this.model = new ByteDanceDolphinElementModel(modelRootDir, modelName, gpuIndex, env, true);
+                                        final OrtEnvironment env,
+                                        final Map<String, Object> customParams) {
+        this.model = ByteDanceDolphinElementModel.getSharedInstance(modelRootDir, modelName, gpuIndex, env, customParams);
     }
 
     @Override
     public List<TextResult> doBatchPredict(List<PreProcessResult> mats, MatManager matManager, NDManager manager, Map<String, Object> extraParameters) {
         extraParameters.put("prompt", "Read formula in the image.");
+        extraParameters.put("skipSpecialTokens", true);
         var elementResults = model.doBatchPredict(mats, matManager, manager, extraParameters);
         return elementResults.stream().map(r -> new TextResult(
                 removeDollar(r.text()), r.tokens(), r.score())).toList();

@@ -26,6 +26,7 @@ import io.github.flux.core.MatManager;
 import io.github.flux.core.ModelParam;
 import io.github.flux.core.PreProcessResult;
 import io.github.flux.exception.FluxException;
+import io.github.flux.model.DocOrientationClassifyModel;
 import io.github.flux.paddle.processor.Crop;
 import io.github.flux.paddle.processor.ImageProcessor;
 import io.github.flux.paddle.processor.Normalize;
@@ -39,18 +40,23 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.HashMap;
 
 public class PaddleDocOrientationPredictor extends BatchPredictor<PreProcessResult, ClassificationResult> {
 
     public static final Set<String> MODEL_NAMES = Set.of("PP-LCNet_x1_0_doc_ori");
 
+    static {
+        DocOrientationClassifyModel.getRegistry().register(MODEL_NAMES, PaddleDocOrientationPredictor::new);
+    }
+
     private final PaddleClassificationPredictor predictor;
 
     public PaddleDocOrientationPredictor(ModelParam param) {
-        this(param.modelRootDir(), param.modelName(), param.env(), param.gpuIndex());
+        this(param.modelRootDir(), param.modelName(), param.gpuIndex(), param.env(), new HashMap<>());
     }
 
-    public PaddleDocOrientationPredictor(String modelRootDir, String modelName, OrtEnvironment env, int gpuIndex) {
+    public PaddleDocOrientationPredictor(String modelRootDir, String modelName, int gpuIndex, OrtEnvironment env, Map<String, Object> customParams) {
         if (!MODEL_NAMES.contains(modelName)) {
             throw new FluxException("Not Supported Model: " + modelName);
         }

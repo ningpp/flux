@@ -4,7 +4,9 @@ import ai.djl.ndarray.NDManager;
 import ai.onnxruntime.OrtEnvironment;
 import io.github.flux.core.BatchPredictor;
 import io.github.flux.core.MatManager;
+import io.github.flux.core.ModelFactory;
 import io.github.flux.core.ModelParam;
+import io.github.flux.core.ModelRegistry;
 import io.github.flux.core.ObjectDetectionResult;
 import io.github.flux.core.ProcessedMat;
 import io.github.flux.docling.DoclingLayoutModel;
@@ -16,8 +18,21 @@ import org.opencv.core.Mat;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.HashMap;
 
 public class LayoutModel extends BatchPredictor<ProcessedMat, List<ObjectDetectionResult>> {
+
+    private static final ModelRegistry<BatchPredictor<ProcessedMat, List<ObjectDetectionResult>>> REGISTRY = new ModelRegistry<>();
+
+    static {
+        // Trigger class loading to ensure models register themselves
+        try {
+            Class.forName(DoclingLayoutModel.class.getName());
+            Class.forName(PaddleLayoutModel.class.getName());
+        } catch (ClassNotFoundException e) {
+            throw new FluxException("Failed to load model classes", e);
+        }
+    }
 
     public static final Set<String> MODEL_NAMES = CollectionUtil.distinct(List.of(
             DoclingLayoutModel.MODEL_NAMES,
@@ -27,21 +42,28 @@ public class LayoutModel extends BatchPredictor<ProcessedMat, List<ObjectDetecti
     private final BatchPredictor<ProcessedMat, List<ObjectDetectionResult>> predictor;
 
     public LayoutModel(ModelParam param) {
-        this(param.modelRootDir(), param.modelName(), param.gpuIndex(), param.env());
+        this(param.modelRootDir(), param.modelName(), param.gpuIndex(), param.env(), new HashMap<>());
     }
 
     public LayoutModel(final String modelRootDir,
                        final String modelName,
                        final int gpuIndex,
                        final OrtEnvironment env) {
-        if (!MODEL_NAMES.contains(modelName)) {
-            throw new FluxException("not supported formula model: " + modelName);
-        }
-        if (DoclingLayoutModel.MODEL_NAMES.contains(modelName)) {
-            predictor = new DoclingLayoutModel(modelRootDir, modelName, gpuIndex, env);
-        } else {
-            predictor = new PaddleLayoutModel(modelRootDir, modelName, gpuIndex, env);
-        }
+        this(modelRootDir, modelName, gpuIndex, env, new HashMap<>());
+    }
+
+    public LayoutModel(final String modelRootDir,
+                       final String modelName,
+                       final int gpuIndex,
+                       final OrtEnvironment env,
+                       final Map<String, Object> customParams) {
+        ModelFactory<BatchPredictor<ProcessedMat, List<ObjectDetectionResult>>> factory = REGISTRY.getFactory(modelName)
+                .orElseThrow(() -> new FluxException("not supported layout model: " + modelName));
+        predictor = factory.create(modelRootDir, modelName, gpuIndex, env, customParams);
+    }
+
+    public static ModelRegistry<BatchPredictor<ProcessedMat, List<ObjectDetectionResult>>> getRegistry() {
+        return REGISTRY;
     }
 
     @Override

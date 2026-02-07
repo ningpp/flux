@@ -20,6 +20,7 @@ package io.github.flux.unirec;
 import ai.djl.ndarray.NDManager;
 import ai.onnxruntime.OrtEnvironment;
 import io.github.flux.core.BatchPredictor;
+import io.github.flux.core.ModelInstanceKey;
 import io.github.flux.core.MatManager;
 import io.github.flux.core.PreProcessResult;
 import io.github.flux.core.TextResult;
@@ -27,10 +28,12 @@ import io.github.flux.exception.FluxException;
 import io.github.flux.util.IOUtil;
 import org.opencv.core.Mat;
 
+import io.github.flux.model.FormulaRecognitionModel;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class UnirecPredictor extends BatchPredictor<PreProcessResult, TextResult> {
 
@@ -38,13 +41,46 @@ public class UnirecPredictor extends BatchPredictor<PreProcessResult, TextResult
             "unirec-0.1b"
     );
 
+    // Shared instance cache to avoid creating multiple expensive model instances
+    private static final Map<ModelInstanceKey, UnirecPredictor> INSTANCE_CACHE = new ConcurrentHashMap<>();
+
+    static {
+        FormulaRecognitionModel.getRegistry().register(MODEL_NAMES, UnirecFormulaModel::new);
+    }
+
     private final UnirecEncoderModel encoderModel;
     private final UnirecDecoderModel decoderModel;
 
-    public UnirecPredictor(final String modelRootDir,
-                           final String modelName,
-                           final int gpuIndex,
-                           final OrtEnvironment env) {
+    /**
+     * Gets a shared instance of UnirecPredictor for the given configuration.
+     * If an instance with the same configuration already exists, it will be reused.
+     * This is important because the model is expensive to create (loads ONNX models).
+     *
+     * @param modelRootDir the root directory containing model files
+     * @param modelName the name of the model
+     * @param gpuIndex the GPU index to use (-1 for CPU)
+     * @param env the ONNX runtime environment
+     * @param customParams custom initialization parameters (e.g., encoder GPU, decoder GPU)
+     * @return a shared instance of the model
+     */
+    public static UnirecPredictor getSharedInstance(final String modelRootDir,
+                                                     final String modelName,
+                                                     final int gpuIndex,
+                                                     final OrtEnvironment env,
+                                                     final Map<String, Object> customParams) {
+        ModelInstanceKey key = new ModelInstanceKey(modelRootDir, modelName, gpuIndex, customParams);
+        return INSTANCE_CACHE.computeIfAbsent(key, k ->
+            new UnirecPredictor(modelRootDir, modelName, gpuIndex, env, customParams));
+    }
+
+    /**
+     * Private constructor - use getSharedInstance() to obtain instances.
+     */
+    private UnirecPredictor(final String modelRootDir,
+                            final String modelName,
+                            final int gpuIndex,
+                            final OrtEnvironment env,
+                            final Map<String, Object> customParams) {
         if (!MODEL_NAMES.contains(modelName)) {
             throw new FluxException("not supported unirec model: " + modelName);
         }

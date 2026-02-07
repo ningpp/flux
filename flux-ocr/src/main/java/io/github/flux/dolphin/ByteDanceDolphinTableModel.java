@@ -40,13 +40,15 @@ public class ByteDanceDolphinTableModel extends BatchPredictor<PreProcessResult,
     public ByteDanceDolphinTableModel(final String modelRootDir,
                                       final String modelName,
                                       final int gpuIndex,
-                                      final OrtEnvironment env) {
-        this.model = new ByteDanceDolphinElementModel(modelRootDir, modelName, gpuIndex, env, false);
+                                      final OrtEnvironment env,
+                                      final Map<String, Object> customParams) {
+        this.model = ByteDanceDolphinElementModel.getSharedInstance(modelRootDir, modelName, gpuIndex, env, customParams);
     }
 
     @Override
     public List<TableResult> doBatchPredict(List<PreProcessResult> mats, MatManager matManager, NDManager manager, Map<String, Object> extraParameters) {
         extraParameters.put("prompt", "Parse the table in the image.");
+        extraParameters.put("skipSpecialTokens", false);
         var elementResults = model.doBatchPredict(mats, matManager, manager, extraParameters);
         return elementResults.stream().map(er -> new TableResult(er.text(), er.tokens())).toList();
     }

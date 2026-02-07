@@ -1,6 +1,7 @@
 package io.github.flux.unirec;
 
 import ai.djl.ndarray.NDManager;
+import ai.onnxruntime.OrtEnvironment;
 import io.github.flux.core.BatchPredictor;
 import io.github.flux.core.MatManager;
 import io.github.flux.core.PreProcessResult;
@@ -17,6 +18,14 @@ public class UnirecTableModel extends BatchPredictor<PreProcessResult, TableResu
 
     public UnirecTableModel(UnirecPredictor predictor) {
         this.predictor = predictor;
+    }
+
+    public UnirecTableModel(final String modelRootDir,
+                            final String modelName,
+                            final int gpuIndex,
+                            final OrtEnvironment env,
+                            final Map<String, Object> customParams) {
+        this.predictor = UnirecPredictor.getSharedInstance(modelRootDir, modelName, gpuIndex, env, customParams);
     }
 
     @Override

@@ -51,7 +51,6 @@ public class DolphinDecoderModel implements AutoCloseable {
     private final long padTokenId;
     private final long eosTokenId;
     private final HuggingFaceTokenizer tokenizer;
-    private final boolean skipSpecialTokens;
 
     public DolphinDecoderModel(final String modelFile,
                                final int gpuIndex,
@@ -59,13 +58,11 @@ public class DolphinDecoderModel implements AutoCloseable {
                                int maxLength,
                                long padTokenId,
                                long eosTokenId,
-                               HuggingFaceTokenizer tokenizer,
-                               boolean skipSpecialTokens) {
+                               HuggingFaceTokenizer tokenizer) {
         this.maxLength = maxLength;
         this.padTokenId = padTokenId;
         this.eosTokenId = eosTokenId;
         this.tokenizer = tokenizer;
-        this.skipSpecialTokens = skipSpecialTokens;
         try {
             this.env = env;
             OrtSession.SessionOptions options = new OrtSession.SessionOptions();
@@ -80,7 +77,7 @@ public class DolphinDecoderModel implements AutoCloseable {
         }
     }
 
-    public List<TextResult> predict(String prompt, OnnxTensor encoder_hidden_states_tensor, long[] decoder_input_ids, NDManager manager) throws OrtException {
+    public List<TextResult> predict(String prompt, OnnxTensor encoder_hidden_states_tensor, long[] decoder_input_ids, NDManager manager, boolean skipSpecialTokens) throws OrtException {
         int batchSize = Math.toIntExact(encoder_hidden_states_tensor.getInfo().getShape()[0]);
         long[][] inputIds = new long[batchSize][];
         for (int i = 0; i < batchSize; i++) {

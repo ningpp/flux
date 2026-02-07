@@ -5,7 +5,9 @@ import ai.onnxruntime.OrtEnvironment;
 import io.github.flux.core.BatchPredictor;
 import io.github.flux.core.TextResult;
 import io.github.flux.core.MatManager;
+import io.github.flux.core.ModelFactory;
 import io.github.flux.core.ModelParam;
+import io.github.flux.core.ModelRegistry;
 import io.github.flux.core.PreProcessResult;
 import io.github.flux.dolphin.ByteDanceDolphinElementModel;
 import io.github.flux.dolphin.ByteDanceDolphinFormulaModel;
@@ -24,8 +26,29 @@ import org.opencv.core.Mat;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.HashMap;
 
 public class FormulaRecognitionModel extends BatchPredictor<PreProcessResult, TextResult> {
+
+    private static final ModelRegistry<BatchPredictor<PreProcessResult, TextResult>> REGISTRY = new ModelRegistry<>();
+
+    static {
+        // Trigger class loading to ensure models register themselves
+        try {
+            Class.forName(ByteDanceDolphinElementModel.class.getName());
+            Class.forName(NougatLatexFormulaModel.class.getName());
+            Class.forName(PaddleFormulaRecognitionPredictor.class.getName());
+            Class.forName(Pix2TextFormulaRecognitionPredictor.class.getName());
+            Class.forName(TexTellerPredictor.class.getName());
+            Class.forName(UnirecPredictor.class.getName());
+        } catch (ClassNotFoundException e) {
+            throw new FluxException("Failed to load model classes", e);
+        }
+
+        // GraniteDoclingFormulaModel needs special handling due to extra maxLength parameter
+        REGISTRY.register(GraniteDoclingFormulaModel.MODEL_NAMES,
+                (dir, name, gpu, env, customParams) -> new GraniteDoclingFormulaModel(dir, name, gpu, env, 8192, customParams));
+    }
 
     private final BatchPredictor<PreProcessResult, TextResult> predictor;
 
@@ -40,30 +63,28 @@ public class FormulaRecognitionModel extends BatchPredictor<PreProcessResult, Te
     ));
 
     public FormulaRecognitionModel(ModelParam param) {
-        this(param.modelRootDir(), param.modelName(), param.gpuIndex(), param.env());
+        this(param.modelRootDir(), param.modelName(), param.gpuIndex(), param.env(), new HashMap<>());
     }
 
     public FormulaRecognitionModel(final String modelRootDir,
                                    final String modelName,
                                    final int gpuIndex,
                                    final OrtEnvironment env) {
-        if (ByteDanceDolphinElementModel.MODEL_NAMES.contains(modelName)) {
-            this.predictor = new ByteDanceDolphinFormulaModel(modelRootDir, modelName, gpuIndex, env);
-        } else if (GraniteDoclingFormulaModel.MODEL_NAMES.contains(modelName)) {
-            this.predictor = new GraniteDoclingFormulaModel(modelRootDir, modelName, gpuIndex, env, 8192);
-        } else if (NougatLatexFormulaModel.MODEL_NAMES.contains(modelName)) {
-            this.predictor = new NougatLatexFormulaModel(modelRootDir, modelName, gpuIndex, env);
-        } else if (PaddleFormulaRecognitionPredictor.MODEL_NAMES.contains(modelName)) {
-            this.predictor = new PaddleFormulaRecognitionPredictor(modelRootDir, modelName, gpuIndex, env);
-        } else if (Pix2TextFormulaRecognitionPredictor.MODEL_NAMES.contains(modelName)) {
-            this.predictor = new Pix2TextFormulaRecognitionPredictor(modelRootDir, modelName, gpuIndex, env);
-        } else if (TexTellerPredictor.MODEL_NAMES.contains(modelName)) {
-            this.predictor = new TexTellerPredictor(modelRootDir, modelName, gpuIndex, env);
-        } else if (UnirecPredictor.MODEL_NAMES.contains(modelName)) {
-            this.predictor = new UnirecFormulaModel(new UnirecPredictor(modelRootDir, modelName, gpuIndex, env));
-        } else {
-            throw new FluxException("not supported formula model: " + modelName);
-        }
+        this(modelRootDir, modelName, gpuIndex, env, new HashMap<>());
+    }
+
+    public FormulaRecognitionModel(final String modelRootDir,
+                                   final String modelName,
+                                   final int gpuIndex,
+                                   final OrtEnvironment env,
+                                   final Map<String, Object> customParams) {
+        ModelFactory<BatchPredictor<PreProcessResult, TextResult>> factory = REGISTRY.getFactory(modelName)
+                .orElseThrow(() -> new FluxException("not supported formula model: " + modelName));
+        this.predictor = factory.create(modelRootDir, modelName, gpuIndex, env, customParams);
+    }
+
+    public static ModelRegistry<BatchPredictor<PreProcessResult, TextResult>> getRegistry() {
+        return REGISTRY;
     }
 
 

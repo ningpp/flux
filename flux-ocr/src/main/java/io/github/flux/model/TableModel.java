@@ -4,7 +4,9 @@ import ai.djl.ndarray.NDManager;
 import ai.onnxruntime.OrtEnvironment;
 import io.github.flux.core.BatchPredictor;
 import io.github.flux.core.MatManager;
+import io.github.flux.core.ModelFactory;
 import io.github.flux.core.ModelParam;
+import io.github.flux.core.ModelRegistry;
 import io.github.flux.core.PreProcessResult;
 import io.github.flux.core.TableResult;
 import io.github.flux.dolphin.ByteDanceDolphinElementModel;
@@ -19,8 +21,25 @@ import org.opencv.core.Mat;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.HashMap;
 
 public class TableModel extends BatchPredictor<PreProcessResult, TableResult> {
+
+    private static final ModelRegistry<BatchPredictor<PreProcessResult, TableResult>> REGISTRY = new ModelRegistry<>();
+
+    static {
+        // Trigger class loading to ensure models register themselves
+        try {
+            Class.forName(ByteDanceDolphinElementModel.class.getName());
+            Class.forName(UnirecPredictor.class.getName());
+        } catch (ClassNotFoundException e) {
+            throw new FluxException("Failed to load model classes", e);
+        }
+
+        // UnirecTableModel needs special handling as it wraps UnirecPredictor
+        REGISTRY.register(UnirecPredictor.MODEL_NAMES,
+                (dir, name, gpu, env, customParams) -> new UnirecTableModel(UnirecPredictor.getSharedInstance(dir, name, gpu, env, customParams)));
+    }
 
     private final BatchPredictor<PreProcessResult, TableResult> predictor;
 
@@ -30,20 +49,28 @@ public class TableModel extends BatchPredictor<PreProcessResult, TableResult> {
     ));
 
     public TableModel(ModelParam param) {
-        this(param.modelRootDir(), param.modelName(), param.gpuIndex(), param.env());
+        this(param.modelRootDir(), param.modelName(), param.gpuIndex(), param.env(), new HashMap<>());
     }
 
     public TableModel(final String modelRootDir,
                       final String modelName,
                       final int gpuIndex,
                       final OrtEnvironment env) {
-        if (ByteDanceDolphinElementModel.MODEL_NAMES.contains(modelName)) {
-            this.predictor = new ByteDanceDolphinTableModel(modelRootDir, modelName, gpuIndex, env);
-        } else if (UnirecPredictor.MODEL_NAMES.contains(modelName)) {
-            this.predictor = new UnirecTableModel(new UnirecPredictor(modelRootDir, modelName, gpuIndex, env));
-        } else {
-            throw new FluxException("not supported table model: " + modelName);
-        }
+        this(modelRootDir, modelName, gpuIndex, env, new HashMap<>());
+    }
+
+    public TableModel(final String modelRootDir,
+                      final String modelName,
+                      final int gpuIndex,
+                      final OrtEnvironment env,
+                      final Map<String, Object> customParams) {
+        ModelFactory<BatchPredictor<PreProcessResult, TableResult>> factory = REGISTRY.getFactory(modelName)
+                .orElseThrow(() -> new FluxException("not supported table model: " + modelName));
+        this.predictor = factory.create(modelRootDir, modelName, gpuIndex, env, customParams);
+    }
+
+    public static ModelRegistry<BatchPredictor<PreProcessResult, TableResult>> getRegistry() {
+        return REGISTRY;
     }
 
 

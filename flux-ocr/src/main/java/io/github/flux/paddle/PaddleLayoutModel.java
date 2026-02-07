@@ -24,6 +24,7 @@ import io.github.flux.core.MatManager;
 import io.github.flux.core.ObjectDetectionResult;
 import io.github.flux.core.ProcessedMat;
 import io.github.flux.exception.FluxException;
+import io.github.flux.model.LayoutModel;
 import io.github.flux.paddle.predictor.PaddleObjectDetectionPredictor;
 import io.github.flux.paddle.processor.DetPostProcessor;
 import io.github.flux.paddle.processor.ImageProcessor;
@@ -49,6 +50,10 @@ public class PaddleLayoutModel extends BatchPredictor<ProcessedMat, List<ObjectD
             "PicoDet-L_layout_17cls",
             "RT-DETR-H_layout_17cls"
     );
+
+    static {
+        LayoutModel.getRegistry().register(MODEL_NAMES, PaddleLayoutModel::new);
+    }
 
     private static final List<String> PP_LABELS_17 = List.of(
             "paragraph_title", "image", "text", "number", "abstract", "content",
@@ -122,7 +127,8 @@ public class PaddleLayoutModel extends BatchPredictor<ProcessedMat, List<ObjectD
     public PaddleLayoutModel(final String modelDir,
                              final String modelName,
                              final int gpuIndex,
-                             final OrtEnvironment env) {
+                             final OrtEnvironment env,
+                             final Map<String, Object> customParams) {
         int resizeSize;
         Normalize normalize;
         DetPostProcessor detPostProcessor;

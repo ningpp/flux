@@ -28,6 +28,7 @@ import io.github.flux.exception.FluxException;
 import io.github.flux.util.IOUtil;
 import org.opencv.core.Mat;
 
+import io.github.flux.model.FormulaRecognitionModel;
 import java.io.File;
 import java.nio.file.Paths;
 import java.util.List;
@@ -39,6 +40,10 @@ public class TexTellerPredictor extends BatchPredictor<PreProcessResult, TextRes
             "TexTeller"
     );
 
+    static {
+        FormulaRecognitionModel.getRegistry().register(MODEL_NAMES, TexTellerPredictor::new);
+    }
+
     private final TexTellerEncoderModel encoderModel;
     private final TexTellerDecoderModel decoderModel;
     private final HuggingFaceTokenizer tokenizer;
@@ -48,7 +53,8 @@ public class TexTellerPredictor extends BatchPredictor<PreProcessResult, TextRes
     public TexTellerPredictor(final String modelRootDir,
                               final String modelName,
                               final int gpuIndex,
-                              final OrtEnvironment env) {
+                              final OrtEnvironment env,
+                              final Map<String, Object> customParams) {
         if (!MODEL_NAMES.contains(modelName)) {
             throw new FluxException("not supported TexTeller model: " + modelName);
         }

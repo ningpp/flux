@@ -30,6 +30,7 @@ import io.github.flux.exception.FluxException;
 import io.github.flux.util.IOUtil;
 import org.opencv.core.Mat;
 
+import io.github.flux.model.FormulaRecognitionModel;
 import java.io.File;
 import java.nio.file.Paths;
 import java.util.List;
@@ -42,6 +43,10 @@ public class NougatLatexFormulaModel extends BatchPredictor<PreProcessResult, Te
             "nougat-latex-base"
     );
 
+    static {
+        FormulaRecognitionModel.getRegistry().register(MODEL_NAMES, NougatLatexFormulaModel::new);
+    }
+
     private final NougatLatexEncoderModel encoderModel;
     private final NougatLatexDecoderModel decoderModel;
     private final HuggingFaceTokenizer tokenizer;
@@ -50,7 +55,8 @@ public class NougatLatexFormulaModel extends BatchPredictor<PreProcessResult, Te
     public NougatLatexFormulaModel(final String modelRootDir,
                                    final String modelName,
                                    final int gpuIndex,
-                                   final OrtEnvironment env) {
+                                   final OrtEnvironment env,
+                                   final Map<String, Object> customParams) {
         if (!MODEL_NAMES.contains(modelName)) {
             throw new FluxException("not supported nougat latex model: " + modelName);
         }
