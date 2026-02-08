@@ -44,18 +44,15 @@ public class GlmOcrDemo {
     public static void main(String[] args) throws Exception {
         // Model and image paths
         String modelRootDir = "D:\\models\\onnx";
-        String imagePath = args.length > 0 ? args[0] : "D:\\tmp\\formula-2026028-105537.jpg";
         boolean useUnified = true;
-        boolean useFp16 = false;  // Use FP16 model for reduced memory
-        int gpuIndex = 0;       // -1 for CPU, 0 for first GPU
-        
-        System.out.println("GLM-OCR ONNX Inference Demo");
-        System.out.println("===========================");
-        System.out.println("Model: " + modelRootDir + "\\GLM-OCR");
-        System.out.println("Image: " + imagePath);
-        System.out.println("FP16: " + useFp16);
-        System.out.println("Device: " + (gpuIndex < 0 ? "CPU" : "GPU " + gpuIndex));
-        System.out.println();
+        boolean useFp16 = false;
+        int gpuIndex = 0;
+
+        String[] images = {
+            "D:\\datasets\\UniMER-Test\\spe\\0000404.png",
+            "D:\\datasets\\UniMER-Test\\spe\\0000317.png",
+            "D:\\datasets\\UniMER-Test\\spe\\0000357.png",
+        };
         
         long startTime = System.currentTimeMillis();
         
@@ -66,22 +63,23 @@ public class GlmOcrDemo {
             
             long loadTime = System.currentTimeMillis() - startTime;
             System.out.println("Model loaded in " + loadTime + " ms");
-            
-            // Load image
-            Mat rgbMat = ImageUtil.readToRgb(matManager, imagePath);
-            System.out.println("Image size: " + rgbMat.cols() + "x" + rgbMat.rows());
-            
-            // Run inference
-            long inferStart = System.currentTimeMillis();
-            TextResult result = model.predict(rgbMat, matManager, ndManager, "Formula Recognition:");
-            long inferTime = System.currentTimeMillis() - inferStart;
-            
-            System.out.println("\nInference time: " + inferTime + " ms");
-            System.out.println("Generated " + result.tokens().length + " tokens");
-            System.out.println("\n--- OCR Result ---");
-            System.out.println(result.text());
-            System.out.println("------------------");
-            System.out.println(Arrays.toString(result.tokens()));
+
+            for (String imagePath : images) {
+                System.out.println("\n============================================================");
+                System.out.println("Image: " + imagePath);
+                
+                Mat rgbMat = ImageUtil.readToRgb(matManager, imagePath);
+                System.out.println("Image size: " + rgbMat.cols() + "x" + rgbMat.rows());
+                
+                long inferStart = System.currentTimeMillis();
+                TextResult result = model.predict(rgbMat, matManager, ndManager, "Formula Recognition:");
+                long inferTime = System.currentTimeMillis() - inferStart;
+                
+                System.out.println("Inference time: " + inferTime + " ms");
+                System.out.println("Generated " + result.tokens().length + " tokens");
+                System.out.println("Tokens: " + Arrays.toString(result.tokens()));
+                System.out.println("Text: " + result.text());
+            }
         }
         
         long totalTime = System.currentTimeMillis() - startTime;

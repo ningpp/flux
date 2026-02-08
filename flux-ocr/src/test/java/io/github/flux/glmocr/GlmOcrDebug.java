@@ -29,7 +29,7 @@ import java.util.Arrays;
 public class GlmOcrDebug {
 
     public static void main(String[] args) throws Exception {
-        String imagePath = args.length > 0 ? args[0] : "D:\\tmp\\formula_2025-8-2_17-28-16.jpg";
+        String imagePath = args.length > 0 ? args[0] : "D:\\datasets\\UniMER-Test\\spe\\0000404.png";
         String modelPath = "D:\\models\\onnx\\GLM-OCR\\vision_encoder.onnx";
         
         try (OrtEnvironment env = OrtEnvironment.getEnvironment();
@@ -88,15 +88,17 @@ public class GlmOcrDebug {
             }
             System.out.println("First patch unique count: " + uniqueCount);
             
-            // Print patch 100 values for comparison
-            System.out.println("\nPatch 100, first 10 values:");
-            for (int i = 0; i < 10; i++) {
-                System.out.printf("  [%d] = %.10f%n", i, pixelValues[100][i]);
+            // Print patch 50 values for comparison (middle patch with content)
+            if (pixelValues.length > 50) {
+                System.out.println("\nPatch 50, first 10 values:");
+                for (int i = 0; i < 10; i++) {
+                    System.out.printf("  [%d] = %.10f%n", i, pixelValues[50][i]);
+                }
+                System.out.println("Patch 50, values at 196, 392, 588:");
+                System.out.printf("  [196] = %.10f%n", pixelValues[50][196]);
+                System.out.printf("  [392] = %.10f%n", pixelValues[50][392]);
+                System.out.printf("  [588] = %.10f%n", pixelValues[50][588]);
             }
-            System.out.println("Patch 100, values at 196, 392, 588:");
-            System.out.printf("  [196] = %.10f%n", pixelValues[100][196]);
-            System.out.printf("  [392] = %.10f%n", pixelValues[100][392]);
-            System.out.printf("  [588] = %.10f%n", pixelValues[100][588]);
             
             // Print pos_ids
             long[][] posIds = GlmOcrVisionEncoderModel.computePosIds(gridThw);
@@ -106,9 +108,9 @@ public class GlmOcrDebug {
                 System.out.print(Arrays.toString(posIds[i]) + " ");
             }
             System.out.println();
-            System.out.println("pos_ids[100]: " + Arrays.toString(posIds[100]));
-            System.out.println("pos_ids[101]: " + Arrays.toString(posIds[101]));
-            System.out.println("pos_ids[102]: " + Arrays.toString(posIds[102]));
+            System.out.println("posIds[0]: " + Arrays.toString(posIds[0]));
+            System.out.println("posIds[1]: " + Arrays.toString(posIds[1]));
+            System.out.println("posIds[last]: " + Arrays.toString(posIds[posIds.length - 1]));
             
             // Save inputs as numpy format for comparison
             java.io.DataOutputStream dos = new java.io.DataOutputStream(
