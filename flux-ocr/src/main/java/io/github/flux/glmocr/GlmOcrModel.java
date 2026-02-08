@@ -62,23 +62,8 @@ public class GlmOcrModel implements AutoCloseable {
     
     private final GlmOcrVisionEncoderModel encoderModel;
     private final GlmOcrEmbedModel embedModel;
-    private final GlmOcrDecoderModel decoderModel;
+    private final GlmOcrDecoder decoderModel;
     private final HuggingFaceTokenizer tokenizer;
-
-    /**
-     * Create GLM-OCR model.
-     *
-     * @param modelRootDir root directory containing model subdirectories
-     * @param modelName model name (e.g., "GLM-OCR")
-     * @param gpuIndex GPU index (-1 for CPU)
-     * @param env ONNX Runtime environment
-     */
-    public GlmOcrModel(final String modelRootDir,
-                       final String modelName,
-                       final int gpuIndex,
-                       final OrtEnvironment env) {
-        this(modelRootDir, modelName, gpuIndex, env, false);
-    }
 
     /**
      * Create GLM-OCR model with optional FP16 precision.
@@ -93,7 +78,8 @@ public class GlmOcrModel implements AutoCloseable {
                        final String modelName,
                        final int gpuIndex,
                        final OrtEnvironment env,
-                       final boolean useFp16) {
+                       final boolean useFp16,
+                       final boolean useUnified) {
         if (!MODEL_NAMES.contains(modelName)) {
             throw new FluxException("not supported model: " + modelName);
         }
@@ -111,15 +97,24 @@ public class GlmOcrModel implements AutoCloseable {
             this.embedModel = new GlmOcrEmbedModel(
                     new File(modelDir, "embedding.onnx").getAbsolutePath(),
                     gpuIndex, env);
-            
-            // Use separate prefill and decode models for better CUDA compatibility
-            this.decoderModel = new GlmOcrDecoderModel(
-                    new File(modelDir, "llm_prefill.onnx").getAbsolutePath(),
-                    new File(modelDir, "llm_decode.onnx").getAbsolutePath(),
-                    gpuIndex,
-                    env,
-                    131072  // max length
-            );
+
+            if (useUnified) {
+                this.decoderModel = new GlmOcrDecoderModelUnified(
+                        new File(modelDir, "llm_unified.onnx").getAbsolutePath(),
+                        gpuIndex,
+                        env,
+                        1024
+                );
+            } else {
+                // Use separate prefill and decode models for better CUDA compatibility
+                this.decoderModel = new GlmOcrDecoderModel(
+                        new File(modelDir, "llm_prefill.onnx").getAbsolutePath(),
+                        new File(modelDir, "llm_decode.onnx").getAbsolutePath(),
+                        gpuIndex,
+                        env,
+                        1024
+                );
+            }
             
             this.tokenizer = HuggingFaceTokenizer.newInstance(Paths.get(modelDir));
         } catch (Exception e) {
@@ -170,6 +165,7 @@ public class GlmOcrModel implements AutoCloseable {
                     expandToHidden(imageFeatures),  // Wrap for batch
                     new long[][]{inputIds},
                     inputsEmbeds,
+                    ppResult.imageGridThw,
                     embedModel,
                     ndManager
             );

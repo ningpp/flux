@@ -28,7 +28,9 @@ import io.github.flux.util.OnnxUtil;
 
 import java.nio.FloatBuffer;
 import java.nio.LongBuffer;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -39,7 +41,7 @@ import java.util.Map;
  * 
  * GLM-OCR specific: Uses 3D position_ids [3, batch, seq_len] for rotary embeddings.
  */
-public class GlmOcrDecoderModel implements AutoCloseable {
+public class GlmOcrDecoderModel implements GlmOcrDecoder {
 
     private final OrtEnvironment env;
     private final OrtSession prefillSession;
@@ -50,6 +52,12 @@ public class GlmOcrDecoderModel implements AutoCloseable {
     private static final int NUM_LAYERS = 16;
     private static final int NUM_KV_HEADS = 8;
     private static final int HEAD_DIM = 128;
+
+    // Spatial merge size for position_ids computation
+    private static final int MERGE_SIZE = 2;
+
+    // Image token ID for GLM-OCR
+    private static final long IMAGE_TOKEN_ID = 59280L;
 
     /**
      * Create decoder model with separate prefill and decode sessions.
@@ -85,13 +93,16 @@ public class GlmOcrDecoderModel implements AutoCloseable {
      * @param imageFeatures vision encoder output [batch, num_patches, hidden] (unused, for API compat)
      * @param inputIds initial input token IDs [batch][seq_len]
      * @param inputsEmbeds initial embeddings with image features merged [batch][seq_len][hidden]
+     * @param imageGridThw image grid dimensions [t, h, w] in patch units
      * @param embedModel embedding model for decoding new tokens
      * @param ndManager NDArray manager
      * @return generated token IDs for each batch item
      */
+    @Override
     public long[][] predict(float[][][] imageFeatures,
                             long[][] inputIds,
                             float[][][] inputsEmbeds,
+                            int[] imageGridThw,
                             GlmOcrEmbedModel embedModel,
                             NDManager ndManager) throws OrtException {
         int batchSize = inputsEmbeds.length;
@@ -100,14 +111,12 @@ public class GlmOcrDecoderModel implements AutoCloseable {
         // Create attention mask [batch, seq_len]
         long[][] attentionMask = ArrayUtil.ones(batchSize, seqLen);
 
-        // Create position_ids [3, batch, seq_len] for GLM-OCR's rotary embeddings
-        long[][][] positionIds = new long[3][batchSize][seqLen];
-        for (int b = 0; b < batchSize; b++) {
-            for (int i = 0; i < seqLen; i++) {
-                positionIds[0][b][i] = i;  // position
-                positionIds[1][b][i] = 0;  // block_position
-                positionIds[2][b][i] = 0;  // is_image (0 for text)
-            }
+        // Compute proper 3D position_ids [3, batch, seq_len] for GLM-OCR's MRoPE
+        long[][][] positionIds = computePositionIds(inputIds[0], imageGridThw);
+        // The last position in prefill determines where decode positions start
+        long lastPos = 0;
+        for (int d = 0; d < 3; d++) {
+            lastPos = Math.max(lastPos, positionIds[d][0][seqLen - 1]);
         }
 
         // Prefill inputs (no KV cache needed for prefill model)
@@ -173,11 +182,13 @@ public class GlmOcrDecoderModel implements AutoCloseable {
             decodeInputs.put("attention_mask", ArrayUtil.createOnnxTensor(ArrayUtil.ones(batchSize, currLen), env));
 
             // Position IDs for single token decode: [3, batch, 1]
+            // For MRoPE, all 3 dims get the same sequential position after prefill
             long[][][] nextPosIds = new long[3][batchSize][1];
+            long decodePos = lastPos + (currLen - seqLen);
             for (int b = 0; b < batchSize; b++) {
-                nextPosIds[0][b][0] = currLen - 1;  // position
-                nextPosIds[1][b][0] = 0;            // block_position
-                nextPosIds[2][b][0] = 0;            // is_image
+                nextPosIds[0][b][0] = decodePos;
+                nextPosIds[1][b][0] = decodePos;
+                nextPosIds[2][b][0] = decodePos;
             }
             decodeInputs.put("position_ids", createPositionIdsTensor(nextPosIds));
 
@@ -262,6 +273,110 @@ public class GlmOcrDecoderModel implements AutoCloseable {
             }
         }
         return OnnxTensor.createTensor(env, LongBuffer.wrap(flat), new long[]{d1, d2, d3});
+    }
+
+    /**
+     * Compute 3D MRoPE position_ids for GLM-OCR (same as Qwen3-VL).
+     * Text tokens: all 3 dims = sequential.
+     * Vision tokens: dim0=temporal, dim1=height, dim2=width with spatial layout.
+     *
+     * @param inputIds     flat input token IDs for a single batch item
+     * @param imageGridThw [t, h, w] in patch units for the image
+     * @return position_ids [3][1][seqLen]
+     */
+    private long[][][] computePositionIds(long[] inputIds, int[] imageGridThw) {
+        int seqLen = inputIds.length;
+        List<long[][]> segments = new ArrayList<>();
+        int st = 0;
+        boolean imageProcessed = false;
+
+        for (int i = 0; i < seqLen; i++) {
+            if (inputIds[i] == IMAGE_TOKEN_ID && !imageProcessed) {
+                int imgStart = i;
+                int textLen = imgStart - st;
+
+                int t = imageGridThw[0];
+                int h = imageGridThw[1];
+                int w = imageGridThw[2];
+
+                int llmGridT = t;
+                int llmGridH = h / MERGE_SIZE;
+                int llmGridW = w / MERGE_SIZE;
+
+                long stIdx = segments.isEmpty() ? 0 : maxOfLastSegment(segments) + 1;
+
+                // Text positions before image
+                if (textLen > 0) {
+                    long[][] textPos = new long[3][textLen];
+                    for (int d = 0; d < 3; d++) {
+                        for (int p = 0; p < textLen; p++) {
+                            textPos[d][p] = stIdx + p;
+                        }
+                    }
+                    segments.add(textPos);
+                }
+
+                // Vision positions: T/H/W spatial grid
+                int numVisTokens = llmGridT * llmGridH * llmGridW;
+                long[][] visPos = new long[3][numVisTokens];
+                int vIdx = 0;
+                for (int gt = 0; gt < llmGridT; gt++) {
+                    for (int gh = 0; gh < llmGridH; gh++) {
+                        for (int gw = 0; gw < llmGridW; gw++) {
+                            visPos[0][vIdx] = gt + textLen + stIdx;
+                            visPos[1][vIdx] = gh + textLen + stIdx;
+                            visPos[2][vIdx] = gw + textLen + stIdx;
+                            vIdx++;
+                        }
+                    }
+                }
+                segments.add(visPos);
+
+                // Skip all consecutive IMAGE_TOKEN_ID tokens
+                int imgEnd = imgStart;
+                while (imgEnd < seqLen && inputIds[imgEnd] == IMAGE_TOKEN_ID) imgEnd++;
+                st = imgEnd;
+                i = imgEnd - 1;
+                imageProcessed = true;
+            }
+        }
+
+        // Remaining text tokens after image
+        if (st < seqLen) {
+            long stIdx = segments.isEmpty() ? 0 : maxOfLastSegment(segments) + 1;
+            int textLen = seqLen - st;
+            long[][] textPos = new long[3][textLen];
+            for (int d = 0; d < 3; d++) {
+                for (int p = 0; p < textLen; p++) {
+                    textPos[d][p] = stIdx + p;
+                }
+            }
+            segments.add(textPos);
+        }
+
+        // Concatenate segments into [3, 1, seqLen]
+        long[][][] positionIds = new long[3][1][seqLen];
+        int offset = 0;
+        for (long[][] seg : segments) {
+            int segLen = seg[0].length;
+            for (int d = 0; d < 3; d++) {
+                System.arraycopy(seg[d], 0, positionIds[d][0], offset, segLen);
+            }
+            offset += segLen;
+        }
+
+        return positionIds;
+    }
+
+    private long maxOfLastSegment(List<long[][]> segments) {
+        long[][] last = segments.get(segments.size() - 1);
+        long max = Long.MIN_VALUE;
+        for (long[] dim : last) {
+            for (long v : dim) {
+                if (v > max) max = v;
+            }
+        }
+        return max;
     }
 
     @Override

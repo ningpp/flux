@@ -28,7 +28,9 @@ import io.github.flux.util.OnnxUtil;
 
 import java.nio.FloatBuffer;
 import java.nio.LongBuffer;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -40,7 +42,7 @@ import java.util.Map;
  *
  * GLM-OCR specific: Uses 3D position_ids [3, batch, seq_len] for rotary embeddings.
  */
-public class GlmOcrDecoderModelUnified implements AutoCloseable {
+public class GlmOcrDecoderModelUnified implements GlmOcrDecoder {
 
     private final OrtEnvironment env;
     private final OrtSession session;
@@ -55,6 +57,10 @@ public class GlmOcrDecoderModelUnified implements AutoCloseable {
     // Stop tokens
     private static final long EOS_TOKEN_ID = 59246L;   // <|endoftext|>
     private static final long USER_TOKEN_ID = 59253L;  // <|user|>
+
+    // MRoPE / spatial merge constants
+    private static final int MERGE_SIZE = 2;
+    private static final long IMAGE_TOKEN_ID = 59280L;
 
     /**
      * Create decoder model with unified session.
@@ -87,44 +93,59 @@ public class GlmOcrDecoderModelUnified implements AutoCloseable {
      * @param imageFeatures vision encoder output (unused, for API compat)
      * @param inputIds initial input token IDs [batch][seq_len]
      * @param inputsEmbeds initial embeddings with image features merged [batch][seq_len][hidden]
+     * @param imageGridThw image grid dimensions [t, h, w] in patch units
      * @param embedModel embedding model for decoding new tokens
      * @param ndManager NDArray manager
      * @return generated token IDs for each batch item
      */
+    @Override
     public long[][] predict(float[][][] imageFeatures,
                             long[][] inputIds,
                             float[][][] inputsEmbeds,
+                            int[] imageGridThw,
                             GlmOcrEmbedModel embedModel,
                             NDManager ndManager) throws OrtException {
         int batchSize = inputsEmbeds.length;
         int seqLen = inputsEmbeds[0].length;
 
+        // Pre-compute 3D MRoPE position_ids [3][1][seqLen]
+        long[][][] prefillPositionIds = computePositionIds(inputIds[0], imageGridThw);
+
+        // Track the last position for decode continuation
+        long lastPos = 0;
+        for (int d = 0; d < 3; d++) {
+            lastPos = Math.max(lastPos, prefillPositionIds[d][0][seqLen - 1]);
+        }
+
         // Initialize empty KV cache - will grow during prefill
         float[][][][][] pkvs = null;
 
-        // Process prefill token by token
-        for (int pos = 0; pos < seqLen; pos++) {
-            // Extract single token embedding [batch, 1, hidden]
+        // Process prefill token by token (tokens 0..seqLen-2 for KV cache building)
+        for (int pos = 0; pos < seqLen - 1; pos++) {
             float[][][] singleEmbed = new float[batchSize][1][HIDDEN_SIZE];
             for (int b = 0; b < batchSize; b++) {
                 singleEmbed[b][0] = inputsEmbeds[b][pos];
             }
 
-            // Run single token through model
-            pkvs = runSingleToken(singleEmbed, pos, pkvs);
+            long[] dimPos = new long[]{prefillPositionIds[0][0][pos],
+                                       prefillPositionIds[1][0][pos],
+                                       prefillPositionIds[2][0][pos]};
+            pkvs = runSingleToken(singleEmbed, dimPos, pkvs);
         }
 
-        // Get first generated token from final prefill step
+        // Run final prefill token to get logits
         float[][][] lastEmbed = new float[batchSize][1][HIDDEN_SIZE];
         for (int b = 0; b < batchSize; b++) {
             lastEmbed[b][0] = inputsEmbeds[b][seqLen - 1];
         }
-        
-        // Run final prefill step to get logits
-        Map<String, OnnxTensor> inputs = buildInputs(lastEmbed, seqLen - 1, pkvs);
+
+        long[] lastDimPos = new long[]{prefillPositionIds[0][0][seqLen - 1],
+                                       prefillPositionIds[1][0][seqLen - 1],
+                                       prefillPositionIds[2][0][seqLen - 1]};
+        Map<String, OnnxTensor> inputs = buildInputs(lastEmbed, lastDimPos, pkvs);
         Result result = session.run(inputs);
         float[][][] logits = (float[][][]) result.get(0).getValue();
-        
+
         // Update KV cache
         pkvs = extractKVCache(result);
         IOUtil.close(result);
@@ -132,9 +153,9 @@ public class GlmOcrDecoderModelUnified implements AutoCloseable {
 
         long start = ArrayUtil.argmax(logits[0][0]);
 
-        long[][] generatedTokens = new long[batchSize][];
-        for (int i = 0; i < batchSize; i++) {
-            generatedTokens[i] = new long[]{start};
+        long[][] generatedTokens = new long[inputIds.length][];
+        for (int i = 0; i < inputIds.length; i++) {
+            generatedTokens[i] = ArrayUtil.clone(inputIds[i]);
         }
 
         boolean[] finished = new boolean[batchSize];
@@ -143,8 +164,6 @@ public class GlmOcrDecoderModelUnified implements AutoCloseable {
                 finished[i] = true;
             }
         }
-
-        int currPos = seqLen;
 
         // Autoregressive decode loop
         for (int step = 0; step < maxLength; step++) {
@@ -159,15 +178,15 @@ public class GlmOcrDecoderModelUnified implements AutoCloseable {
             }
             float[][][] nextEmbed = embedModel.predict(nextTokenIds);
 
-            // Run decode step
-            inputs = buildInputs(nextEmbed, currPos, pkvs);
+            // For decode, all 3 dims get the same sequential position
+            long decodePos = lastPos + 1 + step;
+            long[] decodeDimPos = new long[]{decodePos, decodePos, decodePos};
+            inputs = buildInputs(nextEmbed, decodeDimPos, pkvs);
             result = session.run(inputs);
             logits = (float[][][]) result.get(0).getValue();
             pkvs = extractKVCache(result);
             IOUtil.close(result);
             OnnxUtil.closeTensors(inputs);
-
-            currPos++;
 
             // Get next token for each batch
             for (int j = 0; j < batchSize; j++) {
@@ -182,15 +201,23 @@ public class GlmOcrDecoderModelUnified implements AutoCloseable {
             }
         }
 
-        return generatedTokens;
+        long[][] resultTokens = new long[inputIds.length][];
+        int index = 0;
+        for (long[] ids : inputIds) {
+            long[] tokens = new long[generatedTokens[index].length-ids.length];
+            System.arraycopy(generatedTokens[index], ids.length, tokens, 0, generatedTokens[index].length-ids.length);
+            resultTokens[index] = tokens;
+            index++;
+        }
+        return resultTokens;
     }
 
     /**
      * Run single token through unified model, updating KV cache.
      */
-    private float[][][][][] runSingleToken(float[][][] embed, int pos, float[][][][][] prevPkvs) 
+    private float[][][][][] runSingleToken(float[][][] embed, long[] dimPos, float[][][][][] prevPkvs) 
             throws OrtException {
-        Map<String, OnnxTensor> inputs = buildInputs(embed, pos, prevPkvs);
+        Map<String, OnnxTensor> inputs = buildInputs(embed, dimPos, prevPkvs);
         Result result = session.run(inputs);
         float[][][][][] newPkvs = extractKVCache(result);
         IOUtil.close(result);
@@ -200,8 +227,12 @@ public class GlmOcrDecoderModelUnified implements AutoCloseable {
 
     /**
      * Build inputs for unified model.
+     *
+     * @param embed    single token embedding [batch, 1, hidden]
+     * @param dimPos   position for each of the 3 MRoPE dims [temporal, height, width]
+     * @param pkvs     previous KV cache (null for first token)
      */
-    private Map<String, OnnxTensor> buildInputs(float[][][] embed, int pos, float[][][][][] pkvs) 
+    private Map<String, OnnxTensor> buildInputs(float[][][] embed, long[] dimPos, float[][][][][] pkvs) 
             throws OrtException {
         int batchSize = embed.length;
         int cacheLen = (pkvs == null) ? 0 : pkvs[0][0][0].length;
@@ -216,12 +247,12 @@ public class GlmOcrDecoderModelUnified implements AutoCloseable {
         long[][] attentionMask = ArrayUtil.ones(batchSize, totalLen);
         inputs.put("attention_mask", ArrayUtil.createOnnxTensor(attentionMask, env));
 
-        // position_ids: [3, batch, 1]
+        // position_ids: [3, batch, 1] with proper per-dim MRoPE positions
         long[][][] positionIds = new long[3][batchSize][1];
         for (int b = 0; b < batchSize; b++) {
-            positionIds[0][b][0] = pos;  // position
-            positionIds[1][b][0] = pos;  // same for GLM-OCR
-            positionIds[2][b][0] = pos;  // same for GLM-OCR
+            positionIds[0][b][0] = dimPos[0];
+            positionIds[1][b][0] = dimPos[1];
+            positionIds[2][b][0] = dimPos[2];
         }
         inputs.put("position_ids", createPositionIdsTensor(positionIds));
 
@@ -302,6 +333,110 @@ public class GlmOcrDecoderModelUnified implements AutoCloseable {
             }
         }
         return OnnxTensor.createTensor(env, LongBuffer.wrap(flat), new long[]{d1, d2, d3});
+    }
+
+    /**
+     * Compute 3D MRoPE position_ids for GLM-OCR.
+     * Text tokens: all 3 dims = sequential.
+     * Vision tokens: dim0=temporal, dim1=height, dim2=width with spatial layout.
+     *
+     * @param inputIds     flat input token IDs for single batch
+     * @param imageGridThw [t, h, w] in patch units for the image
+     * @return position_ids [3][1][seqLen]
+     */
+    private long[][][] computePositionIds(long[] inputIds, int[] imageGridThw) {
+        int seqLen = inputIds.length;
+        List<long[][]> segments = new ArrayList<>();
+        int st = 0;
+        boolean imageProcessed = false;
+
+        for (int i = 0; i < seqLen; i++) {
+            if (inputIds[i] == IMAGE_TOKEN_ID && !imageProcessed) {
+                int imgStart = i;
+                int textLen = imgStart - st;
+
+                int t = imageGridThw[0];
+                int h = imageGridThw[1];
+                int w = imageGridThw[2];
+
+                int llmGridT = t;
+                int llmGridH = h / MERGE_SIZE;
+                int llmGridW = w / MERGE_SIZE;
+
+                long stIdx = segments.isEmpty() ? 0 : maxOfLastSegment(segments) + 1;
+
+                // Text positions before image
+                if (textLen > 0) {
+                    long[][] textPos = new long[3][textLen];
+                    for (int d = 0; d < 3; d++) {
+                        for (int p = 0; p < textLen; p++) {
+                            textPos[d][p] = stIdx + p;
+                        }
+                    }
+                    segments.add(textPos);
+                }
+
+                // Vision positions: T/H/W spatial grid
+                int numVisTokens = llmGridT * llmGridH * llmGridW;
+                long[][] visPos = new long[3][numVisTokens];
+                int vIdx = 0;
+                for (int gt = 0; gt < llmGridT; gt++) {
+                    for (int gh = 0; gh < llmGridH; gh++) {
+                        for (int gw = 0; gw < llmGridW; gw++) {
+                            visPos[0][vIdx] = gt + textLen + stIdx;
+                            visPos[1][vIdx] = gh + textLen + stIdx;
+                            visPos[2][vIdx] = gw + textLen + stIdx;
+                            vIdx++;
+                        }
+                    }
+                }
+                segments.add(visPos);
+
+                // Skip all consecutive IMAGE_TOKEN_ID tokens
+                int imgEnd = imgStart;
+                while (imgEnd < seqLen && inputIds[imgEnd] == IMAGE_TOKEN_ID) imgEnd++;
+                st = imgEnd;
+                i = imgEnd - 1;
+                imageProcessed = true;
+            }
+        }
+
+        // Remaining text tokens after image
+        if (st < seqLen) {
+            long stIdx = segments.isEmpty() ? 0 : maxOfLastSegment(segments) + 1;
+            int textLen = seqLen - st;
+            long[][] textPos = new long[3][textLen];
+            for (int d = 0; d < 3; d++) {
+                for (int p = 0; p < textLen; p++) {
+                    textPos[d][p] = stIdx + p;
+                }
+            }
+            segments.add(textPos);
+        }
+
+        // Concatenate segments into [3, 1, seqLen]
+        long[][][] positionIds = new long[3][1][seqLen];
+        int offset = 0;
+        for (long[][] seg : segments) {
+            int segLen = seg[0].length;
+            for (int d = 0; d < 3; d++) {
+                System.arraycopy(seg[d], 0, positionIds[d][0], offset, segLen);
+            }
+            offset += segLen;
+        }
+
+        return positionIds;
+    }
+
+    private long maxOfLastSegment(List<long[][]> segments) {
+        long[][] last = segments.get(segments.size() - 1);
+        long max = Long.MIN_VALUE;
+        for (long[] dim : last) {
+            for (long v : dim) {
+                if (v > max) max = v;
+            }
+        }
+        return max;
     }
 
     @Override

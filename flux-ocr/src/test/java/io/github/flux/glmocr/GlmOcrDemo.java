@@ -44,7 +44,8 @@ public class GlmOcrDemo {
     public static void main(String[] args) throws Exception {
         // Model and image paths
         String modelRootDir = "D:\\models\\onnx";
-        String imagePath = args.length > 0 ? args[0] : "D:\\tmp\\formula_2025-8-2_17-28-16.jpg";
+        String imagePath = args.length > 0 ? args[0] : "D:\\tmp\\formula-2026028-105537.jpg";
+        boolean useUnified = true;
         boolean useFp16 = false;  // Use FP16 model for reduced memory
         int gpuIndex = 0;       // -1 for CPU, 0 for first GPU
         
@@ -59,7 +60,7 @@ public class GlmOcrDemo {
         long startTime = System.currentTimeMillis();
         
         try (OrtEnvironment env = OrtEnvironment.getEnvironment();
-             GlmOcrModel model = new GlmOcrModel(modelRootDir, "GLM-OCR", gpuIndex, env, useFp16);
+             GlmOcrModel model = new GlmOcrModel(modelRootDir, "GLM-OCR", gpuIndex, env, useFp16, useUnified);
              MatManager matManager = new MatManager();
              NDManager ndManager = NDManager.newBaseManager()) {
             
