@@ -55,6 +55,19 @@ public class GlmOcrEmbedModel implements AutoCloseable {
      * @param inputIds token IDs [batch, seq_len]
      * @return embeddings [batch, seq_len, hidden_size]
      */
+    public OnnxTensor predictTensor(long[][] inputIds) throws OrtException {
+        try (OnnxTensor onnxInput = ArrayUtil.createOnnxTensor(inputIds, env)) {
+            Result result = session.run(Map.of("input_ids", onnxInput));
+            return (OnnxTensor) result.get(0);
+        }
+    }
+
+    /**
+     * Convert token IDs to embeddings.
+     *
+     * @param inputIds token IDs [batch, seq_len]
+     * @return embeddings [batch, seq_len, hidden_size]
+     */
     public float[][][] predict(long[][] inputIds) throws OrtException {
         try (OnnxTensor onnxInput = ArrayUtil.createOnnxTensor(inputIds, env);
              Result result = session.run(Map.of("input_ids", onnxInput))) {
