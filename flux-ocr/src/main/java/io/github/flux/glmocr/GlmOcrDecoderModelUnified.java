@@ -24,7 +24,6 @@ import ai.onnxruntime.OrtSession.Result;
 import io.github.flux.exception.FluxException;
 import io.github.flux.util.ArrayUtil;
 import io.github.flux.util.IOUtil;
-import io.github.flux.util.OnnxUtil;
 
 import java.nio.FloatBuffer;
 import java.nio.LongBuffer;
@@ -118,7 +117,7 @@ public class GlmOcrDecoderModelUnified implements GlmOcrDecoder {
         }
 
         // Initialize empty KV cache - will grow during prefill
-        float[][][][][] pkvs = null;
+        OnnxTensor[] pkvTensors = null;
 
         // Process prefill token by token (tokens 0..seqLen-2 for KV cache building)
         for (int pos = 0; pos < seqLen - 1; pos++) {
@@ -130,7 +129,7 @@ public class GlmOcrDecoderModelUnified implements GlmOcrDecoder {
             long[] dimPos = new long[]{prefillPositionIds[0][0][pos],
                                        prefillPositionIds[1][0][pos],
                                        prefillPositionIds[2][0][pos]};
-            pkvs = runSingleToken(singleEmbed, dimPos, pkvs);
+            pkvTensors = runSingleTokenTensor(ArrayUtil.createOnnxTensor(singleEmbed, env), dimPos, pkvTensors);
         }
 
         // Run final prefill token to get logits
@@ -142,14 +141,14 @@ public class GlmOcrDecoderModelUnified implements GlmOcrDecoder {
         long[] lastDimPos = new long[]{prefillPositionIds[0][0][seqLen - 1],
                                        prefillPositionIds[1][0][seqLen - 1],
                                        prefillPositionIds[2][0][seqLen - 1]};
-        Map<String, OnnxTensor> inputs = buildInputs(lastEmbed, lastDimPos, pkvs);
+        Map<String, OnnxTensor> inputs = buildInputs(ArrayUtil.createOnnxTensor(lastEmbed, env), lastDimPos, pkvTensors);
         Result result = session.run(inputs);
         float[][][] logits = (float[][][]) result.get(0).getValue();
 
         // Update KV cache
-        pkvs = extractKVCache(result);
-        IOUtil.close(result);
-        OnnxUtil.closeTensors(inputs);
+        pkvTensors = extractKVCacheTensor(result);
+        // IOUtil.close(result);
+        // OnnxUtil.closeTensors(inputs);
 
         long start = ArrayUtil.argmax(logits[0][0]);
 
@@ -177,17 +176,21 @@ public class GlmOcrDecoderModelUnified implements GlmOcrDecoder {
             for (int b = 0; b < batchSize; b++) {
                 nextTokenIds[b][0] = generatedTokens[b][generatedTokens[b].length - 1];
             }
-            float[][][] nextEmbed = embedModel.predict(nextTokenIds);
+            OnnxTensor nextEmbed = embedModel.predictTensor(nextTokenIds);
 
             // For decode, all 3 dims get the same sequential position
             long decodePos = lastPos + 1 + step;
             long[] decodeDimPos = new long[]{decodePos, decodePos, decodePos};
-            inputs = buildInputs(nextEmbed, decodeDimPos, pkvs);
+            inputs = buildInputs(nextEmbed, decodeDimPos, pkvTensors);
             result = session.run(inputs);
+            // OnnxUtil.closeTensors(inputs);
             logits = (float[][][]) result.get(0).getValue();
-            pkvs = extractKVCache(result);
-            IOUtil.close(result);
-            OnnxUtil.closeTensors(inputs);
+            for (OnnxTensor pkvTensor : pkvTensors) {
+                IOUtil.close(pkvTensor);
+            }
+            pkvTensors = extractKVCacheTensor(result);
+            // IOUtil.close(result);
+            // OnnxUtil.closeTensors(inputs);
 
             // Get next token for each batch
             for (int j = 0; j < batchSize; j++) {
@@ -216,13 +219,12 @@ public class GlmOcrDecoderModelUnified implements GlmOcrDecoder {
     /**
      * Run single token through unified model, updating KV cache.
      */
-    private float[][][][][] runSingleToken(float[][][] embed, long[] dimPos, float[][][][][] prevPkvs) 
+    private OnnxTensor[] runSingleTokenTensor(OnnxTensor embed, long[] dimPos, OnnxTensor[] prevPkvs)
             throws OrtException {
         Map<String, OnnxTensor> inputs = buildInputs(embed, dimPos, prevPkvs);
         Result result = session.run(inputs);
-        float[][][][][] newPkvs = extractKVCache(result);
-        IOUtil.close(result);
-        OnnxUtil.closeTensors(inputs);
+        OnnxTensor[] newPkvs = extractKVCacheTensor(result);
+        // OnnxUtil.closeTensors(inputs);
         return newPkvs;
     }
 
@@ -233,16 +235,17 @@ public class GlmOcrDecoderModelUnified implements GlmOcrDecoder {
      * @param dimPos   position for each of the 3 MRoPE dims [temporal, height, width]
      * @param pkvs     previous KV cache (null for first token)
      */
-    private Map<String, OnnxTensor> buildInputs(float[][][] embed, long[] dimPos, float[][][][][] pkvs) 
+    private Map<String, OnnxTensor> buildInputs(OnnxTensor embed, long[] dimPos, OnnxTensor[] pkvs)
             throws OrtException {
-        int batchSize = embed.length;
-        int cacheLen = (pkvs == null) ? 0 : pkvs[0][0][0].length;
+        long[] embedShape = embed.getInfo().getShape();
+        int batchSize = (int) embedShape[0];
+        int cacheLen = (pkvs == null) ? 0 : (int) pkvs[0].getInfo().getShape()[2];
         int totalLen = cacheLen + 1;
 
         Map<String, OnnxTensor> inputs = new HashMap<>();
 
         // inputs_embeds: [batch, 1, hidden]
-        inputs.put("inputs_embeds", createFloatTensor3D(embed));
+        inputs.put("inputs_embeds", embed);
 
         // attention_mask: [batch, total_len]
         long[][] attentionMask = ArrayUtil.ones(batchSize, totalLen);
@@ -268,8 +271,8 @@ public class GlmOcrDecoderModelUnified implements GlmOcrDecoder {
             }
         } else {
             for (int i = 0; i < NUM_LAYERS; i++) {
-                inputs.put("past_key_" + i, createFloatTensor4D(pkvs[2 * i]));
-                inputs.put("past_value_" + i, createFloatTensor4D(pkvs[2 * i + 1]));
+                inputs.put("past_key_" + i, pkvs[2 * i]);
+                inputs.put("past_value_" + i, pkvs[2 * i + 1]);
             }
         }
 
@@ -279,25 +282,14 @@ public class GlmOcrDecoderModelUnified implements GlmOcrDecoder {
     /**
      * Extract KV cache from model output.
      */
-    private float[][][][][] extractKVCache(Result result) throws OrtException {
-        float[][][][][] pkvs = new float[NUM_LAYERS * 2][][][][];
+    private OnnxTensor[] extractKVCacheTensor(Result result) throws OrtException {
+        OnnxTensor[] pkvs = new OnnxTensor[NUM_LAYERS * 2];
         for (int i = 0; i < NUM_LAYERS; i++) {
             // Output order: logits, then key/value pairs
-            pkvs[2 * i] = (float[][][][]) result.get(2 * i + 1).getValue();
-            pkvs[2 * i + 1] = (float[][][][]) result.get(2 * i + 2).getValue();
+            pkvs[2 * i] = (OnnxTensor) result.get(2 * i + 1);
+            pkvs[2 * i + 1] = (OnnxTensor) result.get(2 * i + 2);
         }
         return pkvs;
-    }
-
-    /**
-     * Create a 3D float tensor.
-     */
-    private OnnxTensor createFloatTensor3D(float[][][] data) throws OrtException {
-        int d1 = data.length;
-        int d2 = data[0].length;
-        int d3 = data[0][0].length;
-        float[] flat = ArrayUtil.flat(data);
-        return OnnxTensor.createTensor(env, FloatBuffer.wrap(flat), new long[]{d1, d2, d3});
     }
 
     /**
