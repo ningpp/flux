@@ -153,9 +153,10 @@ public class GlmOcrDecoderModelUnified implements GlmOcrDecoder {
 
         long start = ArrayUtil.argmax(logits[0][0]);
 
+        // Initialize generatedTokens with input tokens + first generated token
         long[][] generatedTokens = new long[inputIds.length][];
         for (int i = 0; i < inputIds.length; i++) {
-            generatedTokens[i] = ArrayUtil.clone(inputIds[i]);
+            generatedTokens[i] = ArrayUtil.concat(ArrayUtil.clone(inputIds[i]), new long[]{start});
         }
 
         boolean[] finished = new boolean[batchSize];

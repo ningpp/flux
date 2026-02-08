@@ -91,9 +91,8 @@ public class GlmOcrImageProcessor {
         int targetHeight = targetSize[0];
         int targetWidth = targetSize[1];
         
-        // Resize image
-        Mat resized = matManager.newMat();
-        Imgproc.resize(rgbMat, resized, new Size(targetWidth, targetHeight), 0, 0, Imgproc.INTER_AREA);
+        // Resize image using PIL-compatible BICUBIC (Catmull-Rom, a=-0.5) to match Python exactly
+        Mat resized = pilBicubicResize(rgbMat, targetHeight, targetWidth, matManager);
         
         // Convert to float and normalize
         Mat floatMat = matManager.newMat();
@@ -218,6 +217,184 @@ public class GlmOcrImageProcessor {
                 }
             }
         }
+    }
+
+    // ====================================================================
+    // PIL-compatible BICUBIC resize implementation
+    // ====================================================================
+
+    /**
+     * Catmull-Rom cubic kernel (Keys, a=-0.5) matching PIL's BICUBIC.
+     */
+    private static double cubicKernel(double x) {
+        x = Math.abs(x);
+        if (x < 1.0) {
+            return ((1.5 * x - 2.5) * x) * x + 1.0;
+        }
+        if (x < 2.0) {
+            return ((-0.5 * x + 2.5) * x - 4.0) * x + 2.0;
+        }
+        return 0.0;
+    }
+
+    /**
+     * Resize image using PIL-compatible BICUBIC (Catmull-Rom) interpolation.
+     * This matches Python's PIL.Image.resize(size, Image.Resampling.BICUBIC).
+     * 
+     * Uses separable filtering: first horizontal, then vertical.
+     * Includes anti-aliasing for downscaling (kernel support expanded by 1/scale).
+     * Operates on uint8 values and rounds results to match PIL's behavior.
+     *
+     * @param src     source image (CV_8UC3, RGB)
+     * @param newH    target height
+     * @param newW    target width
+     * @param matManager Mat manager for memory management
+     * @return resized image (CV_8UC3, RGB)
+     */
+    private static Mat pilBicubicResize(Mat src, int newH, int newW, MatManager matManager) {
+        int oldH = src.rows();
+        int oldW = src.cols();
+
+        // If no resize needed, return the original
+        if (oldH == newH && oldW == newW) {
+            return src;
+        }
+
+        // Step 1: horizontal resize (width)
+        byte[] srcPixel = new byte[3];
+        int[][] temp;  // intermediate storage [newH_or_oldH][newW][3]
+
+        if (oldW != newW) {
+            temp = new int[oldH][newW * 3];
+            resizeDim(src, temp, oldH, oldW, newW, false);
+        } else {
+            // Copy src to temp (no horizontal resize needed)
+            temp = new int[oldH][oldW * 3];
+            for (int y = 0; y < oldH; y++) {
+                for (int x = 0; x < oldW; x++) {
+                    src.get(y, x, srcPixel);
+                    temp[y][x * 3] = srcPixel[0] & 0xFF;
+                    temp[y][x * 3 + 1] = srcPixel[1] & 0xFF;
+                    temp[y][x * 3 + 2] = srcPixel[2] & 0xFF;
+                }
+            }
+        }
+
+        // Step 2: vertical resize (height)
+        int interW = (oldW != newW) ? newW : oldW;
+        int[][] result;
+        if (oldH != newH) {
+            result = new int[newH][interW * 3];
+            resizeDimVertical(temp, result, oldH, newH, interW);
+        } else {
+            result = temp;
+        }
+
+        // Convert to Mat
+        Mat dst = matManager.newMat();
+        dst.create(newH, newW, CvType.CV_8UC3);
+        byte[] px = new byte[3];
+        for (int y = 0; y < newH; y++) {
+            for (int x = 0; x < newW; x++) {
+                px[0] = (byte) result[y][x * 3];
+                px[1] = (byte) result[y][x * 3 + 1];
+                px[2] = (byte) result[y][x * 3 + 2];
+                dst.put(y, x, px);
+            }
+        }
+
+        return dst;
+    }
+
+    /**
+     * Resize horizontally using PIL-compatible BICUBIC.
+     */
+    private static void resizeDim(Mat src, int[][] dst, int height, int srcW, int dstW, boolean dummy) {
+        double filterScale = Math.max(1.0, (double) srcW / dstW);
+        double support = filterScale * 2.0;  // BICUBIC support = 2.0
+        byte[] pixel = new byte[3];
+
+        for (int y = 0; y < height; y++) {
+            for (int outX = 0; outX < dstW; outX++) {
+                double center = (outX + 0.5) * srcW / (double) dstW - 0.5;
+                int start = (int) Math.floor(center - support);
+                int stop = (int) Math.ceil(center + support);
+
+                double[] sum = new double[3];
+                double totalWeight = 0;
+
+                for (int srcX = start; srcX <= stop; srcX++) {
+                    double x = (srcX - center) / filterScale;
+                    double w = cubicKernel(x);
+                    if (w == 0.0) continue;
+
+                    int clampedX = Math.max(0, Math.min(srcX, srcW - 1));
+                    src.get(y, clampedX, pixel);
+                    sum[0] += w * (pixel[0] & 0xFF);
+                    sum[1] += w * (pixel[1] & 0xFF);
+                    sum[2] += w * (pixel[2] & 0xFF);
+                    totalWeight += w;
+                }
+
+                if (totalWeight > 0) {
+                    dst[y][outX * 3] = clampByte(sum[0] / totalWeight);
+                    dst[y][outX * 3 + 1] = clampByte(sum[1] / totalWeight);
+                    dst[y][outX * 3 + 2] = clampByte(sum[2] / totalWeight);
+                }
+            }
+        }
+    }
+
+    /**
+     * Resize vertically using PIL-compatible BICUBIC.
+     * Input and output are int arrays [height][width*3].
+     */
+    private static void resizeDimVertical(int[][] src, int[][] dst, int srcH, int dstH, int width) {
+        double filterScale = Math.max(1.0, (double) srcH / dstH);
+        double support = filterScale * 2.0;  // BICUBIC support = 2.0
+
+        for (int outY = 0; outY < dstH; outY++) {
+            double center = (outY + 0.5) * srcH / (double) dstH - 0.5;
+            int start = (int) Math.floor(center - support);
+            int stop = (int) Math.ceil(center + support);
+
+            // Pre-compute weights for this row
+            double[] weights = new double[stop - start + 1];
+            double totalWeight = 0;
+            for (int i = 0; i < weights.length; i++) {
+                double y = ((start + i) - center) / filterScale;
+                weights[i] = cubicKernel(y);
+                totalWeight += weights[i];
+            }
+            // Normalize weights
+            if (totalWeight > 0) {
+                for (int i = 0; i < weights.length; i++) {
+                    weights[i] /= totalWeight;
+                }
+            }
+
+            for (int x = 0; x < width; x++) {
+                double[] sum = new double[3];
+                for (int i = 0; i < weights.length; i++) {
+                    if (weights[i] == 0.0) continue;
+                    int srcY = Math.max(0, Math.min(start + i, srcH - 1));
+                    sum[0] += weights[i] * src[srcY][x * 3];
+                    sum[1] += weights[i] * src[srcY][x * 3 + 1];
+                    sum[2] += weights[i] * src[srcY][x * 3 + 2];
+                }
+                dst[outY][x * 3] = clampByte(sum[0]);
+                dst[outY][x * 3 + 1] = clampByte(sum[1]);
+                dst[outY][x * 3 + 2] = clampByte(sum[2]);
+            }
+        }
+    }
+
+    /**
+     * Clamp and round a double value to [0, 255].
+     */
+    private static int clampByte(double value) {
+        int v = (int) Math.round(value);
+        return Math.max(0, Math.min(255, v));
     }
     
     /**
