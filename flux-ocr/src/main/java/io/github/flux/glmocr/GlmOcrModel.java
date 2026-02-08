@@ -116,7 +116,8 @@ public class GlmOcrModel implements AutoCloseable {
                 );
             }
             
-            this.tokenizer = HuggingFaceTokenizer.newInstance(Paths.get(modelDir));
+            this.tokenizer = HuggingFaceTokenizer.newInstance(Paths.get(modelDir),
+                    java.util.Map.of("truncation", "false", "padding", "false"));
         } catch (Exception e) {
             throw new FluxException(e);
         }
@@ -153,7 +154,7 @@ public class GlmOcrModel implements AutoCloseable {
             
             // Tokenize prompt
             long[] inputIds = tokenizer.encode(fullPrompt).getIds();
-            
+
             // Get text embeddings
             float[][][] inputsEmbeds = embedModel.predict(new long[][]{inputIds});
             
