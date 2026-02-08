@@ -295,6 +295,11 @@ public class GlmOcrDecoderModel implements GlmOcrDecoder {
                 int imgStart = i;
                 int textLen = imgStart - st;
 
+                // Find end of image token region first
+                int imgEnd = imgStart;
+                while (imgEnd < seqLen && inputIds[imgEnd] == IMAGE_TOKEN_ID) imgEnd++;
+                int actualVisTokens = imgEnd - imgStart;
+
                 int t = imageGridThw[0];
                 int h = imageGridThw[1];
                 int w = imageGridThw[2];
@@ -316,13 +321,12 @@ public class GlmOcrDecoderModel implements GlmOcrDecoder {
                     segments.add(textPos);
                 }
 
-                // Vision positions: T/H/W spatial grid
-                int numVisTokens = llmGridT * llmGridH * llmGridW;
-                long[][] visPos = new long[3][numVisTokens];
+                // Vision positions: T/H/W spatial grid, capped at actual token count
+                long[][] visPos = new long[3][actualVisTokens];
                 int vIdx = 0;
-                for (int gt = 0; gt < llmGridT; gt++) {
-                    for (int gh = 0; gh < llmGridH; gh++) {
-                        for (int gw = 0; gw < llmGridW; gw++) {
+                for (int gt = 0; gt < llmGridT && vIdx < actualVisTokens; gt++) {
+                    for (int gh = 0; gh < llmGridH && vIdx < actualVisTokens; gh++) {
+                        for (int gw = 0; gw < llmGridW && vIdx < actualVisTokens; gw++) {
                             visPos[0][vIdx] = gt + textLen + stIdx;
                             visPos[1][vIdx] = gh + textLen + stIdx;
                             visPos[2][vIdx] = gw + textLen + stIdx;
@@ -332,9 +336,6 @@ public class GlmOcrDecoderModel implements GlmOcrDecoder {
                 }
                 segments.add(visPos);
 
-                // Skip all consecutive IMAGE_TOKEN_ID tokens
-                int imgEnd = imgStart;
-                while (imgEnd < seqLen && inputIds[imgEnd] == IMAGE_TOKEN_ID) imgEnd++;
                 st = imgEnd;
                 i = imgEnd - 1;
                 imageProcessed = true;
