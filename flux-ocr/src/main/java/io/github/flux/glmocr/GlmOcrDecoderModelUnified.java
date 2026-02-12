@@ -24,6 +24,7 @@ import ai.onnxruntime.OrtSession.Result;
 import io.github.flux.exception.FluxException;
 import io.github.flux.util.ArrayUtil;
 import io.github.flux.util.IOUtil;
+import io.github.flux.util.OnnxUtil;
 
 import java.nio.FloatBuffer;
 import java.nio.LongBuffer;
@@ -190,7 +191,7 @@ public class GlmOcrDecoderModelUnified implements GlmOcrDecoder {
             }
             pkvTensors = extractKVCacheTensor(result);
             // IOUtil.close(result);
-            // OnnxUtil.closeTensors(inputs);
+            OnnxUtil.closeTensors(inputs);
 
             // Get next token for each batch
             for (int j = 0; j < batchSize; j++) {
@@ -213,6 +214,9 @@ public class GlmOcrDecoderModelUnified implements GlmOcrDecoder {
             resultTokens[index] = tokens;
             index++;
         }
+        for (OnnxTensor pkvTensor : pkvTensors) {
+            IOUtil.close(pkvTensor);
+        }
         return resultTokens;
     }
 
@@ -224,7 +228,7 @@ public class GlmOcrDecoderModelUnified implements GlmOcrDecoder {
         Map<String, OnnxTensor> inputs = buildInputs(embed, dimPos, prevPkvs);
         Result result = session.run(inputs);
         OnnxTensor[] newPkvs = extractKVCacheTensor(result);
-        // OnnxUtil.closeTensors(inputs);
+        OnnxUtil.closeTensors(inputs);
         return newPkvs;
     }
 

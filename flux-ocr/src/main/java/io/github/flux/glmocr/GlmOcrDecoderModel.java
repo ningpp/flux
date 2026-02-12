@@ -24,7 +24,6 @@ import ai.onnxruntime.OrtSession.Result;
 import io.github.flux.exception.FluxException;
 import io.github.flux.util.ArrayUtil;
 import io.github.flux.util.IOUtil;
-import io.github.flux.util.OnnxUtil;
 
 import java.nio.FloatBuffer;
 import java.nio.LongBuffer;
@@ -129,14 +128,15 @@ public class GlmOcrDecoderModel implements GlmOcrDecoder {
         Result prefillResult = prefillSession.run(prefillInputs);
         float[][][] logits = (float[][][]) prefillResult.get(0).getValue();
 
-        // Extract KV cache from prefill output: present_key_0, present_value_0, ...
-        float[][][][][] pkvs = new float[NUM_LAYERS * 2][][][][];
+        // Extract KV cache from prefill output as OnnxTensor[] (zero-copy)
+        OnnxTensor[] pkvTensors = new OnnxTensor[NUM_LAYERS * 2];
         for (int i = 0; i < NUM_LAYERS; i++) {
-            pkvs[2 * i] = (float[][][][]) prefillResult.get(2 * i + 1).getValue();      // present_key_i
-            pkvs[2 * i + 1] = (float[][][][]) prefillResult.get(2 * i + 2).getValue();  // present_value_i
+            pkvTensors[2 * i] = (OnnxTensor) prefillResult.get(2 * i + 1);      // present_key_i
+            pkvTensors[2 * i + 1] = (OnnxTensor) prefillResult.get(2 * i + 2);  // present_value_i
         }
 
-        OnnxUtil.closeTensors(prefillInputs);
+        // OnnxUtil.closeTensors(prefillInputs);
+        // Note: Don't close prefillResult - it owns pkvTensors and will be cleaned up later
 
         // Get first predicted token from prefill
         long eosTokenId = 59246L;  // GLM-OCR EOS token <|endoftext|>
@@ -163,7 +163,10 @@ public class GlmOcrDecoderModel implements GlmOcrDecoder {
             }
         }
 
-        IOUtil.close(prefillResult);
+        // IOUtil.close(prefillResult);
+
+        // Track previous result to close it properly
+        Result prevResult = null;
 
         // Autoregressive decode loop
         for (int step = 0; step < maxLength; step++) {
@@ -173,10 +176,10 @@ public class GlmOcrDecoderModel implements GlmOcrDecoder {
             currLen += 1;
 
             // Get embeddings for next tokens
-            float[][][] nextEmbed = embedModel.predict(nextTokenIds);
+            OnnxTensor nextEmbed = embedModel.predictTensor(nextTokenIds);
 
             Map<String, OnnxTensor> decodeInputs = new HashMap<>();
-            decodeInputs.put("inputs_embeds", createFloatTensor3D(nextEmbed));
+            decodeInputs.put("inputs_embeds", nextEmbed);
 
             // Update attention mask for current length
             decodeInputs.put("attention_mask", ArrayUtil.createOnnxTensor(ArrayUtil.ones(batchSize, currLen), env));
@@ -192,23 +195,28 @@ public class GlmOcrDecoderModel implements GlmOcrDecoder {
             }
             decodeInputs.put("position_ids", createPositionIdsTensor(nextPosIds));
 
-            // Add KV cache from previous step
+            // Add KV cache from previous step (pass tensors directly, no copy)
             for (int j = 0; j < NUM_LAYERS; j++) {
-                decodeInputs.put("past_key_" + j, createFloatTensor4D(pkvs[2 * j]));
-                decodeInputs.put("past_value_" + j, createFloatTensor4D(pkvs[2 * j + 1]));
+                decodeInputs.put("past_key_" + j, pkvTensors[2 * j]);
+                decodeInputs.put("past_value_" + j, pkvTensors[2 * j + 1]);
             }
 
             Result stepOut = decodeSession.run(decodeInputs);
             logits = (float[][][]) stepOut.get(0).getValue();
 
             // Update KV cache: decode model outputs present_key_i, present_value_i
-            for (int i = 0; i < NUM_LAYERS; i++) {
-                pkvs[2 * i] = (float[][][][]) stepOut.get(2 * i + 1).getValue();
-                pkvs[2 * i + 1] = (float[][][][]) stepOut.get(2 * i + 2).getValue();
+            // Close previous result (which owns old KV cache tensors) first
+            if (prevResult != null) {
+                // IOUtil.close(prevResult);
             }
-
-            IOUtil.close(stepOut);
-            OnnxUtil.closeTensors(decodeInputs);
+            // Extract new KV cache tensors from current result
+            pkvTensors = new OnnxTensor[NUM_LAYERS * 2];
+            for (int i = 0; i < NUM_LAYERS; i++) {
+                pkvTensors[2 * i] = (OnnxTensor) stepOut.get(2 * i + 1);
+                pkvTensors[2 * i + 1] = (OnnxTensor) stepOut.get(2 * i + 2);
+            }
+            prevResult = stepOut;  // Keep reference to close later
+            // OnnxUtil.closeTensors(decodeInputs);
 
             // Get next token for each batch
             long[][] nextIds = new long[batchSize][1];
@@ -227,6 +235,11 @@ public class GlmOcrDecoderModel implements GlmOcrDecoder {
                 }
             }
             nextTokenIds = nextIds;
+        }
+
+        // Clean up: close final KV cache result
+        if (prevResult != null) {
+            IOUtil.close(prevResult);
         }
 
         return generatedTokens;

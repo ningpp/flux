@@ -20,6 +20,7 @@ import ai.djl.ndarray.NDManager;
 import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtException;
 import io.github.flux.core.MatManager;
+import io.github.flux.core.ModelInstanceKey;
 import io.github.flux.core.TextResult;
 import io.github.flux.exception.FluxException;
 import io.github.flux.util.IOUtil;
@@ -29,7 +30,9 @@ import java.io.File;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * GLM-OCR Model for end-to-end document OCR.
@@ -50,6 +53,37 @@ public class GlmOcrModel implements AutoCloseable {
     public static final Set<String> MODEL_NAMES = Set.of(
             "GLM-OCR"
     );
+
+    // Instance cache for reusing model instances
+    private static final ConcurrentHashMap<ModelInstanceKey, GlmOcrModel> INSTANCE_CACHE = new ConcurrentHashMap<>();
+
+    /**
+     * Get a shared model instance, creating if needed.
+     * Reuses model instances across multiple predictions for efficiency.
+     *
+     * @param modelRootDir root directory containing model subdirectories
+     * @param modelName model name (e.g., "GLM-OCR")
+     * @param gpuIndex GPU index (-1 for CPU)
+     * @param env ONNX Runtime environment
+     * @param useFp16 whether to use FP16 model for reduced memory
+     * @param useUnified whether to use unified decoder model
+     * @return shared model instance
+     */
+    public static GlmOcrModel getSharedInstance(final String modelRootDir,
+                                             final String modelName,
+                                             final int gpuIndex,
+                                             final OrtEnvironment env,
+                                             final boolean useFp16,
+                                             final boolean useUnified) {
+        // Build custom params map for ModelInstanceKey
+        Map<String, Object> customParams = Map.of(
+                "useFp16", useFp16,
+                "useUnified", useUnified
+        );
+        ModelInstanceKey key = new ModelInstanceKey(modelRootDir, modelName, gpuIndex, customParams);
+        return INSTANCE_CACHE.computeIfAbsent(key, k ->
+                new GlmOcrModel(modelRootDir, modelName, gpuIndex, env, useFp16, useUnified));
+    }
 
     // Token IDs for GLM-OCR
     private static final long IMAGE_TOKEN_ID = 59280L;       // <|image|>
@@ -241,5 +275,7 @@ public class GlmOcrModel implements AutoCloseable {
         IOUtil.close(decoderModel);
         IOUtil.close(embedModel);
         IOUtil.close(tokenizer);
+        // Remove from instance cache
+        INSTANCE_CACHE.values().removeIf(instance -> instance == this);
     }
 }

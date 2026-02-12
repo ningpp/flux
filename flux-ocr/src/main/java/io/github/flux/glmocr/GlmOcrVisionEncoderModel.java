@@ -21,6 +21,7 @@ import ai.onnxruntime.OrtException;
 import ai.onnxruntime.OrtSession;
 import ai.onnxruntime.OrtSession.Result;
 import io.github.flux.exception.FluxException;
+import io.github.flux.util.ArrayUtil;
 
 import java.nio.FloatBuffer;
 import java.nio.LongBuffer;
@@ -64,6 +65,51 @@ public class GlmOcrVisionEncoderModel implements AutoCloseable {
     }
 
     /**
+     * Encode image patches to get vision features (zero-copy version).
+     *
+     * @param pixelValues preprocessed image patches [num_patches, 1176]
+     * @param imageGridThw grid info [t, h, w] - temporal, height_patches, width_patches
+     * @return image embeddings as OnnxTensor [num_output_tokens, hidden_size] (stays on GPU)
+     */
+    public OnnxTensor predictTensor(float[][] pixelValues, int[] imageGridThw) throws OrtException {
+        // Compute position IDs for rotary embeddings
+        long[][] posIds = computePosIds(imageGridThw);
+        int maxGridSize = Math.max(imageGridThw[1], imageGridThw[2]);
+
+        Map<String, OnnxTensor> inputs = new HashMap<>();
+
+        // pixel_values: [num_patches, 1176]
+        int numPatches = pixelValues.length;
+        int patchFeatures = pixelValues[0].length;
+        float[] flatPixelValues = flat2d(pixelValues);
+        inputs.put("pixel_values", OnnxTensor.createTensor(env,
+                FloatBuffer.wrap(flatPixelValues),
+                new long[]{numPatches, patchFeatures}));
+
+        // pos_ids: [num_patches, 2]
+        long[] flatPosIds = ArrayUtil.flat(posIds);
+        inputs.put("pos_ids", OnnxTensor.createTensor(env,
+                LongBuffer.wrap(flatPosIds),
+                new long[]{posIds.length, 2}));
+
+        // max_grid_size: scalar
+        inputs.put("max_grid_size", OnnxTensor.createTensor(env,
+                LongBuffer.wrap(new long[]{maxGridSize}),
+                new long[]{}));
+
+        Result result = session.run(inputs);
+        OnnxTensor output = (OnnxTensor) result.get(0);
+
+        // Clean up input tensors only
+        for (OnnxTensor tensor : inputs.values()) {
+            tensor.close();
+        }
+        result.close();
+
+        return output;
+    }
+
+    /**
      * Encode image patches to get vision features.
      *
      * @param pixelValues preprocessed image patches [num_patches, 1176]
@@ -74,28 +120,28 @@ public class GlmOcrVisionEncoderModel implements AutoCloseable {
         // Compute position IDs for rotary embeddings
         long[][] posIds = computePosIds(imageGridThw);
         int maxGridSize = Math.max(imageGridThw[1], imageGridThw[2]);
-        
+
         Map<String, OnnxTensor> inputs = new HashMap<>();
-        
+
         // pixel_values: [num_patches, 1176]
         int numPatches = pixelValues.length;
         int patchFeatures = pixelValues[0].length;
         float[] flatPixelValues = flat2d(pixelValues);
-        inputs.put("pixel_values", OnnxTensor.createTensor(env, 
-                FloatBuffer.wrap(flatPixelValues), 
+        inputs.put("pixel_values", OnnxTensor.createTensor(env,
+                FloatBuffer.wrap(flatPixelValues),
                 new long[]{numPatches, patchFeatures}));
-        
+
         // pos_ids: [num_patches, 2]
         long[] flatPosIds = flat2dLong(posIds);
         inputs.put("pos_ids", OnnxTensor.createTensor(env,
                 LongBuffer.wrap(flatPosIds),
                 new long[]{posIds.length, 2}));
-        
+
         // max_grid_size: scalar
-        inputs.put("max_grid_size", OnnxTensor.createTensor(env, 
+        inputs.put("max_grid_size", OnnxTensor.createTensor(env,
                 LongBuffer.wrap(new long[]{maxGridSize}),
                 new long[]{}));
-        
+
         try (Result result = session.run(inputs)) {
             // Output: [num_output_tokens, hidden_size]
             return (float[][]) result.get(0).getValue();
