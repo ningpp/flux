@@ -21,6 +21,7 @@ import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtException;
 import ai.onnxruntime.OrtSession;
 import ai.onnxruntime.OrtSession.Result;
+import ai.onnxruntime.OrtSession.SessionOptions.OptLevel;
 import io.github.flux.exception.FluxException;
 import io.github.flux.util.ArrayUtil;
 import io.github.flux.util.IOUtil;
@@ -80,7 +81,11 @@ public class GlmOcrDecoderModelUnified implements GlmOcrDecoder {
             OrtSession.SessionOptions options = new OrtSession.SessionOptions();
             if (gpuIndex > -1) {
                 options.addCUDA(gpuIndex);
+                // Single thread for GPU - let runtime handle parallelism
+                options.setIntraOpNumThreads(1);
+                options.setInterOpNumThreads(1);
             }
+            options.setOptimizationLevel(OptLevel.ALL_OPT);
             this.session = env.createSession(modelFile, options);
         } catch (Exception e) {
             throw new FluxException(e);
@@ -148,8 +153,8 @@ public class GlmOcrDecoderModelUnified implements GlmOcrDecoder {
 
         // Update KV cache
         pkvTensors = extractKVCacheTensor(result);
-        // IOUtil.close(result);
-        // OnnxUtil.closeTensors(inputs);
+        // can't close result, because pkvTensors will be used in next
+        OnnxUtil.closeTensors(inputs);
 
         long start = ArrayUtil.argmax(logits[0][0]);
 
@@ -184,14 +189,14 @@ public class GlmOcrDecoderModelUnified implements GlmOcrDecoder {
             long[] decodeDimPos = new long[]{decodePos, decodePos, decodePos};
             inputs = buildInputs(nextEmbed, decodeDimPos, pkvTensors);
             result = session.run(inputs);
-            // OnnxUtil.closeTensors(inputs);
             logits = (float[][][]) result.get(0).getValue();
+            OnnxUtil.closeTensors(inputs);
             for (OnnxTensor pkvTensor : pkvTensors) {
                 IOUtil.close(pkvTensor);
             }
             pkvTensors = extractKVCacheTensor(result);
+            // can't close result, because pkvTensors will be used in next
             // IOUtil.close(result);
-            OnnxUtil.closeTensors(inputs);
 
             // Get next token for each batch
             for (int j = 0; j < batchSize; j++) {
@@ -227,6 +232,7 @@ public class GlmOcrDecoderModelUnified implements GlmOcrDecoder {
             throws OrtException {
         Map<String, OnnxTensor> inputs = buildInputs(embed, dimPos, prevPkvs);
         Result result = session.run(inputs);
+        result.get(0).close();
         OnnxTensor[] newPkvs = extractKVCacheTensor(result);
         OnnxUtil.closeTensors(inputs);
         return newPkvs;
