@@ -122,32 +122,10 @@ public class GlmOcrDecoderModelUnified implements GlmOcrDecoder {
             lastPos = Math.max(lastPos, prefillPositionIds[d][0][seqLen - 1]);
         }
 
-        // Initialize empty KV cache - will grow during prefill
+        // Batched prefill: feed entire inputs_embeds [batch, seqLen, hidden]
         OnnxTensor[] pkvTensors = null;
-
-        // Process prefill token by token (tokens 0..seqLen-2 for KV cache building)
-        for (int pos = 0; pos < seqLen - 1; pos++) {
-            float[][][] singleEmbed = new float[batchSize][1][HIDDEN_SIZE];
-            for (int b = 0; b < batchSize; b++) {
-                singleEmbed[b][0] = inputsEmbeds[b][pos];
-            }
-
-            long[] dimPos = new long[]{prefillPositionIds[0][0][pos],
-                                       prefillPositionIds[1][0][pos],
-                                       prefillPositionIds[2][0][pos]};
-            pkvTensors = runSingleTokenTensor(ArrayUtil.createOnnxTensor(singleEmbed, env), dimPos, pkvTensors);
-        }
-
-        // Run final prefill token to get logits
-        float[][][] lastEmbed = new float[batchSize][1][HIDDEN_SIZE];
-        for (int b = 0; b < batchSize; b++) {
-            lastEmbed[b][0] = inputsEmbeds[b][seqLen - 1];
-        }
-
-        long[] lastDimPos = new long[]{prefillPositionIds[0][0][seqLen - 1],
-                                       prefillPositionIds[1][0][seqLen - 1],
-                                       prefillPositionIds[2][0][seqLen - 1]};
-        Map<String, OnnxTensor> inputs = buildInputs(ArrayUtil.createOnnxTensor(lastEmbed, env), lastDimPos, pkvTensors);
+        OnnxTensor prefillEmbed = ArrayUtil.createOnnxTensor(inputsEmbeds, env);
+        Map<String, OnnxTensor> inputs = buildInputs(prefillEmbed, prefillPositionIds, pkvTensors);
         Result result = session.run(inputs);
         float[][][] logits = (float[][][]) result.get(0).getValue();
 
@@ -156,17 +134,21 @@ public class GlmOcrDecoderModelUnified implements GlmOcrDecoder {
         // can't close result, because pkvTensors will be used in next
         OnnxUtil.closeTensors(inputs);
 
-        long start = ArrayUtil.argmax(logits[0][0]);
+        // Get initial next-token per batch from last prefill position
+        long[] startTokens = new long[batchSize];
+        for (int b = 0; b < batchSize; b++) {
+            startTokens[b] = ArrayUtil.argmax(logits[b][seqLen - 1]);
+        }
 
         // Initialize generatedTokens with input tokens + first generated token
         long[][] generatedTokens = new long[inputIds.length][];
         for (int i = 0; i < inputIds.length; i++) {
-            generatedTokens[i] = ArrayUtil.concat(ArrayUtil.clone(inputIds[i]), new long[]{start});
+            generatedTokens[i] = ArrayUtil.concat(ArrayUtil.clone(inputIds[i]), new long[]{startTokens[i]});
         }
 
         boolean[] finished = new boolean[batchSize];
         for (int i = 0; i < batchSize; i++) {
-            if (start == EOS_TOKEN_ID || start == USER_TOKEN_ID) {
+            if (startTokens[i] == EOS_TOKEN_ID || startTokens[i] == USER_TOKEN_ID) {
                 finished[i] = true;
             }
         }
@@ -273,6 +255,67 @@ public class GlmOcrDecoderModelUnified implements GlmOcrDecoder {
         // KV cache
         if (pkvs == null) {
             // Empty cache for first token
+            for (int i = 0; i < NUM_LAYERS; i++) {
+                float[][][][] emptyKey = new float[batchSize][NUM_KV_HEADS][0][HEAD_DIM];
+                float[][][][] emptyValue = new float[batchSize][NUM_KV_HEADS][0][HEAD_DIM];
+                inputs.put("past_key_" + i, createFloatTensor4D(emptyKey));
+                inputs.put("past_value_" + i, createFloatTensor4D(emptyValue));
+            }
+        } else {
+            for (int i = 0; i < NUM_LAYERS; i++) {
+                inputs.put("past_key_" + i, pkvs[2 * i]);
+                inputs.put("past_value_" + i, pkvs[2 * i + 1]);
+            }
+        }
+
+        return inputs;
+    }
+
+    /**
+     * Build inputs for unified model (batched prefill).
+     *
+     * @param embed        embeddings [batch, seqLen, hidden]
+     * @param positionIds  position ids [3, batch|1, seqLen]
+     * @param pkvs         previous KV cache (null for first prefill)
+     */
+    private Map<String, OnnxTensor> buildInputs(OnnxTensor embed, long[][][] positionIds, OnnxTensor[] pkvs)
+            throws OrtException {
+        long[] embedShape = embed.getInfo().getShape();
+        int batchSize = (int) embedShape[0];
+        int seqLenEmbed = (int) embedShape[1];
+        int cacheLen = (pkvs == null) ? 0 : (int) pkvs[0].getInfo().getShape()[2];
+        int totalLen = cacheLen + seqLenEmbed;
+
+        Map<String, OnnxTensor> inputs = new HashMap<>();
+
+        // inputs_embeds: [batch, seqLen, hidden]
+        inputs.put("inputs_embeds", embed);
+
+        // attention_mask: [batch, total_len]
+        long[][] attentionMask = ArrayUtil.ones(batchSize, totalLen);
+        inputs.put("attention_mask", ArrayUtil.createOnnxTensor(attentionMask, env));
+
+        // position_ids: ensure shape [3, batch, seqLen]
+        int d1 = positionIds.length;
+        int d2 = positionIds[0].length;
+        int d3 = positionIds[0][0].length;
+        long[][][] posIdsBatch;
+        if (d2 == batchSize) {
+            posIdsBatch = positionIds;
+        } else if (d2 == 1) {
+            posIdsBatch = new long[d1][batchSize][d3];
+            for (int d = 0; d < d1; d++) {
+                for (int b = 0; b < batchSize; b++) {
+                    System.arraycopy(positionIds[d][0], 0, posIdsBatch[d][b], 0, d3);
+                }
+            }
+        } else {
+            throw new FluxException("Position ids batch size mismatch: got " + d2 + ", expected " + batchSize);
+        }
+        inputs.put("position_ids", createPositionIdsTensor(posIdsBatch));
+
+        // KV cache
+        if (pkvs == null) {
             for (int i = 0; i < NUM_LAYERS; i++) {
                 float[][][][] emptyKey = new float[batchSize][NUM_KV_HEADS][0][HEAD_DIM];
                 float[][][][] emptyValue = new float[batchSize][NUM_KV_HEADS][0][HEAD_DIM];
