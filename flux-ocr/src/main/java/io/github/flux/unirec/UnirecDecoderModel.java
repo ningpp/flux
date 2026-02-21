@@ -98,16 +98,17 @@ public class UnirecDecoderModel implements AutoCloseable {
 
             // Initialize empty past_key_values for first step
             // Shape: [batch_size, num_heads, 0, head_dim]
-            List<Pair<float[][][][], float[][][][]>> past_key_values = new ArrayList<>();
-            int batch_size = encodeResult.hiddenStates().length;
+            List<Pair<OnnxTensor, OnnxTensor>> past_key_values = new ArrayList<>();
+            int batch_size = (int) encodeResult.hiddenStates().getInfo().getShape()[0];
             for (int i = 0; i < num_decoder_layers; i++) {
                 float[][][][] empty_key = ArrayUtil.createZeros(batch_size, num_heads, 0, head_dim);
                 float[][][][] empty_value = ArrayUtil.createZeros(batch_size, num_heads, 0, head_dim);
-                past_key_values.add(Pair.of(empty_key, empty_value));
+                past_key_values.add(Pair.of(ArrayUtil.createOnnxTensor(empty_key, env),
+                        ArrayUtil.createOnnxTensor(empty_value, env)));
             }
 
-            OnnxTensor crossKOnnxTensor = ArrayUtil.createOnnxTensor(encodeResult.crossK(), env);
-            OnnxTensor crossVOnnxTensor = ArrayUtil.createOnnxTensor(encodeResult.crossV(), env);
+            OnnxTensor crossKOnnxTensor = encodeResult.crossK();
+            OnnxTensor crossVOnnxTensor = encodeResult.crossV();
             int generatedTokens = 0;
             for (int i = 0; i < maxTokens; i++) {
                 long current_token = generated_ids[i];
@@ -136,6 +137,13 @@ public class UnirecDecoderModel implements AutoCloseable {
             System.arraycopy(generated_ids, 0, ids, 0, generatedTokens);
             IOUtil.close(crossKOnnxTensor);
             IOUtil.close(crossVOnnxTensor);
+            for (var pastKvPair : past_key_values) {
+                IOUtil.close(pastKvPair.getLeft());
+                IOUtil.close(pastKvPair.getRight());
+            }
+            IOUtil.close(encodeResult.hiddenStates());
+            IOUtil.close(encodeResult.crossK());
+            IOUtil.close(encodeResult.crossV());
             return new TextResult(clean_special_tokens(decodeTokenIds(ids)), ids, -1f);
         } catch (Exception e) {
             throw new FluxException(e);
@@ -198,7 +206,7 @@ public class UnirecDecoderModel implements AutoCloseable {
                                          int pastLength,
                                          OnnxTensor crossKOnnxTensor,
                                          OnnxTensor crossVOnnxTensor,
-                                         List<Pair<float[][][][], float[][][][]>> pastKeyValues,
+                                         List<Pair<OnnxTensor, OnnxTensor>> pastKeyValues,
                                          long paddingIdx,
                                          int num_decoder_layers) throws OrtException {
 
@@ -217,8 +225,8 @@ public class UnirecDecoderModel implements AutoCloseable {
         decoder_inputs.put("cross_v", crossVOnnxTensor);
         List<OnnxTensor> pastOnnxTensors = new ArrayList<>();
         for (int i = 0; i < pastKeyValues.size(); i++) {
-            OnnxTensor keyTensor = ArrayUtil.createOnnxTensor(pastKeyValues.get(i).getLeft(), env);
-            OnnxTensor valueTensor = ArrayUtil.createOnnxTensor(pastKeyValues.get(i).getRight(), env);
+            OnnxTensor keyTensor = pastKeyValues.get(i).getLeft();
+            OnnxTensor valueTensor = pastKeyValues.get(i).getRight();
             decoder_inputs.put("past_key_" + i, keyTensor);
             decoder_inputs.put("past_value_" + i, valueTensor);
             pastOnnxTensors.add(keyTensor);
@@ -226,22 +234,25 @@ public class UnirecDecoderModel implements AutoCloseable {
         }
 
         Result result = session.run(decoder_inputs);
+        decoder_inputs.forEach((k,v)-> {
+            if (!"cross_k".equals(k) && !"cross_v".equals(k)) {
+                IOUtil.close(v);
+            }
+        });
         float[][][] logits = (float[][][]) result.get(0).getValue();
-        List<Pair<float[][][][], float[][][][]>> present_key_values = new ArrayList<>();
+        List<Pair<OnnxTensor, OnnxTensor>> present_key_values = new ArrayList<>();
         // Extract present_key_values
         for (int i = 0; i < num_decoder_layers; i++) {
-            float[][][][] key = (float[][][][]) result.get(1 + i * 2).getValue();
-            float[][][][] value = (float[][][][]) result.get(1 + i * 2 + 1).getValue();
-            present_key_values.add(Pair.of(key, value));
+            present_key_values.add(Pair.of(
+                    (OnnxTensor) result.get(1 + i * 2),
+                    (OnnxTensor) result.get(1 + i * 2 + 1)));
         }
-        IOUtil.close(result);
+        IOUtil.close(result.get(0));
         pastOnnxTensors.forEach(IOUtil::close);
-        IOUtil.close(positionIdsTensor);
-        IOUtil.close(inputIdsTensor);
         return new DecodeStepResult(logits, present_key_values);
     }
 
-    private record DecodeStepResult(float[][][] logits, List<Pair<float[][][][], float[][][][]>> past_key_values) {
+    private record DecodeStepResult(float[][][] logits, List<Pair<OnnxTensor, OnnxTensor>> past_key_values) {
 
     }
 

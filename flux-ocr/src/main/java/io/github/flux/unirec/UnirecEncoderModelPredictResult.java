@@ -17,7 +17,9 @@
  */
 package io.github.flux.unirec;
 
-public record UnirecEncoderModelPredictResult(float[][][] hiddenStates,
-                                              float[][][][][] crossK,
-                                              float[][][][][] crossV) {
+import ai.onnxruntime.OnnxTensor;
+
+public record UnirecEncoderModelPredictResult(OnnxTensor hiddenStates,
+                                              OnnxTensor crossK,
+                                              OnnxTensor crossV) {
 }

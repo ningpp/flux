@@ -68,13 +68,13 @@ public class UnirecEncoderModel implements AutoCloseable {
             var dataBuffer = inputNdArray.toByteBuffer().asFloatBuffer();
             OnnxTensor onnxInput = OnnxTensor.createTensor(env, dataBuffer, shape);
             Result result = session.run(Map.of("pixel_values", onnxInput));
-            float[][][] hidden_states = (float[][][]) result.get(0).getValue();
-            float[][][][][] cross_k = (float[][][][][]) result.get(1).getValue();
-            float[][][][][] cross_v = (float[][][][][]) result.get(2).getValue();
-            IOUtil.close(result);
             IOUtil.close(onnxInput);
+            IOUtil.close(inputNdArray);
             IOUtil.close(ndList);
-            return new UnirecEncoderModelPredictResult(hidden_states, cross_k, cross_v);
+            return new UnirecEncoderModelPredictResult(
+                    (OnnxTensor) result.get(0),
+                    (OnnxTensor) result.get(1),
+                    (OnnxTensor) result.get(2));
         } catch (Exception e) {
             throw new FluxException(e);
         }
