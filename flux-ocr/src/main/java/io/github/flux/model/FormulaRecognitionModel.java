@@ -3,30 +3,29 @@ package io.github.flux.model;
 import ai.djl.ndarray.NDManager;
 import ai.onnxruntime.OrtEnvironment;
 import io.github.flux.core.BatchPredictor;
-import io.github.flux.core.TextResult;
 import io.github.flux.core.MatManager;
 import io.github.flux.core.ModelFactory;
 import io.github.flux.core.ModelParam;
 import io.github.flux.core.ModelRegistry;
 import io.github.flux.core.PreProcessResult;
+import io.github.flux.core.TextResult;
 import io.github.flux.dolphin.ByteDanceDolphinElementModel;
-import io.github.flux.dolphin.ByteDanceDolphinFormulaModel;
 import io.github.flux.exception.FluxException;
 import io.github.flux.formula.granite.GraniteDoclingFormulaModel;
 import io.github.flux.formula.nougat.NougatLatexFormulaModel;
 import io.github.flux.formula.paddle.PaddleFormulaRecognitionPredictor;
 import io.github.flux.formula.pix2text.Pix2TextFormulaRecognitionPredictor;
 import io.github.flux.formula.texteller.TexTellerPredictor;
-import io.github.flux.unirec.UnirecFormulaModel;
+import io.github.flux.gotocr2.GotOcr2Model;
 import io.github.flux.unirec.UnirecPredictor;
 import io.github.flux.util.CollectionUtil;
 import io.github.flux.util.IOUtil;
 import org.opencv.core.Mat;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.HashMap;
 
 public class FormulaRecognitionModel extends BatchPredictor<PreProcessResult, TextResult> {
 
@@ -36,6 +35,7 @@ public class FormulaRecognitionModel extends BatchPredictor<PreProcessResult, Te
         // Trigger class loading to ensure models register themselves
         try {
             Class.forName(ByteDanceDolphinElementModel.class.getName());
+            Class.forName(GotOcr2Model.class.getName());
             Class.forName(NougatLatexFormulaModel.class.getName());
             Class.forName(PaddleFormulaRecognitionPredictor.class.getName());
             Class.forName(Pix2TextFormulaRecognitionPredictor.class.getName());
@@ -54,6 +54,7 @@ public class FormulaRecognitionModel extends BatchPredictor<PreProcessResult, Te
 
     public static final Set<String> MODEL_NAMES = CollectionUtil.distinct(List.of(
             ByteDanceDolphinElementModel.MODEL_NAMES,
+            GotOcr2Model.MODEL_NAMES,
             GraniteDoclingFormulaModel.MODEL_NAMES,
             NougatLatexFormulaModel.MODEL_NAMES,
             PaddleFormulaRecognitionPredictor.MODEL_NAMES,

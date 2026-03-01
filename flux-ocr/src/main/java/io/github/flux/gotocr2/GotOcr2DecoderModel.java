@@ -1,9 +1,5 @@
 package io.github.flux.gotocr2;
 
-import ai.djl.ndarray.NDArray;
-import ai.djl.ndarray.NDManager;
-import ai.djl.ndarray.types.DataType;
-import ai.djl.ndarray.types.Shape;
 import ai.onnxruntime.OnnxTensor;
 import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtException;
@@ -28,6 +24,9 @@ public class GotOcr2DecoderModel implements AutoCloseable {
     private final OrtEnvironment env;
     private final OrtSession session;
     private final int maxLength;
+    private final int layer = 24;
+    private final int numHeads = 16;
+    private final int headDim = 64;
 
     public GotOcr2DecoderModel(final String modelFile,
                                final int gpuIndex,
@@ -48,31 +47,43 @@ public class GotOcr2DecoderModel implements AutoCloseable {
 
     public long[][] predict(float[][][] image_features, long[][] inputIds, float[][][] inputs_embeds,
                               long[][] attentionMask, long[][] positionIds,
-                              GotOcr2EmbedModel embedModel,
-                              NDManager ndManager) throws OrtException {
+                              GotOcr2EmbedModel embedModel) throws OrtException {
         int batch_size = image_features.length;
-        int layer = 24;
-        int num_heads = 16;
-        int head_dim = 64;
         Map<String, OnnxTensor> lm_prefill_inputs = new HashMap<>(Map.of(
-            "inputs_embeds", ArrayUtil.createOnnxTensor(inputs_embeds, env),
-            "attention_mask", ArrayUtil.createOnnxTensor(attentionMask, env),
-            "position_ids", ArrayUtil.createOnnxTensor(positionIds, env))
+                "inputs_embeds", ArrayUtil.createOnnxTensor(inputs_embeds, env),
+                "attention_mask", ArrayUtil.createOnnxTensor(attentionMask, env),
+                "position_ids", ArrayUtil.createOnnxTensor(positionIds, env))
         );
         for (int i = 0; i < layer; i++) {
-            NDArray past_key_value = ndManager.zeros(new Shape(batch_size, num_heads, 0, head_dim), DataType.FLOAT32);
-            long[] past_key_value_shape = past_key_value.getShape().getShape();
-            FloatBuffer past_key_value_buffer = past_key_value.toByteBuffer().asFloatBuffer();
-            lm_prefill_inputs.put("past_key_" + i, OnnxTensor.createTensor(env, past_key_value_buffer, past_key_value_shape));
-            lm_prefill_inputs.put("past_value_" + i, OnnxTensor.createTensor(env, past_key_value_buffer, past_key_value_shape));
+            OnnxTensor emptyPastKey = OnnxTensor.createTensor(
+                    env,
+                    FloatBuffer.wrap(new float[0]),
+                    new long[]{batch_size, numHeads, 0, headDim}
+            );
+            OnnxTensor emptyPastValue = OnnxTensor.createTensor(
+                    env,
+                    FloatBuffer.wrap(new float[0]),
+                    new long[]{batch_size, numHeads, 0, headDim}
+            );
+            String keyName = "past_key_" + i;
+            String valueName = "past_value_" + i;
+            lm_prefill_inputs.put(keyName, emptyPastKey);
+            lm_prefill_inputs.put(valueName, emptyPastValue);
         }
 
-        Result prefill_result = session.run(lm_prefill_inputs);
-        float[][][] logits = (float[][][]) prefill_result.get(0).getValue();
-        float[][][][][] pkvs = new float[layer*2][][][][];
-        for (int i = 0; i < layer*2; i++) {
-            pkvs[i] = (float[][][][]) prefill_result.get(i+1).getValue();
+        Result prefill_result;
+        try {
+            prefill_result = session.run(lm_prefill_inputs);
+        } finally {
+            OnnxUtil.closeTensors(lm_prefill_inputs);
         }
+
+        float[][][] logits = (float[][][]) prefill_result.get(0).getValue();
+        OnnxTensor[] pkvTensors = new OnnxTensor[layer * 2];
+        for (int i = 0; i < layer * 2; i++) {
+            pkvTensors[i] = (OnnxTensor) prefill_result.get(i + 1);
+        }
+        Result kvOwnerResult = prefill_result;
         long stop_id = 151645;
 
         long start = ArrayUtil.argmax(logits[0][logits[0].length - 1]);
@@ -90,27 +101,41 @@ public class GotOcr2DecoderModel implements AutoCloseable {
         boolean[] finished = new boolean[batch_size];
         for (int i = 0; i < maxLength; i++) {
             curr_len += 1;
-            float[][][] next_embed = embedModel.predict(next_token_ids);
 
-            Map<String, OnnxTensor> inputs = new HashMap<>();
-            inputs.put("inputs_embeds", ArrayUtil.createOnnxTensor(next_embed, env));
-            inputs.put("attention_mask", ArrayUtil.createOnnxTensor(ArrayUtil.ones(batch_size, curr_len), env));
-            long[][] position_ids = new long[batch_size][1];
-            for (int j = 0; j < batch_size; j++) {
-                position_ids[j] = new long[] {curr_len-1};
+            try (GotOcr2EmbedModel.PredictTensorResult nextEmbedResult = embedModel.predictTensor(next_token_ids)) {
+                Map<String, OnnxTensor> inputs = new HashMap<>();
+                inputs.put("inputs_embeds", nextEmbedResult.embeddings());
+                OnnxTensor attentionMaskTensor = ArrayUtil.createOnnxTensor(ArrayUtil.ones(batch_size, curr_len), env);
+                inputs.put("attention_mask", attentionMaskTensor);
+                long[][] position_ids = new long[batch_size][1];
+                for (int j = 0; j < batch_size; j++) {
+                    position_ids[j] = new long[]{curr_len - 1};
+                }
+                OnnxTensor positionIdsTensor = ArrayUtil.createOnnxTensor(position_ids, env);
+                inputs.put("position_ids", positionIdsTensor);
+                for (int j = 0; j < layer; j++) {
+                    inputs.put("past_key_" + j, pkvTensors[2 * j]);
+                    inputs.put("past_value_" + j, pkvTensors[2 * j + 1]);
+                }
+
+                Result step_out = null;
+                try {
+                    step_out = session.run(inputs);
+                    logits = (float[][][]) step_out.get(0).getValue();
+                    OnnxTensor[] nextPkvTensors = new OnnxTensor[layer * 2];
+                    for (int o = 0; o < layer * 2; o++) {
+                        nextPkvTensors[o] = (OnnxTensor) step_out.get(o + 1);
+                    }
+                    IOUtil.close(kvOwnerResult);
+                    kvOwnerResult = step_out;
+                    step_out = null;
+                    pkvTensors = nextPkvTensors;
+                } finally {
+                    IOUtil.close(step_out);
+                    IOUtil.close(attentionMaskTensor);
+                    IOUtil.close(positionIdsTensor);
+                }
             }
-            inputs.put("position_ids", ArrayUtil.createOnnxTensor( position_ids, env));
-            for (int j = 0; j < layer; j++) {
-                inputs.put("past_key_" + j, ArrayUtil.createOnnxTensor(pkvs[2*j], env));
-                inputs.put("past_value_" + j, ArrayUtil.createOnnxTensor(pkvs[2*j+1], env));
-            }
-            Result step_out = session.run(inputs);
-            logits = (float[][][]) step_out.get(0).getValue();
-            for (int o = 0; o < layer*2; o++) {
-                pkvs[o] = (float[][][][]) step_out.get(o+1).getValue();
-            }
-            IOUtil.close(step_out);
-            OnnxUtil.closeTensors(inputs);
 
             long[][] nextIds = new long[batch_size][1];
             for (int j = 0; j < batch_size; j++) {
@@ -132,6 +157,7 @@ public class GotOcr2DecoderModel implements AutoCloseable {
                 break;
             }
         }
+        IOUtil.close(kvOwnerResult);
         return generated_tokens;
     }
 

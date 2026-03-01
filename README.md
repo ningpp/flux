@@ -76,6 +76,7 @@ Do not use in production.
 | CodeFormulaV2        |  ✅  |  ✅   |
 | Dolphin              |  ✅  |  ✅   |
 | Dolphin-1.5          |  ✅  |  ✅   |
+| GOT-OCR-2.0          |  ✅  |  ✅   |
 | granite-docling-258M |  ✅  |  ✅   |
 | nougat-latex-base    |  ✅  |  ✅   |
 | pix2text-mfr         |  ✅  |  ✅   |

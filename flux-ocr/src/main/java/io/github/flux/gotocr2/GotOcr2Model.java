@@ -8,6 +8,7 @@ import io.github.flux.core.MatManager;
 import io.github.flux.core.PreProcessResult;
 import io.github.flux.core.TextResult;
 import io.github.flux.exception.FluxException;
+import io.github.flux.model.FormulaRecognitionModel;
 import io.github.flux.util.IOUtil;
 import org.opencv.core.Mat;
 
@@ -29,10 +30,15 @@ public class GotOcr2Model extends BatchPredictor<PreProcessResult, TextResult> {
     private final GotOcr2DecoderModel decoderModel;
     private final HuggingFaceTokenizer tokenizer;
 
+    static {
+        FormulaRecognitionModel.getRegistry().register(MODEL_NAMES, GotOcr2Model::new);
+    }
+
     public GotOcr2Model(final String modelRootDir,
                         final String modelName,
                         final int gpuIndex,
-                        final OrtEnvironment env) {
+                        final OrtEnvironment env,
+                        final Map<String, Object> customParams) {
         if (!MODEL_NAMES.contains(modelName)) {
             throw new FluxException("not supported model: " + modelName);
         }
@@ -92,9 +98,9 @@ public class GotOcr2Model extends BatchPredictor<PreProcessResult, TextResult> {
                 }
             }
 
-            long[][] genIds = decoderModel.predict(image_features,
+                long[][] genIds = decoderModel.predict(image_features,
                     inputIds, inputs_embeds,
-                    attentionMask, positionIds, embedModel, ndManager);
+                    attentionMask, positionIds, embedModel);
             List<TextResult> textResults = new ArrayList<>();
             for (long[] tokens : genIds) {
                 String text = tokenizer.decode(tokens);
