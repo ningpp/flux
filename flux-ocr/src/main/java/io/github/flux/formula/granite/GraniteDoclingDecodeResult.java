@@ -17,7 +17,18 @@
  */
 package io.github.flux.formula.granite;
 
+import ai.onnxruntime.OnnxTensor;
+import ai.onnxruntime.OrtSession;
+import io.github.flux.util.IOUtil;
+
 import java.util.Map;
 
-public record GraniteDoclingDecodeResult(float[][][] logits, Map<String, float[][][][]> present_key_values) {
+public record GraniteDoclingDecodeResult(float[][][] logits,
+										 Map<String, OnnxTensor> present_key_values,
+										 OrtSession.Result onnxResult) implements AutoCloseable {
+
+	@Override
+	public void close() {
+		IOUtil.close(onnxResult);
+	}
 }

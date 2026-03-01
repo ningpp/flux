@@ -24,6 +24,7 @@ import ai.onnxruntime.OnnxValue;
 import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtException;
 import ai.onnxruntime.OrtSession;
+import ai.onnxruntime.OrtSession.Result;
 import io.github.flux.exception.FluxException;
 import io.github.flux.util.OnnxUtil;
 
@@ -31,6 +32,14 @@ import java.nio.LongBuffer;
 import java.util.Map;
 
 public class GraniteDoclingEmbedModel implements AutoCloseable {
+
+    public record PredictResult(OnnxTensor embeddings, Result onnxResult) implements AutoCloseable {
+
+        @Override
+        public void close() throws Exception {
+            onnxResult.close();
+        }
+    }
 
     @Override
     public void close() throws Exception {
@@ -75,6 +84,33 @@ public class GraniteDoclingEmbedModel implements AutoCloseable {
         onnxResult.close();
         OnnxUtil.closeTensors(inputs);
         return encodeResultFloats;
+    }
+
+    public PredictResult predictTensor(long[][] inputIds) throws OrtException {
+        long[] shape = new long[]{inputIds.length, inputIds[0].length};
+        long[] inputIdsFlat = new long[inputIds.length * inputIds[0].length];
+        int index = 0;
+        for (long[] inputId : inputIds) {
+            for (long value : inputId) {
+                inputIdsFlat[index++] = value;
+            }
+        }
+
+        OnnxTensor tensor = OnnxTensor.createTensor(env, LongBuffer.wrap(inputIdsFlat), shape);
+        Map<String, OnnxTensor> inputs = Map.of("input_ids", tensor);
+        Result onnxResult = null;
+        try {
+            onnxResult = session.run(inputs);
+            OnnxTensor embeddings = (OnnxTensor) onnxResult.get(0);
+            tensor.close();
+            return new PredictResult(embeddings, onnxResult);
+        } catch (Exception e) {
+            OnnxUtil.closeTensors(inputs);
+            if (onnxResult != null) {
+                onnxResult.close();
+            }
+            throw e;
+        }
     }
 
 }
