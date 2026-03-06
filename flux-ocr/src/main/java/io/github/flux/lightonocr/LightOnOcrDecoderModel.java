@@ -4,8 +4,10 @@ import ai.onnxruntime.OnnxTensor;
 import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtException;
 import ai.onnxruntime.OrtSession;
+import ai.onnxruntime.OrtSession.Result;
 import io.github.flux.exception.FluxException;
 import io.github.flux.util.ArrayUtil;
+import io.github.flux.util.IOUtil;
 import io.github.flux.util.OnnxUtil;
 
 import java.nio.FloatBuffer;
@@ -74,38 +76,37 @@ public class LightOnOcrDecoderModel implements AutoCloseable {
         int numKvHeads = SPEC.numKvHeads();
         int headDim = SPEC.headDim();
 
-        // --- Prefill ---
-        Map<String, OnnxTensor> prefillInputs = new HashMap<>();
-        prefillInputs.put("inputs_embeds", ArrayUtil.createOnnxTensor(inputsEmbeds, env));
-        prefillInputs.put("attention_mask", ArrayUtil.createOnnxTensor(attentionMask, env));
+        Map<String, OnnxTensor> prefillInputs = null;
+        Result activeResult = null;
+        OnnxTensor[] kvCache = null;
+        float[][][] logits;
 
-        // Empty KV cache [batch, num_kv_heads, 0, head_dim]
-        for (int i = 0; i < numLayers; i++) {
-            float[][][][] emptyKv = new float[batchSize][numKvHeads][0][headDim];
-            OnnxTensor emptyTensor = OnnxTensor.createTensor(env,
-                    FloatBuffer.wrap(new float[0]),
-                    new long[]{batchSize, numKvHeads, 0, headDim});
-            prefillInputs.put(String.format(Locale.ROOT, "past_key_values.%d.key", i), emptyTensor);
-            // reuse same empty buffer for value (separate tensor)
-            OnnxTensor emptyTensorV = OnnxTensor.createTensor(env,
-                    FloatBuffer.wrap(new float[0]),
-                    new long[]{batchSize, numKvHeads, 0, headDim});
-            prefillInputs.put(String.format(Locale.ROOT, "past_key_values.%d.value", i), emptyTensorV);
+        try {
+            // --- Prefill ---
+            prefillInputs = new HashMap<>();
+            prefillInputs.put("inputs_embeds", ArrayUtil.createOnnxTensor(inputsEmbeds, env));
+            prefillInputs.put("attention_mask", ArrayUtil.createOnnxTensor(attentionMask, env));
+
+            // Empty KV cache [batch, num_kv_heads, 0, head_dim]
+            for (int i = 0; i < numLayers; i++) {
+                OnnxTensor emptyTensor = OnnxTensor.createTensor(env,
+                        FloatBuffer.wrap(new float[0]),
+                        new long[]{batchSize, numKvHeads, 0, headDim});
+                prefillInputs.put(String.format(Locale.ROOT, "past_key_values.%d.key", i), emptyTensor);
+
+                // Keep key/value tensors separate because the model expects distinct inputs.
+                OnnxTensor emptyTensorV = OnnxTensor.createTensor(env,
+                        FloatBuffer.wrap(new float[0]),
+                        new long[]{batchSize, numKvHeads, 0, headDim});
+                prefillInputs.put(String.format(Locale.ROOT, "past_key_values.%d.value", i), emptyTensorV);
+            }
+
+            activeResult = session.run(prefillInputs, outputNames);
+            logits = (float[][][]) activeResult.get("logits").get().getValue();
+            kvCache = extractPresentKvTensors(activeResult, numLayers);
+        } finally {
+            OnnxUtil.closeTensors(prefillInputs);
         }
-
-        OrtSession.Result prefillResult = session.run(prefillInputs, outputNames);
-
-        // Extract logits and KV cache
-        float[][][] logits = (float[][][]) prefillResult.get("logits").get().getValue();
-        float[][][][][] kvCache = new float[numLayers * 2][][][][];
-        for (int i = 0; i < numLayers; i++) {
-            kvCache[2 * i] = (float[][][][]) prefillResult
-                    .get(String.format(Locale.ROOT, "present.%d.key", i)).get().getValue();
-            kvCache[2 * i + 1] = (float[][][][]) prefillResult
-                    .get(String.format(Locale.ROOT, "present.%d.value", i)).get().getValue();
-        }
-        prefillResult.close();
-        OnnxUtil.closeTensors(prefillInputs);
 
         // First generated token
         long[] firstTokens = new long[batchSize];
@@ -133,61 +134,94 @@ public class LightOnOcrDecoderModel implements AutoCloseable {
             }
         }
 
-        // --- Decode loop ---
-        for (int step = 0; step < maxLength - 1; step++) {
-            if (ArrayUtil.allTrue(finished)) {
-                break;
-            }
-
-            currLen += 1;
-
-            // Embed next token
-            float[][][] nextEmbeds = embedModel.predict(nextTokenIds);
-
-            // Build decoder inputs
-            Map<String, OnnxTensor> inputs = new HashMap<>();
-            inputs.put("inputs_embeds", ArrayUtil.createOnnxTensor(nextEmbeds, env));
-            inputs.put("attention_mask", ArrayUtil.createOnnxTensor(
-                    ArrayUtil.ones(batchSize, currLen), env));
-
-            for (int i = 0; i < numLayers; i++) {
-                inputs.put(String.format(Locale.ROOT, "past_key_values.%d.key", i),
-                        ArrayUtil.createOnnxTensor(kvCache[2 * i], env));
-                inputs.put(String.format(Locale.ROOT, "past_key_values.%d.value", i),
-                        ArrayUtil.createOnnxTensor(kvCache[2 * i + 1], env));
-            }
-
-            // Run decoder
-            OrtSession.Result stepResult = session.run(inputs, outputNames);
-
-            logits = (float[][][]) stepResult.get("logits").get().getValue();
-            for (int i = 0; i < numLayers; i++) {
-                kvCache[2 * i] = (float[][][][]) stepResult
-                        .get(String.format(Locale.ROOT, "present.%d.key", i)).get().getValue();
-                kvCache[2 * i + 1] = (float[][][][]) stepResult
-                        .get(String.format(Locale.ROOT, "present.%d.value", i)).get().getValue();
-            }
-            stepResult.close();
-            OnnxUtil.closeTensors(inputs);
-
-            // Pick next tokens
-            long[][] nextIds = new long[batchSize][1];
-            for (int b = 0; b < batchSize; b++) {
-                if (finished[b]) {
-                    continue;
+        try {
+            // --- Decode loop ---
+            for (int step = 0; step < maxLength - 1; step++) {
+                if (ArrayUtil.allTrue(finished)) {
+                    break;
                 }
-                float[] lastLogit = logits[b][0];
-                long nextToken = ArrayUtil.argmax(lastLogit);
-                nextIds[b][0] = nextToken;
-                generatedTokens[b] = ArrayUtil.concat(generatedTokens[b], new long[]{nextToken});
-                if (nextToken == STOP_TOKEN_ID || nextToken == STOP_TOKEN_ID2) {
-                    finished[b] = true;
+
+                currLen += 1;
+
+                // Embed next token
+                OnnxTensor stepMaskTensor = null;
+                Result stepResult = null;
+                LightOnOcrEmbedModel.EmbedOutput embedOutput = null;
+
+                try {
+                    // Build decoder inputs
+                    Map<String, OnnxTensor> inputs = new HashMap<>();
+                    embedOutput = embedModel.predictTensor(nextTokenIds);
+                    stepMaskTensor = ArrayUtil.createOnnxTensor(ArrayUtil.ones(batchSize, currLen), env);
+                    inputs.put("inputs_embeds", embedOutput.tensor());
+                    inputs.put("attention_mask", stepMaskTensor);
+
+                    for (int i = 0; i < numLayers; i++) {
+                        inputs.put(String.format(Locale.ROOT, "past_key_values.%d.key", i), kvCache[2 * i]);
+                        inputs.put(String.format(Locale.ROOT, "past_key_values.%d.value", i), kvCache[2 * i + 1]);
+                    }
+
+                    // Run decoder
+                    stepResult = session.run(inputs, outputNames);
+
+                    logits = (float[][][]) stepResult.get("logits").get().getValue();
+                    OnnxTensor[] nextKvCache = extractPresentKvTensors(stepResult, numLayers);
+
+                    // Previous result/KV are no longer needed after the next cache is acquired.
+                    IOUtil.close(activeResult);
+                    closeTensorArray(kvCache);
+
+                    activeResult = stepResult;
+                    kvCache = nextKvCache;
+                    stepResult = null;
+                } finally {
+                    IOUtil.close(stepResult);
+                    IOUtil.close(embedOutput);
+                    IOUtil.close(stepMaskTensor);
                 }
+
+                // Pick next tokens
+                long[][] nextIds = new long[batchSize][1];
+                for (int b = 0; b < batchSize; b++) {
+                    if (finished[b]) {
+                        continue;
+                    }
+                    float[] lastLogit = logits[b][0];
+                    long nextToken = ArrayUtil.argmax(lastLogit);
+                    nextIds[b][0] = nextToken;
+                    generatedTokens[b] = ArrayUtil.concat(generatedTokens[b], new long[]{nextToken});
+                    if (nextToken == STOP_TOKEN_ID || nextToken == STOP_TOKEN_ID2) {
+                        finished[b] = true;
+                    }
+                }
+                nextTokenIds = nextIds;
             }
-            nextTokenIds = nextIds;
+
+            return generatedTokens;
+        } finally {
+            IOUtil.close(activeResult);
+            closeTensorArray(kvCache);
         }
+    }
 
-        return generatedTokens;
+    private OnnxTensor[] extractPresentKvTensors(Result result, int numLayers) throws OrtException {
+        OnnxTensor[] kvTensors = new OnnxTensor[numLayers * 2];
+        for (int i = 0; i < numLayers; i++) {
+            kvTensors[2 * i] = (OnnxTensor) result
+                    .get(String.format(Locale.ROOT, "present.%d.key", i)).get();
+            kvTensors[2 * i + 1] = (OnnxTensor) result
+                    .get(String.format(Locale.ROOT, "present.%d.value", i)).get();
+        }
+        return kvTensors;
+    }
+
+    private void closeTensorArray(OnnxTensor[] tensors) {
+        if (tensors == null) {
+            return;
+        }
+        for (OnnxTensor tensor : tensors) {
+            IOUtil.close(tensor);
+        }
     }
 
     @Override

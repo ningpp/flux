@@ -7,6 +7,7 @@ import ai.onnxruntime.OrtSession;
 import ai.onnxruntime.OrtSession.Result;
 import io.github.flux.exception.FluxException;
 import io.github.flux.util.ArrayUtil;
+import io.github.flux.util.IOUtil;
 
 import java.util.Map;
 
@@ -16,6 +17,13 @@ import java.util.Map;
  * Output: inputs_embeds [batch, seq_len, 1024] float32
  */
 public class LightOnOcrEmbedModel implements AutoCloseable {
+
+    public record EmbedOutput(OnnxTensor tensor, Result result) implements AutoCloseable {
+        @Override
+        public void close() throws Exception {
+            IOUtil.close(result);
+        }
+    }
 
     private final OrtEnvironment env;
     private final OrtSession session;
@@ -45,6 +53,22 @@ public class LightOnOcrEmbedModel implements AutoCloseable {
         try (OnnxTensor onnxInput = ArrayUtil.createOnnxTensor(inputIds, env);
              Result result = session.run(Map.of("input_ids", onnxInput))) {
             return (float[][][]) result.get(0).getValue();
+        }
+    }
+
+    /**
+     * Embed token IDs and return tensor output directly for zero-copy decode path.
+     * Caller must close returned EmbedOutput after the tensor is consumed.
+     */
+    public EmbedOutput predictTensor(long[][] inputIds) throws OrtException {
+        OnnxTensor onnxInput = ArrayUtil.createOnnxTensor(inputIds, env);
+        try {
+            Result result = session.run(Map.of("input_ids", onnxInput));
+            return new EmbedOutput((OnnxTensor) result.get(0), result);
+        } finally {
+            if (!onnxInput.isClosed()) {
+                onnxInput.close();
+            }
         }
     }
 
