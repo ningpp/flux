@@ -16,6 +16,7 @@
 package io.github.flux.model;
 
 import io.github.flux.exception.FluxException;
+import io.github.flux.llamajcpp.LlamaJCppOcrModel;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -39,6 +40,15 @@ class ModelRegistryIntegrationTest {
         assertNotNull(registry);
 
         for (String modelName : FormulaRecognitionModel.MODEL_NAMES) {
+            assertTrue(registry.isRegistered(modelName),
+                    "Model " + modelName + " should be registered in FormulaRecognitionModel registry");
+        }
+    }
+
+    @Test
+    void testLlamaJCppOcrModelIsRegisteredThroughFormulaRegistry() {
+        var registry = FormulaRecognitionModel.getRegistry();
+        for (String modelName : LlamaJCppOcrModel.MODEL_NAMES) {
             assertTrue(registry.isRegistered(modelName),
                     "Model " + modelName + " should be registered in FormulaRecognitionModel registry");
         }

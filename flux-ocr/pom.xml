@@ -64,6 +64,11 @@
             <artifactId>pytorch-native-cpu</artifactId>
         </dependency>
         <dependency>
+            <groupId>io.gravitee.llama.cpp</groupId>
+            <artifactId>llamaj.cpp</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
             <groupId>net.java.dev.jna</groupId>
             <artifactId>jna</artifactId>
         </dependency>

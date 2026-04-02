@@ -82,6 +82,7 @@
         <commons-lang3.version>3.19.0</commons-lang3.version>
         <djl.version>0.36.0</djl.version>
         <djl-pytorch.version>2.7.1</djl-pytorch.version>
+        <llamajcpp.version>1.0.0</llamajcpp.version>
         <jna.version>5.18.1</jna.version>
         <onnxruntime.version>1.23.2</onnxruntime.version>
         <bytedeco-opencv.version>4.11.0-1.5.12</bytedeco-opencv.version>
@@ -147,6 +148,11 @@
                 <groupId>ai.djl.pytorch</groupId>
                 <artifactId>pytorch-native-cpu</artifactId>
                 <version>${djl-pytorch.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.gravitee.llama.cpp</groupId>
+                <artifactId>llamaj.cpp</artifactId>
+                <version>${llamajcpp.version}</version>
             </dependency>
             <dependency>
                 <groupId>net.java.dev.jna</groupId>
