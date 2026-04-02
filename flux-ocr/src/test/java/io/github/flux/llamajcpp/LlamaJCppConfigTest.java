@@ -30,7 +30,7 @@ class LlamaJCppConfigTest {
         assertEquals(modelFile.toAbsolutePath(), config.modelFile());
         assertEquals(mmprojFile.toAbsolutePath(), config.mmprojFile());
         assertEquals(8192, config.contextSize());
-        assertEquals(Math.min(8192, 2048), config.batchSize());
+        assertEquals(2048, config.batchSize());
         assertFalse(config.useGpu());
         assertTrue(config.useChatTemplate());
         assertEquals("<IMG>\nRead all text in the image.", config.buildPromptContent(null));
