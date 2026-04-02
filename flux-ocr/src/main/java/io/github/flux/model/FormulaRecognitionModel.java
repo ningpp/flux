@@ -17,6 +17,7 @@ import io.github.flux.formula.paddle.PaddleFormulaRecognitionPredictor;
 import io.github.flux.formula.pix2text.Pix2TextFormulaRecognitionPredictor;
 import io.github.flux.formula.texteller.TexTellerPredictor;
 import io.github.flux.gotocr2.GotOcr2Model;
+import io.github.flux.llamajcpp.LlamaJCppOcrModel;
 import io.github.flux.unirec.UnirecPredictor;
 import io.github.flux.util.CollectionUtil;
 import io.github.flux.util.IOUtil;
@@ -36,6 +37,7 @@ public class FormulaRecognitionModel extends BatchPredictor<PreProcessResult, Te
         try {
             Class.forName(ByteDanceDolphinElementModel.class.getName());
             Class.forName(GotOcr2Model.class.getName());
+            Class.forName(LlamaJCppOcrModel.class.getName());
             Class.forName(NougatLatexFormulaModel.class.getName());
             Class.forName(PaddleFormulaRecognitionPredictor.class.getName());
             Class.forName(Pix2TextFormulaRecognitionPredictor.class.getName());
@@ -55,6 +57,7 @@ public class FormulaRecognitionModel extends BatchPredictor<PreProcessResult, Te
     public static final Set<String> MODEL_NAMES = CollectionUtil.distinct(List.of(
             ByteDanceDolphinElementModel.MODEL_NAMES,
             GotOcr2Model.MODEL_NAMES,
+            LlamaJCppOcrModel.MODEL_NAMES,
             GraniteDoclingFormulaModel.MODEL_NAMES,
             NougatLatexFormulaModel.MODEL_NAMES,
             PaddleFormulaRecognitionPredictor.MODEL_NAMES,

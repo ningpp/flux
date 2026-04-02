@@ -17,6 +17,7 @@ Do not use in production.
 7. [docling-project/docling](https://github.com/docling-project/docling)
 8. [huggingface/optimum](https://github.com/huggingface/optimum)
 9. [OleehyO/TexTeller](https://github.com/OleehyO/TexTeller)
+10. [gravitee-io/llamaj.cpp](https://github.com/gravitee-io/llamaj.cpp)
 
 
 ### Support Model Category
@@ -77,6 +78,7 @@ Do not use in production.
 | Dolphin              |  ✅  |  ✅   |
 | Dolphin-1.5          |  ✅  |  ✅   |
 | GOT-OCR-2.0          |  ✅  |  ✅   |
+| LlamaJCpp-OCR       |  ✅  |  ✅   |
 | granite-docling-258M |  ✅  |  ✅   |
 | nougat-latex-base    |  ✅  |  ✅   |
 | pix2text-mfr         |  ✅  |  ✅   |
@@ -88,6 +90,23 @@ Do not use in production.
 | PP-FormulaNet_plus-L |  ✅  |  ❌   |
 | TexTeller            |  ✅  |  ✅   |
 | unirec-0.1b          |  ✅  |  ✅   |
+
+#### LlamaJCpp-OCR setup
+
+`LlamaJCpp-OCR` is an opt-in GGUF/mmproj backend powered by `io.gravitee.llama.cpp:llamaj.cpp`.
+
+- Put the model files under `${modelRootDir}/LlamaJCpp-OCR/` by default:
+  - `model.gguf`
+  - `mmproj.gguf`
+- Or override them with `customParams`:
+  - `modelFile` / `ggufFile`
+  - `mmprojFile`
+  - `contextSize`, `batchSize`, `maxTokens`
+  - `nGpuLayers`, `nThreads`, `useGpu`
+  - `temperature`, `topK`, `topP`, `minP`, `seed`
+  - `systemPrompt`, `promptTemplate`, `mediaMarker`, `stopStrings`
+- This backend stays isolated from the existing ONNX/DJL paths and is only selected when `modelName` is `LlamaJCpp-OCR`.
+- Runtime note: enable native access when launching the JVM, for example `--enable-native-access=ALL-UNNAMED`.
 
 
 #### Table Recognition Model
@@ -102,4 +121,3 @@ Do not use in production.
 | Model                 | CPU | CUDA |
 |:----------------------|:---:|:----:|
 | PP-LCNet_x1_0_doc_ori |  ✅  |  ✅   |
-

@@ -25,7 +25,8 @@ A functional interface for creating model instances:
 ```java
 @FunctionalInterface
 public interface ModelFactory<T> {
-    T create(String modelRootDir, String modelName, int gpuIndex, OrtEnvironment env);
+    T create(String modelRootDir, String modelName, int gpuIndex, OrtEnvironment env,
+             Map<String, Object> customParams);
 }
 ```
 
@@ -80,8 +81,8 @@ You can register custom models at runtime:
 var registry = LayoutModel.getRegistry();
 
 // Register a custom model
-registry.register("my-custom-layout-model", (dir, name, gpu, env) -> {
-    return new MyCustomLayoutModel(dir, name, gpu, env);
+registry.register("my-custom-layout-model", (dir, name, gpu, env, customParams) -> {
+    return new MyCustomLayoutModel(dir, name, gpu, env, customParams);
 });
 
 // Now you can use it like any other model
@@ -107,7 +108,7 @@ All main model classes have been refactored to use the registry pattern:
 Supports: Docling and PaddlePaddle layout models
 
 ### FormulaRecognitionModel
-Supports: Dolphin, Granite, Nougat, Paddle, Pix2Text, TexTeller, Unirec formula models
+Supports: Dolphin, Granite, LlamaJCpp-OCR, Nougat, Paddle, Pix2Text, TexTeller, Unirec formula models
 
 ### TextDetectionModel
 Supports: PP-OCRv4 and PP-OCRv5 detection models
@@ -173,23 +174,15 @@ public class ExpensiveModel {
 
 ### Future Considerations: Custom Initialization Parameters
 
-The current architecture uses `ModelFactory<T>` with a fixed signature:
+The current architecture uses `ModelFactory<T>` with a configurable signature:
 ```java
-T create(String modelRootDir, String modelName, int gpuIndex, OrtEnvironment env);
+T create(String modelRootDir, String modelName, int gpuIndex, OrtEnvironment env,
+         Map<String, Object> customParams);
 ```
 
-For models requiring custom initialization parameters (e.g., encoder on CPU, decoder on GPU), there are several approaches:
+For models requiring custom initialization parameters (e.g., encoder on CPU, decoder on GPU, or GGUF/mmproj backends), there are several approaches:
 
-#### Option 1: Extended Factory Interface
-```java
-@FunctionalInterface
-public interface ExtendedModelFactory<T> {
-    T create(String modelRootDir, String modelName, int gpuIndex,
-             OrtEnvironment env, Map<String, Object> customParams);
-}
-```
-
-#### Option 2: Configuration Objects
+#### Option 1: Configuration Objects
 ```java
 record ModelConfig(String modelRootDir, String modelName,
                    int gpuIndex, OrtEnvironment env,
@@ -201,7 +194,7 @@ public interface ConfigurableModelFactory<T> {
 }
 ```
 
-#### Option 3: Builder Pattern
+#### Option 2: Builder Pattern
 ```java
 ExpensiveModel model = ExpensiveModel.builder()
     .modelRootDir(dir)
@@ -218,7 +211,7 @@ record InstanceKey(String modelRootDir, String modelName,
                    int gpuIndex, int encoderGpu, int decoderGpu) {}
 ```
 
-These patterns allow for flexible model initialization while maintaining instance sharing benefits.
+The built-in `LlamaJCpp-OCR` integration uses `customParams` directly to configure GGUF file locations, multimodal projector files, prompt settings, and runtime options such as context size, GPU layers, and sampler controls while still fitting the same registry contract.
 
 ## Backward Compatibility
 
