@@ -81,17 +81,11 @@ final class LlamaJCppOcrSession implements AutoCloseable {
             this.vocab = localVocab;
             this.template = localTemplate;
         } catch (RuntimeException e) {
-            closeQuietly(localContext);
-            closeQuietly(localMtmdContext);
-            closeQuietly(localModel);
-            closeQuietly(localArena);
+            cleanupResources(localContext, localMtmdContext, localModel, localArena);
             runtimeHandle.close();
             throw e;
         } catch (Exception e) {
-            closeQuietly(localContext);
-            closeQuietly(localMtmdContext);
-            closeQuietly(localModel);
-            closeQuietly(localArena);
+            cleanupResources(localContext, localMtmdContext, localModel, localArena);
             runtimeHandle.close();
             throw new FluxException("Failed to initialize llamaj.cpp OCR session", e);
         }
@@ -176,11 +170,18 @@ final class LlamaJCppOcrSession implements AutoCloseable {
 
     @Override
     public void close() {
-        closeQuietly(context);
-        closeQuietly(mtmdContext);
-        closeQuietly(model);
-        closeQuietly(arena);
+        cleanupResources(context, mtmdContext, model, arena);
         runtimeHandle.close();
+    }
+
+    private static void cleanupResources(final LlamaContext llamaContext,
+                                         final MtmdContext multimodalContext,
+                                         final LlamaModel llamaModel,
+                                         final Arena closeableArena) {
+        closeQuietly(llamaContext);
+        closeQuietly(multimodalContext);
+        closeQuietly(llamaModel);
+        closeQuietly(closeableArena);
     }
 
     private static void closeQuietly(final Object resource) {

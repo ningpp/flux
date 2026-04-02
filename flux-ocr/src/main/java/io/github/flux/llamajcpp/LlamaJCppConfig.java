@@ -42,7 +42,8 @@ public record LlamaJCppConfig(Path modelFile,
         final Map<String, Object> params = customParams == null ? Map.of() : customParams;
         final Path modelDir = Path.of(modelRootDir, modelName);
         final int contextSize = requirePositive("contextSize", getInteger(params, "contextSize", 8192));
-        final int batchSize = requirePositive("batchSize", Math.min(getInteger(params, "batchSize", Math.min(contextSize, 2048)), contextSize));
+        final int defaultBatchSize = Math.min(contextSize, 2048);
+        final int batchSize = requirePositive("batchSize", Math.min(getInteger(params, "batchSize", defaultBatchSize), contextSize));
         final int maxTokens = requirePositive("maxTokens", getInteger(params, "maxTokens", 2048));
         final int nThreads = requirePositive("nThreads", getInteger(params, "nThreads", Runtime.getRuntime().availableProcessors()));
         final boolean useGpu = getBoolean(params, gpuIndex >= 0, "useGpu");
