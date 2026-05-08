@@ -6,6 +6,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -42,28 +43,28 @@ class LlamaJCppConfigTest {
         Path customModel = Files.createFile(modelDir.resolve("custom-model.gguf"));
         Path customMmproj = Files.createFile(modelDir.resolve("projector.gguf"));
 
-        LlamaJCppConfig config = LlamaJCppConfig.from(tempDir.toString(), "LlamaJCpp-OCR", 0, Map.of(
-                "modelFile", "custom-model.gguf",
-                "mmprojFile", "projector.gguf",
-                "contextSize", 4096,
-                "batchSize", 1024,
-                "maxTokens", 256,
-                "nGpuLayers", 32,
-                "nThreads", 6,
-                "temperature", 0.7f,
-                "topK", 20,
-                "topP", 0.8f,
-                "minP", 0.1f,
-                "seed", 7,
-                "useGpu", true,
-                "useNativeImageDecoder", false,
-                "printTimings", true,
-                "useChatTemplate", false,
-                "mediaMarker", "<MEDIA>",
-                "systemPrompt", "ocr system",
-                "promptTemplate", "{media}\nPrompt: {prompt}",
-                "stopStrings", List.of("</s>", "<END>")
-        ));
+        Map<String, Object> customParams = new HashMap<>();
+        customParams.put("modelFile", "custom-model.gguf");
+        customParams.put("mmprojFile", "projector.gguf");
+        customParams.put("contextSize", 4096);
+        customParams.put("batchSize", 1024);
+        customParams.put("maxTokens", 256);
+        customParams.put("nGpuLayers", 32);
+        customParams.put("nThreads", 6);
+        customParams.put("temperature", 0.7f);
+        customParams.put("topK", 20);
+        customParams.put("topP", 0.8f);
+        customParams.put("minP", 0.1f);
+        customParams.put("seed", 7);
+        customParams.put("useGpu", true);
+        customParams.put("useNativeImageDecoder", false);
+        customParams.put("printTimings", true);
+        customParams.put("useChatTemplate", false);
+        customParams.put("mediaMarker", "<MEDIA>");
+        customParams.put("systemPrompt", "ocr system");
+        customParams.put("promptTemplate", "{media}\nPrompt: {prompt}");
+        customParams.put("stopStrings", List.of("</s>", "<END>"));
+        LlamaJCppConfig config = LlamaJCppConfig.from(tempDir.toString(), "LlamaJCpp-OCR", 0, customParams);
 
         assertEquals(customModel.toAbsolutePath(), config.modelFile());
         assertEquals(customMmproj.toAbsolutePath(), config.mmprojFile());
