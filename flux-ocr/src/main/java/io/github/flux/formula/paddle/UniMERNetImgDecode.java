@@ -213,14 +213,6 @@ public class UniMERNetImgDecode implements ImageProcessor {
         // Corresponds to Python: self.crop_margin(Image.fromarray(img).convert("RGB"))
         Mat croppedImg = cropMargin(matManager, img);
 
-        /*
-        Util20250629.saveNDArrayToTxt(
-                croppedImg,
-                NDManager.newBaseManager(),
-                "D:\\after-crop_margin-java-" + System.currentTimeMillis() + ".txt",
-                1
-        );
-        */
         if (croppedImg.height() == 0 || croppedImg.width() == 0) {
             return null;
         }
@@ -257,15 +249,6 @@ public class UniMERNetImgDecode implements ImageProcessor {
 
         Mat paddedImg = matManager.newMat();
         Core.copyMakeBorder(resizedImg, paddedImg, top, bottom, left, right, Core.BORDER_CONSTANT, new Scalar(0, 0, 0));
-
-        /*
-        Util20250629.saveNDArrayToTxt(
-                paddedImg,
-                NDManager.newBaseManager(),
-                "D:\\after-UniMERNetImgDecode-java-" + System.currentTimeMillis() + ".txt"
-        );
-        */
-
 
         return paddedImg;
     }

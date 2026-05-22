@@ -84,10 +84,10 @@ Do not use in production.
 | pix2text-mfr         |  ✅  |  ✅   |
 | pix2text-mfr-1.5     |  ✅  |  ✅   |
 | PP-FormulaNet-S      |  ✅  |  ❌   |
-| PP-FormulaNet-L      |  ✅  |  ❌   |
+| PP-FormulaNet-L      |  ✅  |  ✅   |
 | PP-FormulaNet_plus-S |  ✅  |  ❌   |
 | PP-FormulaNet_plus-M |  ✅  |  ❌   |
-| PP-FormulaNet_plus-L |  ✅  |  ❌   |
+| PP-FormulaNet_plus-L |  ✅  |  ✅   |
 | TexTeller            |  ✅  |  ✅   |
 | unirec-0.1b          |  ✅  |  ✅   |
 

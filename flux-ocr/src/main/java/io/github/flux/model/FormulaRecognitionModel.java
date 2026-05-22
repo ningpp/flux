@@ -13,6 +13,7 @@ import io.github.flux.dolphin.ByteDanceDolphinElementModel;
 import io.github.flux.exception.FluxException;
 import io.github.flux.formula.granite.GraniteDoclingFormulaModel;
 import io.github.flux.formula.nougat.NougatLatexFormulaModel;
+import io.github.flux.formula.paddle.PaddleFormulaModel;
 import io.github.flux.formula.paddle.PaddleFormulaRecognitionPredictor;
 import io.github.flux.formula.pix2text.Pix2TextFormulaRecognitionPredictor;
 import io.github.flux.formula.texteller.TexTellerPredictor;
@@ -60,6 +61,7 @@ public class FormulaRecognitionModel extends BatchPredictor<PreProcessResult, Te
             LlamaJCppOcrModel.MODEL_NAMES,
             GraniteDoclingFormulaModel.MODEL_NAMES,
             NougatLatexFormulaModel.MODEL_NAMES,
+            PaddleFormulaModel.MODEL_NAMES,
             PaddleFormulaRecognitionPredictor.MODEL_NAMES,
             Pix2TextFormulaRecognitionPredictor.MODEL_NAMES,
             TexTellerPredictor.MODEL_NAMES,

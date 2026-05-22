@@ -100,13 +100,6 @@ public class UniMERNetTestTransform implements ImageProcessor {
         Mat mergedImage = matManager.newMat();
         Core.merge(channels, mergedImage);
 
-        /*
-        Util20250629.saveNDArrayToTxt(
-                mergedImage,
-                NDManager.newBaseManager(),
-                "D:\\after-UniMERNetTestTransform-java-" + System.currentTimeMillis() + ".txt"
-        );
-        */
         return mergedImage;
     }
 
