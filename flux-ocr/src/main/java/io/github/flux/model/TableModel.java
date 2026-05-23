@@ -12,6 +12,8 @@ import io.github.flux.core.TableResult;
 import io.github.flux.dolphin.ByteDanceDolphinElementModel;
 import io.github.flux.dolphin.ByteDanceDolphinTableModel;
 import io.github.flux.exception.FluxException;
+import io.github.flux.falconocr.FalconOcrModel;
+import io.github.flux.falconocr.FalconOcrTableModel;
 import io.github.flux.unirec.UnirecPredictor;
 import io.github.flux.unirec.UnirecTableModel;
 import io.github.flux.util.CollectionUtil;
@@ -39,13 +41,15 @@ public class TableModel extends BatchPredictor<PreProcessResult, TableResult> {
         // UnirecTableModel needs special handling as it wraps UnirecPredictor
         REGISTRY.register(UnirecPredictor.MODEL_NAMES,
                 (dir, name, gpu, env, customParams) -> new UnirecTableModel(UnirecPredictor.getSharedInstance(dir, name, gpu, env, customParams)));
+        REGISTRY.register(FalconOcrModel.MODEL_NAMES, FalconOcrTableModel::new);
     }
 
     private final BatchPredictor<PreProcessResult, TableResult> predictor;
 
     public static final Set<String> MODEL_NAMES = CollectionUtil.distinct(List.of(
             ByteDanceDolphinElementModel.MODEL_NAMES,
-            UnirecPredictor.MODEL_NAMES
+            UnirecPredictor.MODEL_NAMES,
+            FalconOcrModel.MODEL_NAMES
     ));
 
     public TableModel(ModelParam param) {

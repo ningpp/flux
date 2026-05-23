@@ -10,6 +10,7 @@ import ai.onnxruntime.OrtException;
 import com.google.gson.Gson;
 
 import java.nio.FloatBuffer;
+import java.nio.ByteBuffer;
 import java.nio.LongBuffer;
 import java.util.ArrayList;
 import java.util.List;
@@ -31,6 +32,16 @@ public final class ArrayUtil {
         return OnnxTensor.createTensor(env,
                     LongBuffer.wrap(ArrayUtil.flat(inputIds)),
                     new long[] {inputIds.length, inputIds[0].length});
+    }
+
+    public static OnnxTensor createOnnxTensor(boolean[][][] data, OrtEnvironment env) throws OrtException {
+        int d1 = data.length;
+        int d2 = data[0].length;
+        int d3 = data[0][0].length;
+        return OnnxTensor.createTensor(env,
+                ByteBuffer.wrap(flat(data)),
+                new long[]{d1, d2, d3},
+                ai.onnxruntime.OnnxJavaType.BOOL);
     }
 
     public static int[][][] toInt3d(NDArray intArr) {
@@ -403,6 +414,22 @@ public final class ArrayUtil {
             }
         }
         // 创建并 reshape
+        return flat;
+    }
+
+    public static byte[] flat(boolean[][][] data) {
+        int d1 = data.length;
+        int d2 = data[0].length;
+        int d3 = data[0][0].length;
+        byte[] flat = new byte[d1 * d2 * d3];
+        int idx = 0;
+        for (int i = 0; i < d1; i++) {
+            for (int j = 0; j < d2; j++) {
+                for (int k = 0; k < d3; k++) {
+                    flat[idx++] = data[i][j][k] ? (byte) 1 : (byte) 0;
+                }
+            }
+        }
         return flat;
     }
 

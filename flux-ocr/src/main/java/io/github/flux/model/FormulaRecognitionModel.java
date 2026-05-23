@@ -11,6 +11,8 @@ import io.github.flux.core.PreProcessResult;
 import io.github.flux.core.TextResult;
 import io.github.flux.dolphin.ByteDanceDolphinElementModel;
 import io.github.flux.exception.FluxException;
+import io.github.flux.falconocr.FalconOcrFormulaModel;
+import io.github.flux.falconocr.FalconOcrModel;
 import io.github.flux.formula.granite.GraniteDoclingFormulaModel;
 import io.github.flux.formula.nougat.NougatLatexFormulaModel;
 import io.github.flux.formula.paddle.PaddleFormulaModel;
@@ -51,6 +53,7 @@ public class FormulaRecognitionModel extends BatchPredictor<PreProcessResult, Te
         // GraniteDoclingFormulaModel needs special handling due to extra maxLength parameter
         REGISTRY.register(GraniteDoclingFormulaModel.MODEL_NAMES,
                 (dir, name, gpu, env, customParams) -> new GraniteDoclingFormulaModel(dir, name, gpu, env, 8192, customParams));
+        REGISTRY.register(FalconOcrModel.MODEL_NAMES, FalconOcrFormulaModel::new);
     }
 
     private final BatchPredictor<PreProcessResult, TextResult> predictor;
@@ -65,7 +68,8 @@ public class FormulaRecognitionModel extends BatchPredictor<PreProcessResult, Te
             PaddleFormulaRecognitionPredictor.MODEL_NAMES,
             Pix2TextFormulaRecognitionPredictor.MODEL_NAMES,
             TexTellerPredictor.MODEL_NAMES,
-            UnirecPredictor.MODEL_NAMES
+            UnirecPredictor.MODEL_NAMES,
+            FalconOcrModel.MODEL_NAMES
     ));
 
     public FormulaRecognitionModel(ModelParam param) {

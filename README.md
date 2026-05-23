@@ -77,6 +77,7 @@ Do not use in production.
 | CodeFormulaV2        |  ✅  |  ✅   |
 | Dolphin              |  ✅  |  ✅   |
 | Dolphin-1.5          |  ✅  |  ✅   |
+| Falcon-OCR           |  ✅  |  ✅   |
 | GOT-OCR-2.0          |  ✅  |  ✅   |
 | LlamaJCpp-OCR       |  ✅  |  ✅   |
 | granite-docling-258M |  ✅  |  ✅   |
@@ -114,6 +115,7 @@ Do not use in production.
 |:------------|:---:|:----:|
 | Dolphin     |  ✅  |  ✅   |
 | Dolphin-1.5 |  ✅  |  ✅   |
+| Falcon-OCR  |  ✅  |  ✅   |
 | unirec-0.1b |  ✅  |  ✅   |
 
 
