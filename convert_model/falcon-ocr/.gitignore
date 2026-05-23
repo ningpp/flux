@@ -1,0 +1,8 @@
+*.onnx
+*.onnx.data
+.venv/
+__pycache__/
+.pytest_cache/
+*.log
+*.tmp
+onnx/*.json
