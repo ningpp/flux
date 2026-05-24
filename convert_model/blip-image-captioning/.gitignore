@@ -1,0 +1,6 @@
+onnx_models
+onnx_models_gemini
+**.onnx
+**.onnx.data
+.idea
+__pycache__
