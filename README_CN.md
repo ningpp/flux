@@ -1,13 +1,11 @@
 # Flux
 
-⚠️ WARNING: This project is in its early stages of development.
-
-Do not use in production.
+⚠️ 警告：本项目处于早期开发阶段，请勿用于生产环境。
 
 [![License](https://img.shields.io/badge/License-Apache%202-blue.svg)](LICENSE)
 
 
-## **Special Thanks**
+## **特别感谢**
 1. [PaddlePaddle/PaddleX](https://github.com/PaddlePaddle/PaddleX)
 2. [Topdu/OpenOCR](https://github.com/Topdu/OpenOCR)
 3. [breezedeus/Pix2Text](https://github.com/breezedeus/Pix2Text)
@@ -19,51 +17,51 @@ Do not use in production.
 9. [OleehyO/TexTeller](https://github.com/OleehyO/TexTeller)
 
 
-### Support Model Category
-| Model Category      | Status |
-|:--------------------|:------:|
-| Layout              |   ✅    |
-| Text Detection      |   ✅    |
-| Text Recognition    |   ✅    |
-| Formula Recognition |   ✅    |
-| Table Recognition   |   ✅    |
-| Doc Orientation     |   ✅    |
-| Multimodal OCR      |   ✅    |
+### 支持的模型类别
+| 模型类别       | 状态 |
+|:-------------|:----:|
+| 版面分析       |  ✅   |
+| 文本检测       |  ✅   |
+| 文本识别       |  ✅   |
+| 公式识别       |  ✅   |
+| 表格识别       |  ✅   |
+| 文档方向分类    |  ✅   |
+| 多模态OCR     |  ✅   |
 
 
 
-### Support Model List
+### 支持的模型列表
 
-#### Layout Model
-| Model                       | CPU | CUDA |
-|:----------------------------|:---:|:----:|
-| docling-layout-egret-large  |  ✅  |  ✅   |
-| docling-layout-egret-medium |  ✅  |  ✅   |
-| docling-layout-egret-xlarge |  ✅  |  ✅   |
-| docling-layout-heron        |  ✅  |  ✅   |
-| docling-layout-heron-101    |  ✅  |  ✅   |
-| PP-DocLayoutV2              |  ✅  |  ✅   |
-| PP-DocLayout_plus-L         |  ✅  |  ✅   |
-| PP-DocLayout-L              |  ✅  |  ✅   |
-| PP-DocLayout-M              |  ✅  |  ✅   |
-| PP-DocLayout-S              |  ✅  |  ✅   |
-| PicoDet-S_layout_17cls      |  ✅  |  ✅   |
-| PicoDet-L_layout_17cls      |  ✅  |  ✅   |
-| RT-DETR-H_layout_17cls      |  ✅  |  ✅   |
+#### 版面分析模型
+| 模型                          | CPU | CUDA |
+|:------------------------------|:---:|:----:|
+| docling-layout-egret-large    |  ✅  |  ✅   |
+| docling-layout-egret-medium   |  ✅  |  ✅   |
+| docling-layout-egret-xlarge   |  ✅  |  ✅   |
+| docling-layout-heron          |  ✅  |  ✅   |
+| docling-layout-heron-101      |  ✅  |  ✅   |
+| PP-DocLayoutV2                |  ✅  |  ✅   |
+| PP-DocLayout_plus-L           |  ✅  |  ✅   |
+| PP-DocLayout-L                |  ✅  |  ✅   |
+| PP-DocLayout-M                |  ✅  |  ✅   |
+| PP-DocLayout-S                |  ✅  |  ✅   |
+| PicoDet-S_layout_17cls        |  ✅  |  ✅   |
+| PicoDet-L_layout_17cls        |  ✅  |  ✅   |
+| RT-DETR-H_layout_17cls        |  ✅  |  ✅   |
 
 
-#### Text Detection Model
-| Model               | CPU | CUDA |
-|:--------------------|:---:|:----:|
+#### 文本检测模型
+| 模型                | CPU | CUDA |
+|:-------------------|:---:|:----:|
 | PP-OCRv5_server_det |  ✅  |  ✅   |
 | PP-OCRv5_mobile_det |  ✅  |  ✅   |
 | PP-OCRv4_server_det |  ✅  |  ✅   |
 | PP-OCRv4_mobile_det |  ✅  |  ✅   |
 
 
-#### Text Recognition Model
-| Model                   | CPU | CUDA |
-|:------------------------|:---:|:----:|
+#### 文本识别模型
+| 模型                    | CPU | CUDA |
+|:-----------------------|:---:|:----:|
 | PP-OCRv5_server_rec     |  ✅  |  ✅   |
 | PP-OCRv5_mobile_rec     |  ✅  |  ✅   |
 | PP-OCRv4_server_rec     |  ✅  |  ✅   |
@@ -71,8 +69,8 @@ Do not use in production.
 | PP-OCRv4_mobile_rec     |  ✅  |  ✅   |
 
 
-#### Formula Recognition Model
-| Model                | CPU | CUDA |
+#### 公式识别模型
+| 模型                  | CPU | CUDA |
 |:---------------------|:---:|:----:|
 | CodeFormulaV2        |  ✅  |  ✅   |
 | Dolphin              |  ✅  |  ✅   |
@@ -92,23 +90,23 @@ Do not use in production.
 | unirec-0.1b          |  ✅  |  ✅   |
 
 
-#### Table Recognition Model
-| Model       | CPU | CUDA |
-|:------------|:---:|:----:|
+#### 表格识别模型
+| 模型        | CPU | CUDA |
+|:-----------|:---:|:----:|
 | Dolphin     |  ✅  |  ✅   |
 | Dolphin-1.5 |  ✅  |  ✅   |
 | Falcon-OCR  |  ✅  |  ✅   |
 | unirec-0.1b |  ✅  |  ✅   |
 
 
-#### Doc Orientation Model
-| Model                 | CPU | CUDA |
-|:----------------------|:---:|:----:|
+#### 文档方向分类模型
+| 模型                  | CPU | CUDA |
+|:---------------------|:---:|:----:|
 | PP-LCNet_x1_0_doc_ori |  ✅  |  ✅   |
 
 
-#### Multimodal OCR Model
-| Model                            | CPU | CUDA |
+#### 多模态OCR模型
+| 模型                              | CPU | CUDA |
 |:---------------------------------|:---:|:----:|
 | GLM-OCR                          |  ✅  |  ✅   |
 | LightOnOCR-2-1B                  |  ✅  |  ✅   |
