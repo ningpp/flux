@@ -41,6 +41,7 @@
 | docling-layout-heron          |  ✅  |  ✅   |
 | docling-layout-heron-101      |  ✅  |  ✅   |
 | PP-DocLayoutV2                |  ✅  |  ✅   |
+| PP-DocLayoutV3                |  ✅  |  ✅   |
 | PP-DocLayout_plus-L           |  ✅  |  ✅   |
 | PP-DocLayout-L                |  ✅  |  ✅   |
 | PP-DocLayout-M                |  ✅  |  ✅   |

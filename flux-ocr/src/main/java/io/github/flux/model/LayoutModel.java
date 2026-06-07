@@ -11,6 +11,7 @@ import io.github.flux.core.ObjectDetectionResult;
 import io.github.flux.core.ProcessedMat;
 import io.github.flux.docling.DoclingLayoutModel;
 import io.github.flux.exception.FluxException;
+import io.github.flux.paddle.PPDocLayoutV3Model;
 import io.github.flux.paddle.PaddleLayoutModel;
 import io.github.flux.util.CollectionUtil;
 import org.opencv.core.Mat;
@@ -29,6 +30,7 @@ public class LayoutModel extends BatchPredictor<ProcessedMat, List<ObjectDetecti
         try {
             Class.forName(DoclingLayoutModel.class.getName());
             Class.forName(PaddleLayoutModel.class.getName());
+            Class.forName(PPDocLayoutV3Model.class.getName());
         } catch (ClassNotFoundException e) {
             throw new FluxException("Failed to load model classes", e);
         }
@@ -36,7 +38,8 @@ public class LayoutModel extends BatchPredictor<ProcessedMat, List<ObjectDetecti
 
     public static final Set<String> MODEL_NAMES = CollectionUtil.distinct(List.of(
             DoclingLayoutModel.MODEL_NAMES,
-            PaddleLayoutModel.MODEL_NAMES
+            PaddleLayoutModel.MODEL_NAMES,
+            PPDocLayoutV3Model.MODEL_NAMES
     ));
 
     private final BatchPredictor<ProcessedMat, List<ObjectDetectionResult>> predictor;
