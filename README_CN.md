@@ -35,13 +35,13 @@
 #### 版面分析模型
 | 模型                          | CPU | CUDA |
 |:------------------------------|:---:|:----:|
-| docling-layout-egret-large    |  ✅  |  ✅   |
-| docling-layout-egret-medium   |  ✅  |  ✅   |
-| docling-layout-egret-xlarge   |  ✅  |  ✅   |
-| docling-layout-heron          |  ✅  |  ✅   |
-| docling-layout-heron-101      |  ✅  |  ✅   |
+| [docling-layout-egret-large](https://huggingface.co/ningpp/docling-layout-egret-large-ONNX)    |  ✅  |  ✅   |
+| [docling-layout-egret-medium](https://huggingface.co/ningpp/docling-layout-egret-medium-ONNX)   |  ✅  |  ✅   |
+| [docling-layout-egret-xlarge](https://huggingface.co/ningpp/docling-layout-egret-xlarge-ONNX)   |  ✅  |  ✅   |
+| [docling-layout-heron](https://huggingface.co/ningpp/docling-layout-heron-ONNX)          |  ✅  |  ✅   |
+| [docling-layout-heron-101](https://huggingface.co/ningpp/docling-layout-heron-101-ONNX)      |  ✅  |  ✅   |
 | PP-DocLayoutV2                |  ✅  |  ✅   |
-| PP-DocLayoutV3                |  ✅  |  ✅   |
+| [PP-DocLayoutV3](https://huggingface.co/ningpp/PP-DocLayoutV3-ONNX)                |  ✅  |  ✅   |
 | PP-DocLayout_plus-L           |  ✅  |  ✅   |
 | PP-DocLayout-L                |  ✅  |  ✅   |
 | PP-DocLayout-M                |  ✅  |  ✅   |
@@ -73,20 +73,20 @@
 #### 公式识别模型
 | 模型                  | CPU | CUDA |
 |:---------------------|:---:|:----:|
-| CodeFormulaV2        |  ✅  |  ✅   |
+| [CodeFormulaV2](https://huggingface.co/ningpp/CodeFormulaV2-ONNX)        |  ✅  |  ✅   |
 | Dolphin              |  ✅  |  ✅   |
 | Dolphin-1.5          |  ✅  |  ✅   |
-| Falcon-OCR           |  ✅  |  ✅   |
-| GOT-OCR-2.0          |  ✅  |  ✅   |
+| [Falcon-OCR](https://huggingface.co/ningpp/Falcon-OCR-ONNX)           |  ✅  |  ✅   |
+| [GOT-OCR-2.0](https://huggingface.co/ningpp/GOT-OCR-2.0-ONNX)          |  ✅  |  ✅   |
 | granite-docling-258M |  ✅  |  ✅   |
 | nougat-latex-base    |  ✅  |  ✅   |
 | pix2text-mfr         |  ✅  |  ✅   |
 | pix2text-mfr-1.5     |  ✅  |  ✅   |
 | PP-FormulaNet-S      |  ✅  |  ❌   |
-| PP-FormulaNet-L      |  ✅  |  ✅   |
+| [PP-FormulaNet-L](https://huggingface.co/ningpp/PP-FormulaNet-L-ONNX)      |  ✅  |  ✅   |
 | PP-FormulaNet_plus-S |  ✅  |  ❌   |
 | PP-FormulaNet_plus-M |  ✅  |  ❌   |
-| PP-FormulaNet_plus-L |  ✅  |  ✅   |
+| [PP-FormulaNet_plus-L](https://huggingface.co/ningpp/PP-FormulaNet_plus-L-ONNX) |  ✅  |  ✅   |
 | TexTeller            |  ✅  |  ✅   |
 | unirec-0.1b          |  ✅  |  ✅   |
 
@@ -103,13 +103,13 @@
 #### 文档方向分类模型
 | 模型                  | CPU | CUDA |
 |:---------------------|:---:|:----:|
-| PP-LCNet_x1_0_doc_ori |  ✅  |  ✅   |
+| [PP-LCNet_x1_0_doc_ori](https://huggingface.co/ningpp/PP-LCNet_x1_0_doc_ori-ONNX) |  ✅  |  ✅   |
 
 
 #### 多模态OCR模型
 | 模型                              | CPU | CUDA |
 |:---------------------------------|:---:|:----:|
-| GLM-OCR                          |  ✅  |  ✅   |
+| [GLM-OCR](https://huggingface.co/ningpp/GLM-OCR-ONNX)                          |  ✅  |  ✅   |
 | LightOnOCR-2-1B                  |  ✅  |  ✅   |
 | LightOnOCR-2-1B-ONNX             |  ✅  |  ✅   |
 | llava-onevision-qwen2-0.5b-ov-hf |  ✅  |  ✅   |
