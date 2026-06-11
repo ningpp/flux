@@ -27,6 +27,9 @@ public class TextRecognitionModel extends BatchPredictor<PreProcessResult, List<
     private static final ModelRegistry<BatchPredictor<PreProcessResult, List<RecognitionResult>>> REGISTRY = new ModelRegistry<>();
 
     public static final Set<String> SUPPORT_MODELS = Set.of(
+            "PP-OCRv6_medium_rec",
+            "PP-OCRv6_small_rec",
+            "PP-OCRv6_tiny_rec",
             "PP-OCRv5_server_rec",
             "PP-OCRv5_mobile_rec",
             "PP-OCRv4_server_rec",
@@ -35,7 +38,8 @@ public class TextRecognitionModel extends BatchPredictor<PreProcessResult, List<
     );
 
     static {
-        ModelFactory<BatchPredictor<PreProcessResult, List<RecognitionResult>>> factory =
+        // v4/v5 recognition model factory
+        ModelFactory<BatchPredictor<PreProcessResult, List<RecognitionResult>>> v4v5Factory =
                 (modelDir, modelName, gpuIndex, env, customParams) -> {
                     List<ImageProcessor> preProcessors = List.of(
                             new OCRResizeNormImg()
@@ -51,7 +55,31 @@ public class TextRecognitionModel extends BatchPredictor<PreProcessResult, List<
                     return new TextRecognitionPredictor(predictor);
                 };
 
-        REGISTRY.register(SUPPORT_MODELS, factory);
+        // v6 recognition model factory (different file naming: inference.onnx, inference.yml)
+        ModelFactory<BatchPredictor<PreProcessResult, List<RecognitionResult>>> v6Factory =
+                (modelDir, modelName, gpuIndex, env, customParams) -> {
+                    List<ImageProcessor> preProcessors = List.of(
+                            new OCRResizeNormImg()
+                    );
+
+                    PaddleRecognitionPredictor predictor = new PaddleRecognitionPredictor(
+                            new File(modelDir + File.separator + modelName + "_onnx", "inference.onnx").getAbsolutePath(),
+                            gpuIndex,
+                            env,
+                            preProcessors,
+                            new CTCLabelDecode(new File(modelDir + File.separator + modelName + "_onnx", "inference.yml").getAbsolutePath())
+                    );
+                    return new TextRecognitionPredictor(predictor);
+                };
+
+        REGISTRY.register(Set.of("PP-OCRv6_medium_rec", "PP-OCRv6_small_rec", "PP-OCRv6_tiny_rec"), v6Factory);
+        REGISTRY.register(Set.of(
+                "PP-OCRv5_server_rec",
+                "PP-OCRv5_mobile_rec",
+                "PP-OCRv4_server_rec",
+                "PP-OCRv4_server_rec_doc",
+                "PP-OCRv4_mobile_rec"
+        ), v4v5Factory);
     }
 
     private final PaddleRecognitionPredictor predictor;

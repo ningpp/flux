@@ -380,15 +380,10 @@ public final class ImageUtil {
         Point br = (right1.y < right2.y) ? right2 : right1;
 
         // 7) Build the 4‐point box in order: [tl, tr, br, bl]
-        int[][] boxInt = new int[4][2];
         Point[] ordered = new Point[]{tl, tr, br, bl};
-        for (int i = 0; i < 4; i++) {
-            boxInt[i][0] = (int) Math.round(ordered[i].x);
-            boxInt[i][1] = (int) Math.round(ordered[i].y);
-        }
 
-        // 8) Delegate to your rotate‐crop routine
-        return getRotateCropImage(matManager, mat, boxInt);
+        // 8) Delegate to your rotate‐crop routine (keeping float precision, matching Python)
+        return getRotateCropImage(matManager, mat, ordered);
     }
 
     public static Mat getRotateCropImage(MatManager matManager, Mat mat, int[][] points) {
@@ -402,7 +397,19 @@ public final class ImageUtil {
             srcPts[i] = new Point(points[i][0], points[i][1]);
         }
 
-        // 3) Compute crop width & height via Math.hypot
+        return getRotateCropImage(matManager, mat, srcPts);
+    }
+
+    /**
+     * Crop and rotate the input image based on the given four float points (matching Python PaddleX).
+     * This overload preserves float precision from minAreaRect, avoiding rounding errors.
+     */
+    public static Mat getRotateCropImage(MatManager matManager, Mat mat, Point[] srcPts) {
+        if (srcPts.length != 4) {
+            throw new IllegalArgumentException("points must be 4");
+        }
+
+        // Compute crop width & height via Math.hypot
         double wA = Math.hypot(srcPts[0].x - srcPts[1].x, srcPts[0].y - srcPts[1].y);
         double wB = Math.hypot(srcPts[2].x - srcPts[3].x, srcPts[2].y - srcPts[3].y);
         int cropW = (int) Math.max(wA, wB);
@@ -411,7 +418,11 @@ public final class ImageUtil {
         double hB = Math.hypot(srcPts[1].x - srcPts[2].x, srcPts[1].y - srcPts[2].y);
         int cropH = (int) Math.max(hA, hB);
 
-        // Perspective transform
+        if (cropW <= 0 || cropH <= 0) {
+            throw new IllegalArgumentException("Invalid crop dimensions: " + cropW + "x" + cropH);
+        }
+
+        // Perspective transform (source points are float, matching Python)
         MatOfPoint2f srcMat = new MatOfPoint2f(srcPts);
         MatOfPoint2f dstMat = new MatOfPoint2f(
                 new Point(0, 0),
@@ -432,7 +443,7 @@ public final class ImageUtil {
         dstMat.release();
         M.release();
 
-        // Rotate if tall
+        // Rotate if tall (matching Python: np.rot90 when h/w >= 1.5)
         if ((double) warped.rows() / warped.cols() >= 1.5) {
             return rotate90Degree(matManager, warped);
         }

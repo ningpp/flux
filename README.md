@@ -54,18 +54,24 @@ Do not use in production.
 
 
 #### Text Detection Model
-| Model               | CPU | CUDA |
-|:--------------------|:---:|:----:|
-| PP-OCRv5_server_det |  ✅  |  ✅   |
+| Model                           | CPU | CUDA |
+|:--------------------------------|:---:|:----:|
+| [PP-OCRv6_medium_det](https://huggingface.co/PaddlePaddle/PP-OCRv6_medium_det_onnx) |  ✅  |  ✅   |
+| [PP-OCRv6_small_det](https://huggingface.co/PaddlePaddle/PP-OCRv6_small_det_onnx)   |  ✅  |  ✅   |
+| [PP-OCRv6_tiny_det](https://huggingface.co/PaddlePaddle/PP-OCRv6_tiny_det_onnx)     |  ✅  |  ✅   |
+| PP-OCRv5_server_det             |  ✅  |  ✅   |
 | PP-OCRv5_mobile_det |  ✅  |  ✅   |
 | PP-OCRv4_server_det |  ✅  |  ✅   |
 | PP-OCRv4_mobile_det |  ✅  |  ✅   |
 
 
 #### Text Recognition Model
-| Model                   | CPU | CUDA |
-|:------------------------|:---:|:----:|
-| PP-OCRv5_server_rec     |  ✅  |  ✅   |
+| Model                           | CPU | CUDA |
+|:--------------------------------|:---:|:----:|
+| [PP-OCRv6_medium_rec](https://huggingface.co/PaddlePaddle/PP-OCRv6_medium_rec_onnx) |  ✅  |  ✅   |
+| [PP-OCRv6_small_rec](https://huggingface.co/PaddlePaddle/PP-OCRv6_small_rec_onnx)   |  ✅  |  ✅   |
+| [PP-OCRv6_tiny_rec](https://huggingface.co/PaddlePaddle/PP-OCRv6_tiny_rec_onnx)     |  ✅  |  ✅   |
+| PP-OCRv5_server_rec             |  ✅  |  ✅   |
 | PP-OCRv5_mobile_rec     |  ✅  |  ✅   |
 | PP-OCRv4_server_rec     |  ✅  |  ✅   |
 | PP-OCRv4_server_rec_doc |  ✅  |  ✅   |

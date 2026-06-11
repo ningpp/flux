@@ -31,6 +31,9 @@ public class TextDetectionModel extends BatchPredictor<PreProcessResult, TextDet
     private static final ModelRegistry<BatchPredictor<PreProcessResult, TextDetectionResult>> REGISTRY = new ModelRegistry<>();
 
     public static final Set<String> SUPPORT_MODELS = Set.of(
+            "PP-OCRv6_medium_det",
+            "PP-OCRv6_small_det",
+            "PP-OCRv6_tiny_det",
             "PP-OCRv5_server_det",
             "PP-OCRv5_mobile_det",
             "PP-OCRv4_server_det",
@@ -38,7 +41,8 @@ public class TextDetectionModel extends BatchPredictor<PreProcessResult, TextDet
     );
 
     static {
-        ModelFactory<BatchPredictor<PreProcessResult, TextDetectionResult>> factory =
+        // v4/v5 detection model factory
+        ModelFactory<BatchPredictor<PreProcessResult, TextDetectionResult>> v4v5Factory =
                 (modelDir, modelName, gpuIndex, env, customParams) -> {
                     DetResize detResize = new DetResize(0, 960, LimitType.MAX);
                     List<ImageProcessor> preProcessors = List.of(
@@ -64,7 +68,40 @@ public class TextDetectionModel extends BatchPredictor<PreProcessResult, TextDet
                     return new TextDetectionPredictor(predictor);
                 };
 
-        REGISTRY.register(SUPPORT_MODELS, factory);
+        // v6 detection model factory (different resize params, file naming, and maxCandidates)
+        ModelFactory<BatchPredictor<PreProcessResult, TextDetectionResult>> v6Factory =
+                (modelDir, modelName, gpuIndex, env, customParams) -> {
+                    DetResize detResize = new DetResize(0, 64, LimitType.MIN, null, 4000, null, null);
+                    List<ImageProcessor> preProcessors = List.of(
+                            new Normalize(
+                                    1.0 / 255.0,
+                                    new double[]{0.485, 0.456, 0.406},
+                                    new double[]{0.229, 0.224, 0.225}
+                            ),
+                            new ToCHWImage()
+                    );
+                    final DBPostProcess dbPostProcess = new DBPostProcess(
+                            0.3f, 0.6f, 1.5f, 3000, "fast", "quad"
+                    );
+
+                    PaddleDetectionPredictor predictor = new PaddleDetectionPredictor(
+                            new File(modelDir + File.separator + modelName + "_onnx", "inference.onnx").getAbsolutePath(),
+                            gpuIndex,
+                            env,
+                            detResize,
+                            preProcessors,
+                            dbPostProcess
+                    );
+                    return new TextDetectionPredictor(predictor);
+                };
+
+        REGISTRY.register(Set.of("PP-OCRv6_medium_det", "PP-OCRv6_small_det", "PP-OCRv6_tiny_det"), v6Factory);
+        REGISTRY.register(Set.of(
+                "PP-OCRv5_server_det",
+                "PP-OCRv5_mobile_det",
+                "PP-OCRv4_server_det",
+                "PP-OCRv4_mobile_det"
+        ), v4v5Factory);
     }
 
     private final PaddleDetectionPredictor predictor;
