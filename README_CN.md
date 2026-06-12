@@ -26,6 +26,7 @@
 | 公式识别       |  ✅   |
 | 表格识别       |  ✅   |
 | 文档方向分类    |  ✅   |
+| 文本行方向分类  |  ✅   |
 | 多模态OCR     |  ✅   |
 
 
@@ -110,6 +111,13 @@
 | 模型                  | CPU | CUDA |
 |:---------------------|:---:|:----:|
 | [PP-LCNet_x1_0_doc_ori](https://huggingface.co/ningpp/PP-LCNet_x1_0_doc_ori-ONNX) |  ✅  |  ✅   |
+
+
+#### 文本行方向分类模型
+| 模型                  | CPU | CUDA |
+|:---------------------|:---:|:----:|
+| [PP-LCNet_x1_0_textline_ori](https://huggingface.co/PaddlePaddle/PP-LCNet_x1_0_textline_ori_onnx) |  ✅  |  ✅   |
+| [PP-LCNet_x0_25_textline_ori](https://huggingface.co/PaddlePaddle/PP-LCNet_x0_25_textline_ori_onnx) |  ✅  |  ✅   |
 
 
 #### 多模态OCR模型

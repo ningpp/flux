@@ -28,6 +28,7 @@ Do not use in production.
 | Formula Recognition |   ✅    |
 | Table Recognition   |   ✅    |
 | Doc Orientation     |   ✅    |
+| Text Line Orientation |   ✅    |
 | Multimodal OCR      |   ✅    |
 
 
@@ -112,6 +113,13 @@ Do not use in production.
 | Model                 | CPU | CUDA |
 |:----------------------|:---:|:----:|
 | [PP-LCNet_x1_0_doc_ori](https://huggingface.co/ningpp/PP-LCNet_x1_0_doc_ori-ONNX) |  ✅  |  ✅   |
+
+
+#### Text Line Orientation Model
+| Model                 | CPU | CUDA |
+|:----------------------|:---:|:----:|
+| [PP-LCNet_x1_0_textline_ori](https://huggingface.co/PaddlePaddle/PP-LCNet_x1_0_textline_ori_onnx) |  ✅  |  ✅   |
+| [PP-LCNet_x0_25_textline_ori](https://huggingface.co/PaddlePaddle/PP-LCNet_x0_25_textline_ori_onnx) |  ✅  |  ✅   |
 
 
 #### Multimodal OCR Model
