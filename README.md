@@ -112,7 +112,7 @@ Do not use in production.
 #### Doc Orientation Model
 | Model                 | CPU | CUDA |
 |:----------------------|:---:|:----:|
-| [PP-LCNet_x1_0_doc_ori](https://huggingface.co/ningpp/PP-LCNet_x1_0_doc_ori-ONNX) |  ✅  |  ✅   |
+| [PP-LCNet_x1_0_doc_ori](https://huggingface.co/PaddlePaddle/PP-LCNet_x1_0_doc_ori_onnx) |  ✅  |  ✅   |
 
 
 #### Text Line Orientation Model

@@ -72,9 +72,9 @@ public class PaddleDocOrientationPredictor extends BatchPredictor<PreProcessResu
                 new ToCHWImage()
         );
 
-        String modelDir = modelRootDir + File.separator + modelName;
+        String modelDir = modelRootDir + File.separator + modelName + "_onnx";
         this.predictor = new PaddleClassificationPredictor(
-                new File(modelDir, "model.onnx").getAbsolutePath(),
+                new File(modelDir, "inference.onnx").getAbsolutePath(),
                 gpuIndex,
                 env,
                 preProcessors,

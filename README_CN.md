@@ -110,7 +110,7 @@
 #### 文档方向分类模型
 | 模型                  | CPU | CUDA |
 |:---------------------|:---:|:----:|
-| [PP-LCNet_x1_0_doc_ori](https://huggingface.co/ningpp/PP-LCNet_x1_0_doc_ori-ONNX) |  ✅  |  ✅   |
+| [PP-LCNet_x1_0_doc_ori](https://huggingface.co/PaddlePaddle/PP-LCNet_x1_0_doc_ori_onnx) |  ✅  |  ✅   |
 
 
 #### 文本行方向分类模型
