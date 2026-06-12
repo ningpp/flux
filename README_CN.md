@@ -127,3 +127,58 @@
 | LightOnOCR-2-1B                  |  ✅  |  ✅   |
 | LightOnOCR-2-1B-ONNX             |  ✅  |  ✅   |
 | llava-onevision-qwen2-0.5b-ov-hf |  ✅  |  ✅   |
+
+
+### OCR Pipeline
+
+OCR Pipeline 将多个模型组合，实现从文档图片到文本的端到端提取。流程如下：
+
+1. **文档方向分类**（可选）— 检测并纠正文档整体旋转方向（0°/90°/180°/270°）。
+2. **文本检测** — 定位图片中的文本区域，返回多边形边界框。
+3. **文本行方向分类**（可选）— 检测每个文本行是否倒置（0° 或 180°），若倒置则旋转纠正。
+4. **文本识别** — 对每个检测到的文本行进行文字识别。
+
+#### 使用示例
+
+```java
+try (OrtEnvironment env = OrtEnvironment.getEnvironment()) {
+    // 必需模型
+    TextDetectionModel detModel = new TextDetectionModel(modelDir, "PP-OCRv6_medium_det", env, gpuIndex);
+    TextRecognitionModel recModel = new TextRecognitionModel(modelDir, "PP-OCRv6_medium_rec", env, gpuIndex);
+
+    // 可选模型（传 null 可跳过）
+    DocOrientationClassifyModel docOriModel = new DocOrientationClassifyModel(modelDir, "PP-LCNet_x1_0_doc_ori", env, gpuIndex);
+    TextLineOrientationModel textLineOriModel = new TextLineOrientationModel(modelDir, "PP-LCNet_x1_0_textline_ori", env, gpuIndex);
+
+    OCRPipeline pipeline = new OCRPipeline(detModel, recModel, docOriModel, textLineOriModel);
+
+    Map<String, Object> params = new HashMap<>();
+    params.put("recognitionBatchSize", 1);
+
+    List<OCRPipelineResult> results = pipeline.predictFile("image.png", params);
+
+    for (OCRPipelineResult result : results) {
+        String text = result.recResults().stream()
+            .map(r -> r.text())
+            .collect(Collectors.joining());
+        System.out.println(text);
+    }
+}
+```
+
+#### 参数
+
+| 参数 | 类型 | 默认值 | 说明 |
+|:-----|:----:|:-----:|:-----|
+| `recognitionBatchSize` | Integer | 1 | 文本识别推理的批大小 |
+
+#### OCRPipelineResult 字段
+
+| 字段 | 类型 | 说明 |
+|:-----|:-----|:-----|
+| `detPolys` | `int[][]` | 检测到的文本区域多边形坐标 |
+| `recResults` | `List<RecognitionResult>` | 识别的文本及置信度 |
+| `docOrientationLabel` | `String` | 文档方向标签（如 "0"、"90"、"180"、"270"） |
+| `docOrientationScore` | `float` | 文档方向分类置信度 |
+| `textLineOrientationLabel` | `String` | 文本行方向标签（如 "0_degree"、"180_degree"） |
+| `textLineOrientationScore` | `float` | 文本行方向分类置信度 |

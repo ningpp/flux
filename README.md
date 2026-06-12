@@ -129,3 +129,58 @@ Do not use in production.
 | LightOnOCR-2-1B                  |  ✅  |  ✅   |
 | LightOnOCR-2-1B-ONNX             |  ✅  |  ✅   |
 | llava-onevision-qwen2-0.5b-ov-hf |  ✅  |  ✅   |
+
+
+### OCR Pipeline
+
+The OCR Pipeline combines multiple models to perform end-to-end text extraction from document images. It orchestrates the following steps:
+
+1. **Document Orientation Classification** (optional) — Detects and corrects the overall document rotation (0°/90°/180°/270°).
+2. **Text Detection** — Locates text regions in the image and returns bounding polygons.
+3. **Text Line Orientation Classification** (optional) — Detects whether each text line is upside down (0° or 180°) and rotates it if needed.
+4. **Text Recognition** — Recognizes text content from each detected text line.
+
+#### Usage
+
+```java
+try (OrtEnvironment env = OrtEnvironment.getEnvironment()) {
+    // Required models
+    TextDetectionModel detModel = new TextDetectionModel(modelDir, "PP-OCRv6_medium_det", env, gpuIndex);
+    TextRecognitionModel recModel = new TextRecognitionModel(modelDir, "PP-OCRv6_medium_rec", env, gpuIndex);
+
+    // Optional models (pass null to skip)
+    DocOrientationClassifyModel docOriModel = new DocOrientationClassifyModel(modelDir, "PP-LCNet_x1_0_doc_ori", env, gpuIndex);
+    TextLineOrientationModel textLineOriModel = new TextLineOrientationModel(modelDir, "PP-LCNet_x1_0_textline_ori", env, gpuIndex);
+
+    OCRPipeline pipeline = new OCRPipeline(detModel, recModel, docOriModel, textLineOriModel);
+
+    Map<String, Object> params = new HashMap<>();
+    params.put("recognitionBatchSize", 1);
+
+    List<OCRPipelineResult> results = pipeline.predictFile("image.png", params);
+
+    for (OCRPipelineResult result : results) {
+        String text = result.recResults().stream()
+            .map(r -> r.text())
+            .collect(Collectors.joining());
+        System.out.println(text);
+    }
+}
+```
+
+#### Parameters
+
+| Parameter | Type | Default | Description |
+|:----------|:----:|:-------:|:------------|
+| `recognitionBatchSize` | Integer | 1 | Batch size for text recognition inference |
+
+#### OCRPipelineResult Fields
+
+| Field | Type | Description |
+|:------|:-----|:------------|
+| `detPolys` | `int[][]` | Detected text region polygon coordinates |
+| `recResults` | `List<RecognitionResult>` | Recognized text and confidence scores |
+| `docOrientationLabel` | `String` | Document orientation label (e.g., "0", "90", "180", "270") |
+| `docOrientationScore` | `float` | Document orientation classification confidence |
+| `textLineOrientationLabel` | `String` | Text line orientation label (e.g., "0_degree", "180_degree") |
+| `textLineOrientationScore` | `float` | Text line orientation classification confidence |
