@@ -149,6 +149,14 @@ When layout analysis is enabled, the pipeline first detects layout regions and t
 - **Table regions** → table recognition model (if available, otherwise falls back to text OCR)
 - **Image regions** — no recognition, region info only
 
+#### Performance Demo
+| File                    | Pages | E2E(ms) | OCR(ms) | PDF(ms) |
+|-------------------------|-------|---------|---------|---------|
+| 2606.13108.pdf          | 29    | 6630.00 | 6430.90 | 199.10  |
+| 2606.13108_zh_CN.pdf    | 29    | 6954.10 | 6750.30 | 203.80  |
+| 2606.13392.pdf          | 30    | 9279.00 | 9162.40 | 116.70  |
+| 2606.13392_zh_CN.pdf    | 34    | 8424.00 | 8248.30 | 175.70  |
+
 #### Usage
 
 ```java

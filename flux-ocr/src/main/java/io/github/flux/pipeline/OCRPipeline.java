@@ -96,6 +96,11 @@ public class OCRPipeline {
         recognitionBatchSize = 1;
       }
 
+      Integer formulaBatchSize = ParameterUtil.getInteger(extraParameters, "formulaBatchSize");
+      if (formulaBatchSize == null || formulaBatchSize < 1) {
+        formulaBatchSize = 1;
+      }
+
       // Read all images and convert BGR to RGB
       List<Mat> bgrImages = new ArrayList<>();
       List<Mat> rgbImages = new ArrayList<>();
@@ -176,7 +181,7 @@ public class OCRPipeline {
         if (layoutModel != null) {
           List<ObjectDetectionResult> regions = allLayoutRegions.get(i);
           imageResults = processLayoutRegions(matManager, ndManager, srcImage, regions,
-              oriLabel, oriScore, recognitionBatchSize, extraParameters);
+              oriLabel, oriScore, recognitionBatchSize, formulaBatchSize, extraParameters);
         } else {
           imageResults = recognizeText(matManager, ndManager, srcImage, null,
               oriLabel, oriScore, recognitionBatchSize, extraParameters);
@@ -205,10 +210,18 @@ public class OCRPipeline {
   private List<OCRPipelineResult> processLayoutRegions(MatManager matManager, NDManager ndManager,
                                                         Mat srcImage, List<ObjectDetectionResult> regions,
                                                         String oriLabel, float oriScore,
-                                                        int recognitionBatchSize,
+                                                        int recognitionBatchSize, int formulaBatchSize,
                                                         Map<String, Object> extraParameters) {
     List<LayoutRegionResult> layoutRegionResults = new ArrayList<>();
-    for (ObjectDetectionResult region : regions) {
+
+    // Collect formula regions for batch processing
+    List<Integer> formulaRegionIndices = new ArrayList<>();
+    List<ObjectDetectionResult> formulaRegions = new ArrayList<>();
+    List<PreProcessResult> formulaInputs = new ArrayList<>();
+    List<Mat> formulaRgbs = new ArrayList<>();
+
+    for (int i = 0; i < regions.size(); i++) {
+      ObjectDetectionResult region = regions.get(i);
       String regionType = classifyLabel(region.label());
 
       switch (regionType) {
@@ -220,12 +233,12 @@ public class OCRPipeline {
             Mat croppedBgr = cropRegion(matManager, srcImage, region.coordinate());
             Mat croppedRgb = matManager.newMat();
             Imgproc.cvtColor(croppedBgr, croppedRgb, Imgproc.COLOR_BGR2RGB);
+            formulaRgbs.add(croppedRgb);
             PreProcessResult formulaInput = formulaRecognitionModel.processRgb(matManager, croppedRgb, ndManager);
-            List<TextResult> formulaResults = formulaRecognitionModel.batchPredict(
-                List.of(formulaInput), 1, matManager, ndManager, extraParameters);
-            croppedRgb.release();
-            TextResult formulaResult = formulaResults.isEmpty() ? null : formulaResults.get(0);
-            layoutRegionResults.add(LayoutRegionResult.formula(region, formulaResult));
+            formulaInputs.add(formulaInput);
+            formulaRegions.add(region);
+            formulaRegionIndices.add(layoutRegionResults.size());
+            layoutRegionResults.add(null); // placeholder
           } else {
             List<OCRPipelineResult> textResults = recognizeText(
                 matManager, ndManager, srcImage, region.coordinate(),
@@ -257,6 +270,28 @@ public class OCRPipeline {
               oriLabel, oriScore, recognitionBatchSize, extraParameters);
           layoutRegionResults.add(LayoutRegionResult.text(region, textResults));
         }
+      }
+    }
+
+    // Batch process formula regions
+    if (!formulaInputs.isEmpty()) {
+      List<List<PreProcessResult>> batched = splitIntoBatches(formulaInputs, formulaBatchSize);
+      List<TextResult> allFormulaResults = new ArrayList<>();
+      for (List<PreProcessResult> batch : batched) {
+        List<TextResult> batchResults = formulaRecognitionModel.batchPredict(
+            batch, batch.size(), matManager, ndManager, extraParameters);
+        allFormulaResults.addAll(batchResults);
+      }
+      // Fill placeholders with formula results
+      for (int i = 0; i < formulaRegionIndices.size(); i++) {
+        int layoutIndex = formulaRegionIndices.get(i);
+        ObjectDetectionResult region = formulaRegions.get(i);
+        TextResult formulaResult = (i < allFormulaResults.size()) ? allFormulaResults.get(i) : null;
+        layoutRegionResults.set(layoutIndex, LayoutRegionResult.formula(region, formulaResult));
+      }
+      // Release formula RGB mats
+      for (Mat rgb : formulaRgbs) {
+        rgb.release();
       }
     }
 
