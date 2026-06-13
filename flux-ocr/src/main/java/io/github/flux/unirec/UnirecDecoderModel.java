@@ -93,7 +93,7 @@ public class UnirecDecoderModel implements AutoCloseable {
             int num_heads = 6;
             int head_dim = 128;
             int maxTokens = 2048;
-            long[] generated_ids = new long[maxTokens];
+            long[] generated_ids = new long[maxTokens + 1];
             generated_ids[0] = bos_token_id;
 
             // Initialize empty past_key_values for first step
@@ -133,6 +133,9 @@ public class UnirecDecoderModel implements AutoCloseable {
                     break;
                 }
             }
+            if (generatedTokens == 0) {
+                generatedTokens = maxTokens + 1;
+            }
             long[] ids = new long[generatedTokens];
             System.arraycopy(generated_ids, 0, ids, 0, generatedTokens);
             IOUtil.close(crossKOnnxTensor);
@@ -157,7 +160,7 @@ public class UnirecDecoderModel implements AutoCloseable {
                 continue;
             }
             int intId = Math.toIntExact(id);
-            if (intId > id2tokens.length) {
+            if (intId >= id2tokens.length) {
                 continue;
             }
             builder.append(id2tokens[intId]);
