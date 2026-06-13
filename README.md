@@ -136,9 +136,18 @@ Do not use in production.
 The OCR Pipeline combines multiple models to perform end-to-end text extraction from document images. It orchestrates the following steps:
 
 1. **Document Orientation Classification** (optional) — Detects and corrects the overall document rotation (0°/90°/180°/270°).
-2. **Text Detection** — Locates text regions in the image and returns bounding polygons.
-3. **Text Line Orientation Classification** (optional) — Detects whether each text line is upside down (0° or 180°) and rotates it if needed.
-4. **Text Recognition** — Recognizes text content from each detected text line.
+2. **Layout Analysis** (optional) — Detects layout regions (text, formula, table, image) in the document.
+3. **Text Detection** — Locates text regions in the image and returns bounding polygons.
+4. **Text Line Orientation Classification** (optional) — Detects whether each text line is upside down (0° or 180°) and rotates it if needed.
+5. **Text Recognition** — Recognizes text content from each detected text line.
+6. **Formula Recognition** (optional) — Recognizes LaTeX formulas from formula regions detected by layout analysis.
+7. **Table Recognition** (optional) — Recognizes HTML tables from table regions detected by layout analysis.
+
+When layout analysis is enabled, the pipeline first detects layout regions and then routes each region to the appropriate model:
+- **Text regions** → text detection + text line orientation + text recognition
+- **Formula regions** → formula recognition model (if available, otherwise falls back to text OCR)
+- **Table regions** → table recognition model (if available, otherwise falls back to text OCR)
+- **Image regions** — no recognition, region info only
 
 #### Usage
 
@@ -152,7 +161,13 @@ try (OrtEnvironment env = OrtEnvironment.getEnvironment()) {
     DocOrientationClassifyModel docOriModel = new DocOrientationClassifyModel(modelDir, "PP-LCNet_x1_0_doc_ori", env, gpuIndex);
     TextLineOrientationModel textLineOriModel = new TextLineOrientationModel(modelDir, "PP-LCNet_x1_0_textline_ori", env, gpuIndex);
 
-    OCRPipeline pipeline = new OCRPipeline(detModel, recModel, docOriModel, textLineOriModel);
+    // Optional: layout, formula, and table models
+    LayoutModel layoutModel = new LayoutModel(modelDir, "PP-DocLayoutV3", env, gpuIndex);
+    FormulaRecognitionModel formulaModel = new FormulaRecognitionModel(modelDir, "PP-FormulaNet_plus-L", env, gpuIndex);
+    TableModel tableModel = new TableModel(modelDir, "unirec-0.1b", env, gpuIndex);
+
+    OCRPipeline pipeline = new OCRPipeline(detModel, recModel, docOriModel, textLineOriModel,
+            layoutModel, formulaModel, tableModel);
 
     Map<String, Object> params = new HashMap<>();
     params.put("recognitionBatchSize", 1);
@@ -160,10 +175,16 @@ try (OrtEnvironment env = OrtEnvironment.getEnvironment()) {
     List<OCRPipelineResult> results = pipeline.predictFile("image.png", params);
 
     for (OCRPipelineResult result : results) {
-        String text = result.recResults().stream()
-            .map(r -> r.text())
-            .collect(Collectors.joining());
-        System.out.println(text);
+        if (result.layoutRegions() != null) {
+            for (LayoutRegionResult region : result.layoutRegions()) {
+                System.out.println(region.regionType() + ": " + region.getText());
+            }
+        } else {
+            String text = result.recResults().stream()
+                .map(r -> r.text())
+                .collect(Collectors.joining());
+            System.out.println(text);
+        }
     }
 }
 ```
@@ -184,3 +205,14 @@ try (OrtEnvironment env = OrtEnvironment.getEnvironment()) {
 | `docOrientationScore` | `float` | Document orientation classification confidence |
 | `textLineOrientationLabel` | `String` | Text line orientation label (e.g., "0_degree", "180_degree") |
 | `textLineOrientationScore` | `float` | Text line orientation classification confidence |
+| `layoutRegions` | `List<LayoutRegionResult>` | Layout analysis results (when layout model is enabled) |
+
+#### LayoutRegionResult Fields
+
+| Field | Type | Description |
+|:------|:-----|:------------|
+| `layoutRegion` | `ObjectDetectionResult` | Layout region bounding box, label, and score |
+| `regionType` | `String` | Region type: "text", "formula", "table", or "image" |
+| `textResults` | `List<OCRPipelineResult>` | OCR results for text regions |
+| `formulaResult` | `TextResult` | LaTeX formula text for formula regions |
+| `tableResult` | `TableResult` | HTML table text for table regions |

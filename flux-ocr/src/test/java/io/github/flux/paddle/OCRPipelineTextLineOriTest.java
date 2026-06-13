@@ -55,12 +55,13 @@ public class OCRPipelineTextLineOriTest {
              DocOrientationClassifyModel docOriModel = new DocOrientationClassifyModel(MODEL_ROOT_DIR, "PP-LCNet_x1_0_doc_ori", env, gpuIndex);
              TextLineOrientationModel textLineOriModel = new TextLineOrientationModel(MODEL_ROOT_DIR, "PP-LCNet_x1_0_textline_ori", env, gpuIndex)) {
 
-            OCRPipeline pipeline = new OCRPipeline(detModel, recModel, docOriModel, textLineOriModel);
+            OCRPipeline pipeline = new OCRPipeline(detModel, recModel, docOriModel, textLineOriModel, null, null, null);
 
             Map<String, Object> params = new HashMap<>();
             params.put("recognitionBatchSize", 1);
 
-            List<OCRPipelineResult> results = pipeline.predictFile(IMAGE_PATH, params);
+            List<List<OCRPipelineResult>> batchResults = pipeline.predict(List.of(IMAGE_PATH), params);
+            List<OCRPipelineResult> results = batchResults.get(0);
 
             // Build detailed output JSON
             Map<String, Object> output = new HashMap<>();

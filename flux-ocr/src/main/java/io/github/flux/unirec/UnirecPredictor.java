@@ -34,6 +34,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class UnirecPredictor extends BatchPredictor<PreProcessResult, TextResult> {
 
@@ -48,8 +49,10 @@ public class UnirecPredictor extends BatchPredictor<PreProcessResult, TextResult
         FormulaRecognitionModel.getRegistry().register(MODEL_NAMES, UnirecFormulaModel::new);
     }
 
+    private final ModelInstanceKey key;
     private final UnirecEncoderModel encoderModel;
     private final UnirecDecoderModel decoderModel;
+    private final AtomicBoolean closed = new AtomicBoolean();
 
     /**
      * Gets a shared instance of UnirecPredictor for the given configuration.
@@ -70,17 +73,15 @@ public class UnirecPredictor extends BatchPredictor<PreProcessResult, TextResult
                                                      final Map<String, Object> customParams) {
         ModelInstanceKey key = new ModelInstanceKey(modelRootDir, modelName, gpuIndex, customParams);
         return INSTANCE_CACHE.computeIfAbsent(key, k ->
-            new UnirecPredictor(modelRootDir, modelName, gpuIndex, env, customParams));
+            new UnirecPredictor(key, modelRootDir, modelName, gpuIndex, env, customParams));
     }
 
-    /**
-     * Private constructor - use getSharedInstance() to obtain instances.
-     */
-    private UnirecPredictor(final String modelRootDir,
+    private UnirecPredictor(ModelInstanceKey key, final String modelRootDir,
                             final String modelName,
                             final int gpuIndex,
                             final OrtEnvironment env,
                             final Map<String, Object> customParams) {
+        this.key = key;
         if (!MODEL_NAMES.contains(modelName)) {
             throw new FluxException("not supported unirec model: " + modelName);
         }
@@ -109,6 +110,10 @@ public class UnirecPredictor extends BatchPredictor<PreProcessResult, TextResult
 
     @Override
     public void close() throws Exception {
+        if (!closed.compareAndSet(false, true)) {
+            return;
+        }
+        INSTANCE_CACHE.remove(key);
         IOUtil.close(encoderModel);
         IOUtil.close(decoderModel);
     }

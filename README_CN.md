@@ -134,9 +134,18 @@
 OCR Pipeline 将多个模型组合，实现从文档图片到文本的端到端提取。流程如下：
 
 1. **文档方向分类**（可选）— 检测并纠正文档整体旋转方向（0°/90°/180°/270°）。
-2. **文本检测** — 定位图片中的文本区域，返回多边形边界框。
-3. **文本行方向分类**（可选）— 检测每个文本行是否倒置（0° 或 180°），若倒置则旋转纠正。
-4. **文本识别** — 对每个检测到的文本行进行文字识别。
+2. **版面分析**（可选）— 检测文档中的版面区域（文本、公式、表格、图片）。
+3. **文本检测** — 定位图片中的文本区域，返回多边形边界框。
+4. **文本行方向分类**（可选）— 检测每个文本行是否倒置（0° 或 180°），若倒置则旋转纠正。
+5. **文本识别** — 对每个检测到的文本行进行文字识别。
+6. **公式识别**（可选）— 对版面分析检测到的公式区域进行 LaTeX 公式识别。
+7. **表格识别**（可选）— 对版面分析检测到的表格区域进行 HTML 表格识别。
+
+启用版面分析后，Pipeline 会先检测版面区域，然后将每个区域路由到对应的模型：
+- **文本区域** → 文本检测 + 文本行方向分类 + 文本识别
+- **公式区域** → 公式识别模型（若未提供则回退到文本 OCR）
+- **表格区域** → 表格识别模型（若未提供则回退到文本 OCR）
+- **图片区域** — 不进行识别，仅保留区域信息
 
 #### 使用示例
 
@@ -150,7 +159,13 @@ try (OrtEnvironment env = OrtEnvironment.getEnvironment()) {
     DocOrientationClassifyModel docOriModel = new DocOrientationClassifyModel(modelDir, "PP-LCNet_x1_0_doc_ori", env, gpuIndex);
     TextLineOrientationModel textLineOriModel = new TextLineOrientationModel(modelDir, "PP-LCNet_x1_0_textline_ori", env, gpuIndex);
 
-    OCRPipeline pipeline = new OCRPipeline(detModel, recModel, docOriModel, textLineOriModel);
+    // 可选：版面分析、公式识别、表格识别模型
+    LayoutModel layoutModel = new LayoutModel(modelDir, "PP-DocLayoutV3", env, gpuIndex);
+    FormulaRecognitionModel formulaModel = new FormulaRecognitionModel(modelDir, "PP-FormulaNet_plus-L", env, gpuIndex);
+    TableModel tableModel = new TableModel(modelDir, "unirec-0.1b", env, gpuIndex);
+
+    OCRPipeline pipeline = new OCRPipeline(detModel, recModel, docOriModel, textLineOriModel,
+            layoutModel, formulaModel, tableModel);
 
     Map<String, Object> params = new HashMap<>();
     params.put("recognitionBatchSize", 1);
@@ -158,10 +173,16 @@ try (OrtEnvironment env = OrtEnvironment.getEnvironment()) {
     List<OCRPipelineResult> results = pipeline.predictFile("image.png", params);
 
     for (OCRPipelineResult result : results) {
-        String text = result.recResults().stream()
-            .map(r -> r.text())
-            .collect(Collectors.joining());
-        System.out.println(text);
+        if (result.layoutRegions() != null) {
+            for (LayoutRegionResult region : result.layoutRegions()) {
+                System.out.println(region.regionType() + ": " + region.getText());
+            }
+        } else {
+            String text = result.recResults().stream()
+                .map(r -> r.text())
+                .collect(Collectors.joining());
+            System.out.println(text);
+        }
     }
 }
 ```
@@ -182,3 +203,14 @@ try (OrtEnvironment env = OrtEnvironment.getEnvironment()) {
 | `docOrientationScore` | `float` | 文档方向分类置信度 |
 | `textLineOrientationLabel` | `String` | 文本行方向标签（如 "0_degree"、"180_degree"） |
 | `textLineOrientationScore` | `float` | 文本行方向分类置信度 |
+| `layoutRegions` | `List<LayoutRegionResult>` | 版面分析结果（启用版面分析模型时可用） |
+
+#### LayoutRegionResult 字段
+
+| 字段 | 类型 | 说明 |
+|:-----|:-----|:-----|
+| `layoutRegion` | `ObjectDetectionResult` | 版面区域边界框、标签和置信度 |
+| `regionType` | `String` | 区域类型："text"、"formula"、"table" 或 "image" |
+| `textResults` | `List<OCRPipelineResult>` | 文本区域的 OCR 结果 |
+| `formulaResult` | `TextResult` | 公式区域的 LaTeX 文本 |
+| `tableResult` | `TableResult` | 表格区域的 HTML 文本 |

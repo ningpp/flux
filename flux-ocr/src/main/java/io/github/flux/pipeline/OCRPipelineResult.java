@@ -7,10 +7,18 @@ import java.util.List;
 
 public record OCRPipelineResult(int[][] detPolys, List<RecognitionResult> recResults,
                                 String docOrientationLabel, float docOrientationScore,
-                                String textLineOrientationLabel, float textLineOrientationScore) {
+                                String textLineOrientationLabel, float textLineOrientationScore,
+                                List<LayoutRegionResult> layoutRegions) {
 
     public OCRPipelineResult(int[][] detPolys, List<RecognitionResult> recResults) {
-        this(detPolys, recResults, null, 0f, null, 0f);
+        this(detPolys, recResults, null, 0f, null, 0f, null);
+    }
+
+    public OCRPipelineResult(int[][] detPolys, List<RecognitionResult> recResults,
+                             String docOrientationLabel, float docOrientationScore,
+                             String textLineOrientationLabel, float textLineOrientationScore) {
+        this(detPolys, recResults, docOrientationLabel, docOrientationScore,
+                textLineOrientationLabel, textLineOrientationScore, null);
     }
 
     @Override
@@ -22,6 +30,7 @@ public record OCRPipelineResult(int[][] detPolys, List<RecognitionResult> recRes
                 ", docOrientationScore=" + docOrientationScore +
                 ", textLineOrientationLabel=" + textLineOrientationLabel +
                 ", textLineOrientationScore=" + textLineOrientationScore +
+                ",\n layoutRegions=" + layoutRegions +
                 "\n}";
     }
 
