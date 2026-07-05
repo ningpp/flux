@@ -66,23 +66,37 @@ public class Pix2TextEncoderModel implements AutoCloseable {
 
     public float[][][] batchPredict(List<NDArray> inputNDArrays) throws OrtException {
         NDList ndList = new NDList();
-        ndList.addAll(inputNDArrays);
-        NDArray inputNdArray = NDArrays.stack(ndList);
-        inputNDArrays.forEach(IOUtil::close);
-        long[] shape = inputNdArray.getShape().getShape();
-        var dataBuffer = inputNdArray.toByteBuffer().asFloatBuffer();
-        OnnxTensor onnxInput = OnnxTensor.createTensor(env, dataBuffer, shape);
-        IOUtil.close(inputNdArray);
-        IOUtil.close(ndList);
-        Map<String, OnnxTensor> inputs = new HashMap<>(inputNames.size());
-        for (String inputName : inputNames) {
-            inputs.put(inputName, onnxInput);
+        NDArray inputNdArray = null;
+        OnnxTensor onnxInput = null;
+        OrtSession.Result onnxResult = null;
+        try {
+            ndList.addAll(inputNDArrays);
+            inputNdArray = NDArrays.stack(ndList);
+            inputNDArrays.forEach(IOUtil::close);
+            long[] shape = inputNdArray.getShape().getShape();
+            var dataBuffer = inputNdArray.toByteBuffer().asFloatBuffer();
+            onnxInput = OnnxTensor.createTensor(env, dataBuffer, shape);
+            IOUtil.close(inputNdArray);
+            inputNdArray = null;
+            IOUtil.close(ndList);
+            ndList = null;
+            Map<String, OnnxTensor> inputs = new HashMap<>(inputNames.size());
+            for (String inputName : inputNames) {
+                inputs.put(inputName, onnxInput);
+            }
+            onnxInput = null; // ownership transferred to inputs map
+            onnxResult = session.run(inputs);
+            OnnxUtil.closeTensors(inputs);
+            float[][][] encodeResultFloats = (float[][][]) onnxResult.get(0).getValue();
+            IOUtil.close(onnxResult);
+            onnxResult = null;
+            return encodeResultFloats;
+        } finally {
+            IOUtil.close(onnxResult);
+            IOUtil.close(onnxInput);
+            IOUtil.close(inputNdArray);
+            IOUtil.close(ndList);
         }
-        OrtSession.Result onnxResult = session.run(inputs);
-        OnnxUtil.closeTensors(inputs);
-        float[][][] encodeResultFloats = (float[][][]) onnxResult.get(0).getValue();
-        IOUtil.close(onnxResult);
-        return encodeResultFloats;
     }
 
 }

@@ -82,57 +82,59 @@ public class Pix2TextDecoderModel implements AutoCloseable {
                 encodeResultFloats[0][0].length
         };
         OnnxTensor encoderHiddenStates = OnnxTensor.createTensor(env, dataBuffer, shape);
-        int batchSize = (int) shape[0];
-        long[][] inputIds = new long[batchSize][];
-        for (int i = 0; i < batchSize; i++) {
-            inputIds[i] = new long[]{decoderStartTokenId};
-        }
+        try {
+            int batchSize = (int) shape[0];
+            long[][] inputIds = new long[batchSize][];
+            for (int i = 0; i < batchSize; i++) {
+                inputIds[i] = new long[]{decoderStartTokenId};
+            }
 
-        long[][] generated_tokens = new long[batchSize][];
-        for (int i = 0; i < batchSize; i++) {
-            generated_tokens[i] = new long[0];
-        }
-        long curLen = 1;
-        boolean[] finished = new boolean[batchSize];
-        for (int i = 0; i < maxLength; i++) {
-            long[] flat = ArrayUtil.flat(inputIds);
-            LongBuffer buffer = LongBuffer.wrap(flat);
-            try (OnnxTensor input_ids_tensor = OnnxTensor.createTensor(env, buffer, new long[] {inputIds.length, inputIds[0].length});
-                 OrtSession.Result onnxResult = session.run(Map.of("input_ids", input_ids_tensor, "encoder_hidden_states", encoderHiddenStates))) {
-                OnnxValue onnxValue = onnxResult.get(0);
-                float[][][] decoderResultFloats = (float[][][]) onnxValue.getValue();
-                long[][] nextIds = new long[batchSize][1];
-                for (int j = 0; j < batchSize; j++) {
-                    if (finished[j]) {
-                        nextIds[j][0] = padTokenId;
-                        continue;
+            long[][] generated_tokens = new long[batchSize][];
+            for (int i = 0; i < batchSize; i++) {
+                generated_tokens[i] = new long[0];
+            }
+            long curLen = 1;
+            boolean[] finished = new boolean[batchSize];
+            for (int i = 0; i < maxLength; i++) {
+                long[] flat = ArrayUtil.flat(inputIds);
+                LongBuffer buffer = LongBuffer.wrap(flat);
+                try (OnnxTensor input_ids_tensor = OnnxTensor.createTensor(env, buffer, new long[] {inputIds.length, inputIds[0].length});
+                     OrtSession.Result onnxResult = session.run(Map.of("input_ids", input_ids_tensor, "encoder_hidden_states", encoderHiddenStates))) {
+                    OnnxValue onnxValue = onnxResult.get(0);
+                    float[][][] decoderResultFloats = (float[][][]) onnxValue.getValue();
+                    long[][] nextIds = new long[batchSize][1];
+                    for (int j = 0; j < batchSize; j++) {
+                        if (finished[j]) {
+                            nextIds[j][0] = padTokenId;
+                            continue;
+                        }
+                        float[] lastLogit = decoderResultFloats[j][(int) (curLen - 1)];
+                        long nextToken = ArrayUtil.argmax(lastLogit);
+                        nextIds[j][0] = nextToken;
+
+                        generated_tokens[j] = ArrayUtil.concat(generated_tokens[j], new long[] {nextToken});
+                        if (nextToken == eosTokenId) {
+                            finished[j] = true;
+                        }
                     }
-                    float[] lastLogit = decoderResultFloats[j][(int) (curLen - 1)];
-                    long nextToken = ArrayUtil.argmax(lastLogit);
-                    nextIds[j][0] = nextToken;
+                    inputIds = ArrayUtil.concat(inputIds, nextIds);
+                    curLen++;
 
-                    generated_tokens[j] = ArrayUtil.concat(generated_tokens[j], new long[] {nextToken});
-                    if (nextToken == eosTokenId) {
-                        finished[j] = true;
+                    if (ArrayUtil.allTrue(finished)) {
+                        break;
                     }
-                }
-                inputIds = ArrayUtil.concat(inputIds, nextIds);
-                curLen++;
-
-                if (ArrayUtil.allTrue(finished)) {
-                    break;
                 }
             }
-        }
 
-        IOUtil.close(encoderHiddenStates);
-
-        List<TextResult> results = new ArrayList<>();
-        for (long[] tokens : generated_tokens) {
-            String text = tokenizer.decode(tokens, true);
-            results.add(new TextResult(text, tokens, -1));
+            List<TextResult> results = new ArrayList<>();
+            for (long[] tokens : generated_tokens) {
+                String text = tokenizer.decode(tokens, true);
+                results.add(new TextResult(text, tokens, -1));
+            }
+            return results;
+        } finally {
+            IOUtil.close(encoderHiddenStates);
         }
-        return results;
     }
 
 }
