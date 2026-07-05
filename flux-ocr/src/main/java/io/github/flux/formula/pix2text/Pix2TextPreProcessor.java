@@ -45,7 +45,7 @@ public class Pix2TextPreProcessor {
         NDArray imgNdArray = ImageUtil.toNDArrayUint8(rgbImg, manager);
         NDArray input = deitProcessor.preprocess(imgNdArray, matManager, manager);
 
-        rgbImg.release();
+        matManager.release(rgbImg);
         imgNdArray.close();
         return input;
     }
