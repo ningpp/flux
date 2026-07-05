@@ -141,6 +141,8 @@ public class PaddleObjectDetectionPredictor extends BatchPredictor<ProcessedMat,
     public List<List<ObjectDetectionResult>> _predict(List<ProcessedMat> images, MatManager matManager, NDManager manager,
                                                       boolean layoutNms) {
 
+        Map<String, OnnxTensor> inputs = new HashMap<>(3);
+        OrtSession.Result onnxResult = null;
         try {
             List<ObjectDetectionResizeResult> resizeResults = new ArrayList<>();
             float[] scale_factors = new float[images.size() * 2];
@@ -174,7 +176,6 @@ public class PaddleObjectDetectionPredictor extends BatchPredictor<ProcessedMat,
             FloatBuffer dataBuffer = FloatBuffer.wrap(ArrayUtil.flat(allFloatDatas));
             long[] shape = new long[] { images.size(), channels, rows, cols };
 
-            Map<String, OnnxTensor> inputs = new HashMap<>(3);
             inputs.put("image", OnnxTensor.createTensor(env, dataBuffer, shape));
 
             if (inputNames.size() == 3) {
@@ -186,7 +187,7 @@ public class PaddleObjectDetectionPredictor extends BatchPredictor<ProcessedMat,
             FloatBuffer scale_factor_buffer = FloatBuffer.wrap(scale_factors);
             inputs.put("scale_factor", OnnxTensor.createTensor(env, scale_factor_buffer, new long[]{images.size(), 2}));
 
-            OrtSession.Result onnxResult = session.run(inputs, outputNames);
+            onnxResult = session.run(inputs, outputNames);
             OnnxValue pred_boxes_value = onnxResult.get("fetch_name_0").get();
             float[][] pred_boxes = (float[][]) pred_boxes_value.getValue();
 
@@ -215,12 +216,13 @@ public class PaddleObjectDetectionPredictor extends BatchPredictor<ProcessedMat,
 
             IOUtil.close(reshaped);
             boxes.close();
-            OnnxUtil.closeTensors(inputs);
-            onnxResult.close();
 
             return postProcessResults;
         } catch (Exception e) {
             throw new FluxException(e);
+        } finally {
+            OnnxUtil.closeTensors(inputs);
+            IOUtil.close(onnxResult);
         }
     }
 
