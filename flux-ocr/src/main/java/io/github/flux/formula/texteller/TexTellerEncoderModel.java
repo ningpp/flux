@@ -58,22 +58,37 @@ public class TexTellerEncoderModel implements AutoCloseable {
 
     public float[][][] batchPredict(List<Mat> inputMats, MatManager matManager, NDManager manager) throws OrtException {
         NDList ndList = new NDList();
-        for (Mat mat : inputMats) {
-            ndList.add(ImageUtil.toChannalNDArrayFloat(matManager, mat, manager));
+        NDArray inputNdArray = null;
+        OnnxTensor onnxInput = null;
+        OrtSession.Result onnxResult = null;
+        try {
+            for (Mat mat : inputMats) {
+                ndList.add(ImageUtil.toChannalNDArrayFloat(matManager, mat, manager));
+            }
+            inputNdArray = NDArrays.stack(ndList);
+            long[] shape = inputNdArray.getShape().getShape();
+            FloatBuffer dataBuffer = inputNdArray.toByteBuffer().asFloatBuffer();
+            IOUtil.close(inputNdArray);
+            inputNdArray = null;
+            IOUtil.close(ndList);
+            ndList = null;
+            onnxInput = OnnxTensor.createTensor(env, dataBuffer, shape);
+            Map<String, OnnxTensor> inputs = Map.of("pixel_values", onnxInput);
+            onnxResult = session.run(inputs);
+            OnnxValue onnxValue = onnxResult.get(0);
+            float[][][] results = (float[][][]) onnxValue.getValue();
+            IOUtil.close(onnxValue);
+            IOUtil.close(onnxInput);
+            onnxInput = null;
+            IOUtil.close(onnxResult);
+            onnxResult = null;
+            return results;
+        } finally {
+            IOUtil.close(onnxResult);
+            IOUtil.close(onnxInput);
+            IOUtil.close(inputNdArray);
+            IOUtil.close(ndList);
         }
-        NDArray inputNdArray = NDArrays.stack(ndList);
-        long[] shape = inputNdArray.getShape().getShape();
-        FloatBuffer dataBuffer = inputNdArray.toByteBuffer().asFloatBuffer();
-        IOUtil.close(inputNdArray);
-        IOUtil.close(ndList);
-        OnnxTensor onnxInput = OnnxTensor.createTensor(env, dataBuffer, shape);
-        Map<String, OnnxTensor> inputs = Map.of("pixel_values", onnxInput);
-        OrtSession.Result onnxResult = session.run(inputs);
-        OnnxValue onnxValue = onnxResult.get(0);
-        float[][][] results = (float[][][]) onnxValue.getValue();
-        IOUtil.close(onnxValue);
-        IOUtil.close(onnxInput);
-        return results;
     }
 
 }

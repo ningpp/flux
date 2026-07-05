@@ -72,123 +72,129 @@ public class TexTellerDecoderModel implements AutoCloseable {
         long[] shape = inputNdArray.getShape().getShape();
         int batchSize = (int) shape[0];
         OnnxTensor encoderHiddenStates = OnnxTensor.createTensor(env, dataBuffer, shape);
-        List<List<Long>> allGeneratedIds = new ArrayList<>();
-        for (int i = 0; i < batchSize; i++) {
-            allGeneratedIds.add(new ArrayList<>(List.of(decoderStartTokenId)));
-        }
-        boolean[] finished = new boolean[batchSize];
+        IOUtil.close(inputNdArray);
 
-        List<Map<String, OnnxTensor>> past_kvs = new ArrayList<>();
-        List<Map<String, OnnxTensor>> cross_attention_kvs = new ArrayList<>();
-        Map<String, OnnxTensor> emptyPastKV = new HashMap<>();
-        for (int step = 0; step < maxLength; step++) {
-            Map<String, OnnxTensor> cross_attention_key_values = new HashMap<>();
-            Map<String, OnnxTensor> onnxInputs = new LinkedHashMap<>();
-
-            long[][] inputIdsArray;
-
-            if (step == 0) {
-                inputIdsArray = new long[batchSize][];
-                for (int i = 0; i < batchSize; i++) {
-                    inputIdsArray[i] = new long[]{decoderStartTokenId};
-                }
-                onnxInputs.put("use_cache_branch",
-                        OnnxTensor.createTensor(env, new boolean[]{false}));
-                for (int i = 0; i < layers; i++) {
-                    emptyPastKV.put("past_key_values." + i + ".decoder.key",
-                            OnnxTensor.createTensor(env, FloatBuffer.allocate(0), new long[]{batchSize, num_attention_heads, 0, embed_size_per_head}));
-                    emptyPastKV.put("past_key_values." + i + ".decoder.value",
-                            OnnxTensor.createTensor(env, FloatBuffer.allocate(0), new long[]{batchSize, num_attention_heads, 0, embed_size_per_head}));
-                    emptyPastKV.put("past_key_values." + i + ".encoder.key",
-                            OnnxTensor.createTensor(env, FloatBuffer.allocate(0), new long[]{batchSize, num_attention_heads, 0, embed_size_per_head}));
-                    emptyPastKV.put("past_key_values." + i + ".encoder.value",
-                            OnnxTensor.createTensor(env, FloatBuffer.allocate(0), new long[]{batchSize, num_attention_heads, 0, embed_size_per_head}));
-                }
-                onnxInputs.putAll(emptyPastKV);
-            } else {
-                cross_attention_kvs.add(cross_attention_key_values);
-                for (int i = 0; i < layers; i++) {
-                    String keyKey = "past_key_values." + i + ".encoder.key";
-                    cross_attention_key_values.put(keyKey, past_kvs.get(step-1).get(keyKey));
-                    String valKey = "past_key_values." + i + ".encoder.value";
-                    cross_attention_key_values.put(valKey, past_kvs.get(step-1).get(valKey));
-                }
-                // 后续推理：只传入最新生成的 token
-                inputIdsArray = new long[batchSize][];
-                for (int i = 0; i < batchSize; i++) {
-                    inputIdsArray[i] = new long[]{allGeneratedIds.get(i).getLast()};
-                }
-                onnxInputs.put("use_cache_branch",
-                        OnnxTensor.createTensor(env, new boolean[]{true}));
-
-                // 添加上一次输出的 past_key_values
-                onnxInputs.putAll(past_kvs.get(step-1));
+        try {
+            List<List<Long>> allGeneratedIds = new ArrayList<>();
+            for (int i = 0; i < batchSize; i++) {
+                allGeneratedIds.add(new ArrayList<>(List.of(decoderStartTokenId)));
             }
+            boolean[] finished = new boolean[batchSize];
 
-            OnnxTensor inputIdsTensor = OnnxTensor.createTensor(env, inputIdsArray);
-            onnxInputs.put("input_ids", inputIdsTensor);
-            onnxInputs.put("encoder_hidden_states", encoderHiddenStates);
+            List<Map<String, OnnxTensor>> past_kvs = new ArrayList<>();
+            List<Map<String, OnnxTensor>> cross_attention_kvs = new ArrayList<>();
+            Map<String, OnnxTensor> emptyPastKV = new HashMap<>();
+            for (int step = 0; step < maxLength; step++) {
+                Map<String, OnnxTensor> cross_attention_key_values = new HashMap<>();
+                Map<String, OnnxTensor> onnxInputs = new LinkedHashMap<>();
 
-            OrtSession.Result result = session.run(onnxInputs);
-            OnnxUtil.closeTensors(emptyPastKV);
+                long[][] inputIdsArray;
 
-            Map<String, OnnxTensor> pastKeyValues = new HashMap<>();
-            past_kvs.add(pastKeyValues);
-            for (int i = 0; i < layers; i++) {
-                String keyKeyEncoder = "past_key_values." + i + ".encoder.key";
-                String valKeyEncoder = "past_key_values." + i + ".encoder.value";
                 if (step == 0) {
-                    pastKeyValues.put(keyKeyEncoder, (OnnxTensor) result.get("present." + i + ".encoder.key").get());
-                    pastKeyValues.put(valKeyEncoder, (OnnxTensor) result.get("present." + i + ".encoder.value").get());
+                    inputIdsArray = new long[batchSize][];
+                    for (int i = 0; i < batchSize; i++) {
+                        inputIdsArray[i] = new long[]{decoderStartTokenId};
+                    }
+                    onnxInputs.put("use_cache_branch",
+                            OnnxTensor.createTensor(env, new boolean[]{false}));
+                    for (int i = 0; i < layers; i++) {
+                        emptyPastKV.put("past_key_values." + i + ".decoder.key",
+                                OnnxTensor.createTensor(env, FloatBuffer.allocate(0), new long[]{batchSize, num_attention_heads, 0, embed_size_per_head}));
+                        emptyPastKV.put("past_key_values." + i + ".decoder.value",
+                                OnnxTensor.createTensor(env, FloatBuffer.allocate(0), new long[]{batchSize, num_attention_heads, 0, embed_size_per_head}));
+                        emptyPastKV.put("past_key_values." + i + ".encoder.key",
+                                OnnxTensor.createTensor(env, FloatBuffer.allocate(0), new long[]{batchSize, num_attention_heads, 0, embed_size_per_head}));
+                        emptyPastKV.put("past_key_values." + i + ".encoder.value",
+                                OnnxTensor.createTensor(env, FloatBuffer.allocate(0), new long[]{batchSize, num_attention_heads, 0, embed_size_per_head}));
+                    }
+                    onnxInputs.putAll(emptyPastKV);
                 } else {
-                    pastKeyValues.put(keyKeyEncoder, cross_attention_key_values.get(keyKeyEncoder));
-                    pastKeyValues.put(valKeyEncoder, cross_attention_key_values.get(valKeyEncoder));
+                    cross_attention_kvs.add(cross_attention_key_values);
+                    for (int i = 0; i < layers; i++) {
+                        String keyKey = "past_key_values." + i + ".encoder.key";
+                        cross_attention_key_values.put(keyKey, past_kvs.get(step-1).get(keyKey));
+                        String valKey = "past_key_values." + i + ".encoder.value";
+                        cross_attention_key_values.put(valKey, past_kvs.get(step-1).get(valKey));
+                    }
+                    // 后续推理：只传入最新生成的 token
+                    inputIdsArray = new long[batchSize][];
+                    for (int i = 0; i < batchSize; i++) {
+                        inputIdsArray[i] = new long[]{allGeneratedIds.get(i).getLast()};
+                    }
+                    onnxInputs.put("use_cache_branch",
+                            OnnxTensor.createTensor(env, new boolean[]{true}));
+
+                    // 添加上一次输出的 past_key_values
+                    onnxInputs.putAll(past_kvs.get(step-1));
                 }
 
-                String keyKeyDecoder = "past_key_values." + i + ".decoder.key";
-                String valKeyDecoder = "past_key_values." + i + ".decoder.value";
-                pastKeyValues.put(keyKeyDecoder, (OnnxTensor) result.get("present." + i + ".decoder.key").get());
-                pastKeyValues.put(valKeyDecoder, (OnnxTensor) result.get("present." + i + ".decoder.value").get());
-            }
+                OnnxTensor inputIdsTensor = OnnxTensor.createTensor(env, inputIdsArray);
+                onnxInputs.put("input_ids", inputIdsTensor);
+                onnxInputs.put("encoder_hidden_states", encoderHiddenStates);
 
-            // 获取 logits 并选择下一个 token
-            OnnxTensor logits = (OnnxTensor) result.get("logits").get();
-            long[] nextTokens = selectNextTokens(logits);
+                OrtSession.Result result = session.run(onnxInputs);
+                OnnxUtil.closeTensors(emptyPastKV);
 
-            for (int b = 0; b < batchSize; b++) {
-                if (!finished[b]) {
-                    allGeneratedIds.get(b).add(nextTokens[b]);
+                Map<String, OnnxTensor> pastKeyValues = new HashMap<>();
+                past_kvs.add(pastKeyValues);
+                for (int i = 0; i < layers; i++) {
+                    String keyKeyEncoder = "past_key_values." + i + ".encoder.key";
+                    String valKeyEncoder = "past_key_values." + i + ".encoder.value";
+                    if (step == 0) {
+                        pastKeyValues.put(keyKeyEncoder, (OnnxTensor) result.get("present." + i + ".encoder.key").get());
+                        pastKeyValues.put(valKeyEncoder, (OnnxTensor) result.get("present." + i + ".encoder.value").get());
+                    } else {
+                        pastKeyValues.put(keyKeyEncoder, cross_attention_key_values.get(keyKeyEncoder));
+                        pastKeyValues.put(valKeyEncoder, cross_attention_key_values.get(valKeyEncoder));
+                    }
 
-                    // 检查是否遇到 EOS 或达到最大长度
-                    if (nextTokens[b] == eosTokenId) {
-                        finished[b] = true;
+                    String keyKeyDecoder = "past_key_values." + i + ".decoder.key";
+                    String valKeyDecoder = "past_key_values." + i + ".decoder.value";
+                    pastKeyValues.put(keyKeyDecoder, (OnnxTensor) result.get("present." + i + ".decoder.key").get());
+                    pastKeyValues.put(valKeyDecoder, (OnnxTensor) result.get("present." + i + ".decoder.value").get());
+                }
+
+                // 获取 logits 并选择下一个 token
+                OnnxTensor logits = (OnnxTensor) result.get("logits").get();
+                long[] nextTokens = selectNextTokens(logits);
+
+                for (int b = 0; b < batchSize; b++) {
+                    if (!finished[b]) {
+                        allGeneratedIds.get(b).add(nextTokens[b]);
+
+                        // 检查是否遇到 EOS 或达到最大长度
+                        if (nextTokens[b] == eosTokenId) {
+                            finished[b] = true;
+                        }
                     }
                 }
+                IOUtil.close(logits);
+                IOUtil.close(result); // Close OrtSession.Result after extracting needed values
+
+                // 清理当前步骤的输入 tensors
+                inputIdsTensor.close();
+                onnxInputs.get("use_cache_branch").close();
+
+                // 检查是否生成结束
+                if (ArrayUtil.allTrue(finished)) {
+                    break;
+                }
             }
-            IOUtil.close(logits);
 
-            // 清理当前步骤的输入 tensors
-            inputIdsTensor.close();
-            onnxInputs.get("use_cache_branch").close();
+            past_kvs.forEach(OnnxUtil::closeTensors);
+            OnnxUtil.closeTensors(emptyPastKV);
+            cross_attention_kvs.forEach(OnnxUtil::closeTensors);
 
-            // 检查是否生成结束
-            if (ArrayUtil.allTrue(finished)) {
-                break;
+            List<TextResult> results = new ArrayList<>();
+            for (var generatedIds : allGeneratedIds) {
+                long[] tokens = generatedIds.stream().mapToLong(Long::longValue).toArray();
+                String text = tokenizer.decode(tokens, true);
+                results.add(new TextResult(addNewlines(removeStyle(text)), tokens, -1));
             }
+            return results;
+        } finally {
+            IOUtil.close(encoderHiddenStates);
         }
-
-        past_kvs.forEach(OnnxUtil::closeTensors);
-        IOUtil.close(encoderHiddenStates);
-        OnnxUtil.closeTensors(emptyPastKV);
-        cross_attention_kvs.forEach(OnnxUtil::closeTensors);
-
-        List<TextResult> results = new ArrayList<>();
-        for (var generatedIds : allGeneratedIds) {
-            long[] tokens = generatedIds.stream().mapToLong(Long::longValue).toArray();
-            String text = tokenizer.decode(tokens, true);
-            results.add(new TextResult(addNewlines(removeStyle(text)), tokens, -1));
-        }
-        return results;
     }
 
     private static String removeStyle(String inputStr) {
