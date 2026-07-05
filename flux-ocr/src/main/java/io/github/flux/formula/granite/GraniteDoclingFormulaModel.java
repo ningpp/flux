@@ -121,12 +121,13 @@ public class GraniteDoclingFormulaModel extends BatchPredictor<PreProcessResult,
     }
 
     private TextResult _predict(String chat_template, MatManager matManager, Mat image, NDManager manager) {
+        NDArray imgNdArray = null;
+        GraniteDoclingDecodeResult pastDecodeResult = null;
         try {
             long image_token_id = 100270;
 
-            NDArray imgNdArray = ImageUtil.toNDArrayUint8(image, manager);
+            imgNdArray = ImageUtil.toNDArrayUint8(image, manager);
             String requestText = Idefics3Processor.apply_chat_template(chat_template, query);
-            // cost ~40ms
             Idefics3PreProcessResult preResult = Idefics3ImageProcessor.process(tokenizer, requestText, matManager, imgNdArray, manager);
             long[] input_ids = preResult.input_ids();
             long[] attention_mask = preResult.attention_mask();
@@ -134,7 +135,6 @@ public class GraniteDoclingFormulaModel extends BatchPredictor<PreProcessResult,
             float[][][][] image_feature_floats = encoderModel.predict(preResult.pixel_values(), preResult.pixel_attention_mask());
 
             List<Long> generated_tokens_list = new ArrayList<>(maxLength);
-            GraniteDoclingDecodeResult pastDecodeResult = null;
             for (int i = 0; i < maxLength; i++) {
                 long[][] input_ids_batch = new long[][]{input_ids};
                 GraniteDoclingDecodeResult decodeResult;
@@ -176,17 +176,24 @@ public class GraniteDoclingFormulaModel extends BatchPredictor<PreProcessResult,
             }
 
             matManager.release(image);
-            if (pastDecodeResult != null) {
-                pastDecodeResult.close();
-            }
-            IOUtil.close(imgNdArray);
+            image = null; // mark as released
             long[] generated_tokens = new long[generated_tokens_list.size()];
             for (int i = 0; i < generated_tokens_list.size(); i++) {
                 generated_tokens[i] = generated_tokens_list.get(i);
             }
-            return new TextResult(tokenizer.decode(generated_tokens, false), generated_tokens, -1);
+            TextResult result = new TextResult(tokenizer.decode(generated_tokens, false), generated_tokens, -1);
+            // Transfer ownership - pastDecodeResult and imgNdArray will be cleaned up by finally
+            pastDecodeResult = null;
+            imgNdArray = null;
+            return result;
         } catch (Exception e) {
             throw new FluxException(e);
+        } finally {
+            IOUtil.close(imgNdArray);
+            IOUtil.close(pastDecodeResult);
+            if (image != null) {
+                matManager.release(image);
+            }
         }
     }
 
