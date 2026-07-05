@@ -87,13 +87,13 @@ final class FalconOcrProcessor {
             return new Preprocessed(tokens, pixels, height, width, patchRows, patchCols, checkedCategory);
         } finally {
             if (bounded != rgbMat) {
-                bounded.release();
+                matManager.release(bounded);
             }
             if (smart != null && smart != bounded) {
-                smart.release();
+                matManager.release(smart);
             }
             if (normalized != null) {
-                normalized.release();
+                matManager.release(normalized);
             }
         }
     }

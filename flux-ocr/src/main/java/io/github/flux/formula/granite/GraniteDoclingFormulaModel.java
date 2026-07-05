@@ -175,7 +175,7 @@ public class GraniteDoclingFormulaModel extends BatchPredictor<PreProcessResult,
                 }
             }
 
-            image.release();
+            matManager.release(image);
             if (pastDecodeResult != null) {
                 pastDecodeResult.close();
             }
