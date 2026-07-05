@@ -25,6 +25,8 @@ import org.opencv.core.Rect;
 import org.opencv.imgcodecs.Imgcodecs;
 import org.opencv.imgproc.Imgproc;
 
+import io.github.flux.util.IOUtil;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -127,11 +129,19 @@ public class OCRPipeline {
           oriLabels.add(oriResult.label());
           oriScores.add(oriResult.score());
         }
+        // Release orientation classification inputs (NDArrays)
+        for (PreProcessResult oriInput : oriInputs) {
+          IOUtil.close(oriInput);
+        }
       } else {
         for (int i = 0; i < images.size(); i++) {
           oriLabels.add(null);
           oriScores.add(0f);
         }
+      }
+      // Release rgbImages - no longer needed after orientation classification
+      for (Mat rgbImg : rgbImages) {
+        matManager.release(rgbImg);
       }
 
       // Apply orientation correction to get srcImages
@@ -143,8 +153,9 @@ public class OCRPipeline {
         Mat srcImage;
         if (oriLabel != null && oriScore > 0.3f) {
           srcImage = ImageUtil.rotateImage(matManager, bgrImage, Double.parseDouble(oriLabel));
+          matManager.release(bgrImage); // bgrImage no longer needed after rotation
         } else {
-          srcImage = bgrImage;
+          srcImage = bgrImage; // reuse bgrImage as srcImage
         }
         srcImages.add(srcImage);
       }
@@ -162,6 +173,10 @@ public class OCRPipeline {
         }
         List<List<ObjectDetectionResult>> layoutResults = layoutModel.batchPredict(
             layoutInputs, layoutInputs.size(), matManager, ndManager, extraParameters);
+        // Release layout intermediate resources
+        for (ProcessedMat layoutInput : layoutInputs) {
+          layoutInput.release();
+        }
         for (Mat srcRgb : srcRgbs) {
           matManager.release(srcRgb);
         }
@@ -187,15 +202,8 @@ public class OCRPipeline {
               oriLabel, oriScore, recognitionBatchSize, extraParameters);
         }
         allResults.add(imageResults);
-      }
-
-      // Release resources
-      for (int i = 0; i < images.size(); i++) {
-        matManager.release(srcImages.get(i));
-        matManager.release(bgrImages.get(i));
-        if (oriLabels.get(i) == null || oriScores.get(i) <= 0.3f) {
-          matManager.release(rgbImages.get(i));
-        }
+        // Release srcImage after processing - it's no longer needed
+        matManager.release(srcImage);
       }
 
       return allResults;
@@ -233,6 +241,7 @@ public class OCRPipeline {
             Mat croppedBgr = cropRegion(matManager, srcImage, region.coordinate());
             Mat croppedRgb = matManager.newMat();
             Imgproc.cvtColor(croppedBgr, croppedRgb, Imgproc.COLOR_BGR2RGB);
+            matManager.release(croppedBgr); // Release BGR after RGB conversion
             formulaRgbs.add(croppedRgb);
             PreProcessResult formulaInput = formulaRecognitionModel.processRgb(matManager, croppedRgb, ndManager);
             formulaInputs.add(formulaInput);
@@ -251,10 +260,12 @@ public class OCRPipeline {
             Mat croppedBgr = cropRegion(matManager, srcImage, region.coordinate());
             Mat croppedRgb = matManager.newMat();
             Imgproc.cvtColor(croppedBgr, croppedRgb, Imgproc.COLOR_BGR2RGB);
+            matManager.release(croppedBgr); // Release BGR after RGB conversion
             PreProcessResult tableInput = tableModel.processRgb(matManager, croppedRgb, ndManager);
             List<TableResult> tableResults = tableModel.batchPredict(
                 List.of(tableInput), 1, matManager, ndManager, extraParameters);
             matManager.release(croppedRgb);
+            IOUtil.close(tableInput); // Release table input PreProcessResult
             TableResult tableResult = tableResults.isEmpty() ? null : tableResults.get(0);
             layoutRegionResults.add(LayoutRegionResult.table(region, tableResult));
           } else {
@@ -281,6 +292,10 @@ public class OCRPipeline {
         List<TextResult> batchResults = formulaRecognitionModel.batchPredict(
             batch, batch.size(), matManager, ndManager, extraParameters);
         allFormulaResults.addAll(batchResults);
+        // Release formula batch inputs
+        for (PreProcessResult input : batch) {
+          IOUtil.close(input);
+        }
       }
       // Fill placeholders with formula results
       for (int i = 0; i < formulaRegionIndices.size(); i++) {
@@ -349,12 +364,15 @@ public class OCRPipeline {
     List<OCRPipelineResult> results = new ArrayList<>();
     Mat workImage = cropRegion(matManager, srcImage, coordinate);
 
+    Mat detectionInput = matManager.cloneMat(workImage);
     var detectionResult = textDetectionModel.batchPredict(
-        List.of(new PreProcessResult(matManager.cloneMat(workImage), null)), 1,
+        List.of(new PreProcessResult(detectionInput, null)), 1,
         matManager, ndManager, extraParameters).get(0);
+    matManager.release(detectionInput);
 
     int[][][] polys = detectionResult.polys();
     if (polys == null || polys.length == 0) {
+      matManager.release(workImage);
       return results;
     }
 
@@ -366,26 +384,38 @@ public class OCRPipeline {
     for (int[][] poly : sortedPolys) {
       cropedImages.add(ImageUtil.getMinAreaRectCrop(matManager, ndManager, workImage, poly));
     }
+    matManager.release(workImage); // workImage no longer needed after cropping
 
     // Text line orientation classification: if 180_degree, rotate the cropped image
     List<String> textLineOriLabels = new ArrayList<>();
     List<Float> textLineOriScores = new ArrayList<>();
     if (textLineOrientationModel != null) {
       List<PreProcessResult> textLineInputs = new ArrayList<>();
+      List<Mat> rgbCrops = new ArrayList<>();
       for (Mat cropedImg : cropedImages) {
         Mat rgbCrop = matManager.newMat();
         Imgproc.cvtColor(cropedImg, rgbCrop, Imgproc.COLOR_BGR2RGB);
+        rgbCrops.add(rgbCrop);
         textLineInputs.add(textLineOrientationModel.processRgb(matManager, rgbCrop, ndManager));
       }
       List<ClassificationResult> textLineOriResults = textLineOrientationModel.batchPredict(
           textLineInputs, textLineInputs.size(), matManager, ndManager, extraParameters);
+      // Release text line orientation inputs
+      for (PreProcessResult textLineInput : textLineInputs) {
+        IOUtil.close(textLineInput);
+      }
+      for (Mat rgbCrop : rgbCrops) {
+        matManager.release(rgbCrop);
+      }
       for (int i = 0; i < textLineOriResults.size(); i++) {
         ClassificationResult oriResult = textLineOriResults.get(i);
         textLineOriLabels.add(oriResult.label());
         textLineOriScores.add(oriResult.score());
         if ("180_degree".equals(oriResult.label())) {
-          Mat rotated = ImageUtil.rotateImage(matManager, cropedImages.get(i), 180.0);
+          Mat oldImg = cropedImages.get(i);
+          Mat rotated = ImageUtil.rotateImage(matManager, oldImg, 180.0);
           cropedImages.set(i, rotated);
+          matManager.release(oldImg); // Release old image before replacing
         }
       }
     }
@@ -408,6 +438,10 @@ public class OCRPipeline {
             textLineOriScore
         ));
         index++;
+      }
+      // Release batch Mats after recognition
+      for (Mat mat : iter) {
+        matManager.release(mat);
       }
     }
     polysNDArray.close();
