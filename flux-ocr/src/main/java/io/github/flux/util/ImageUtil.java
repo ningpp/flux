@@ -456,14 +456,14 @@ public final class ImageUtil {
         Mat dstImg = matManager.newMat();
         // Rotate 90 degrees counterclockwise (equivalent to np.rot90)
         Core.rotate(srcImg, dstImg, Core.ROTATE_90_COUNTERCLOCKWISE);
-        srcImg.release();
+        matManager.release(srcImg);
         return dstImg;
     }
 
     public static Mat bgrToRgb(MatManager matManager, Mat bgrImg) {
         Mat rgbImg = matManager.newMat();
         Imgproc.cvtColor(bgrImg, rgbImg, Imgproc.COLOR_BGR2RGB);
-        bgrImg.release();
+        matManager.release(bgrImg);
         return rgbImg;
     }
 
@@ -471,7 +471,7 @@ public final class ImageUtil {
         Mat bgrImg = matManager.imread(image, Imgcodecs.IMREAD_COLOR_BGR);
         Mat rgbImg = matManager.newMat();
         Imgproc.cvtColor(bgrImg, rgbImg, Imgproc.COLOR_BGR2RGB);
-        bgrImg.release();
+        matManager.release(bgrImg);
         return rgbImg;
     }
 
