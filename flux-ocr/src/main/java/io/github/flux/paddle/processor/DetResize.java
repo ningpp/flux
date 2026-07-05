@@ -73,7 +73,7 @@ public class DetResize {
             var resized = detResize(matManager, img, limitSideLen, limitType, maxSideLimit);
             res.add(resized);
             if (img != resized.resizeImg()) {
-                img.release();
+                matManager.release(img);
             }
         }
         return res;
@@ -105,8 +105,8 @@ public class DetResize {
             result = resizeImageType1(matManager, img);
         }
         if (ximg != img) {
-            ximg.release();
-            img.release();
+            matManager.release(ximg);
+            matManager.release(img);
         }
         return new DetResizeResultV2(result.resizeImg(),
                 new double[]{srcH, srcW, result.imgShape()[0], result.imgShape()[1]});
@@ -144,7 +144,7 @@ public class DetResize {
 
         Image.Interpolation interpolation = interp == null ? Image.Interpolation.BILINEAR : interp;
         Mat resizedImg = new Resize(resizeW, resizeH, interpolation).process(matManager, img);
-        img.release();
+        matManager.release(img);
 
         return new DetResizeResultV2(resizedImg, new double[]{ratioH, ratioW});
     }
@@ -195,7 +195,7 @@ public class DetResize {
         double ratioW = (double) resizeW / oriW;
 
         Mat resizedImg = new Resize(resizeW, resizeH, Image.Interpolation.BILINEAR).process(matManager, img);
-        img.release();
+        matManager.release(img);
 
         return new DetResizeResultV2(resizedImg, new double[]{ratioH, ratioW});
     }
@@ -231,7 +231,7 @@ public class DetResize {
         }
 
         Mat resizedImg = new Resize(resizeW, resizeH, Image.Interpolation.BILINEAR).process(matManager, img);
-        img.release();
+        matManager.release(img);
 
         // Calculate aspect ratios
         double ratioH = (double) resizeH / h;
@@ -256,7 +256,7 @@ public class DetResize {
         double ratioW = (double) resizeW / oriW;
 
         Mat resizedImg = new Resize(resizeW, resizeH, Image.Interpolation.BILINEAR).process(matManager, img);
-        img.release();
+        matManager.release(img);
         return new DetResizeResultV2(resizedImg, new double[]{ratioH, ratioW});
     }
 
@@ -276,9 +276,9 @@ public class DetResize {
         Mat roi = matManager.newMat(imPad, new Rect(0, 0, w, h));
         im.copyTo(roi);
 
-        ones.release();
-        roi.release();
-        im.release();
+        matManager.release(ones);
+        matManager.release(roi);
+        matManager.release(im);
         return imPad;
     }
 

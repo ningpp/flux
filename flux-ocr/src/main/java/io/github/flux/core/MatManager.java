@@ -68,9 +68,20 @@ public class MatManager implements AutoCloseable {
         return mat;
     }
 
+    public void release(Mat mat) {
+        if (mat != null) {
+            long addr = mat.getNativeObjAddr();
+            if (resources.containsKey(addr)) {
+                resources.remove(addr);
+            }
+            IOUtil.close(mat);
+        }
+    }
+
     @Override
     public void close() throws Exception {
         resources.forEach((_, mat) -> IOUtil.close(mat));
+        resources.clear();
     }
 
 }

@@ -163,7 +163,7 @@ public class OCRPipeline {
         List<List<ObjectDetectionResult>> layoutResults = layoutModel.batchPredict(
             layoutInputs, layoutInputs.size(), matManager, ndManager, extraParameters);
         for (Mat srcRgb : srcRgbs) {
-          srcRgb.release();
+          matManager.release(srcRgb);
         }
         for (int i = 0; i < layoutResults.size(); i++) {
           allLayoutRegions.add(layoutResults.get(i));
@@ -191,10 +191,10 @@ public class OCRPipeline {
 
       // Release resources
       for (int i = 0; i < images.size(); i++) {
-        srcImages.get(i).release();
-        bgrImages.get(i).release();
+        matManager.release(srcImages.get(i));
+        matManager.release(bgrImages.get(i));
         if (oriLabels.get(i) == null || oriScores.get(i) <= 0.3f) {
-          rgbImages.get(i).release();
+          matManager.release(rgbImages.get(i));
         }
       }
 
@@ -254,7 +254,7 @@ public class OCRPipeline {
             PreProcessResult tableInput = tableModel.processRgb(matManager, croppedRgb, ndManager);
             List<TableResult> tableResults = tableModel.batchPredict(
                 List.of(tableInput), 1, matManager, ndManager, extraParameters);
-            croppedRgb.release();
+            matManager.release(croppedRgb);
             TableResult tableResult = tableResults.isEmpty() ? null : tableResults.get(0);
             layoutRegionResults.add(LayoutRegionResult.table(region, tableResult));
           } else {
@@ -291,7 +291,7 @@ public class OCRPipeline {
       }
       // Release formula RGB mats
       for (Mat rgb : formulaRgbs) {
-        rgb.release();
+        matManager.release(rgb);
       }
     }
 

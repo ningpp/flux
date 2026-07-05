@@ -122,14 +122,13 @@ public class OCRResizeNormImg implements ImageProcessor {
         finalImage.put(0, 0, finalImageData);
 
         for (Mat mat : channels) {
-            mat.release();
+            matManager.release(mat);
         }
-        transposed.release();
-        resizedImage.release();
-        roi.release();
-        paddingIm.release();
-        resizedImage.release();
-        img.release();
+        matManager.release(transposed);
+        matManager.release(resizedImage);
+        matManager.release(roi);
+        matManager.release(paddingIm);
+        matManager.release(img);
 
         // Reshape to (C, H, W)
         return finalImage;
@@ -198,9 +197,9 @@ public class OCRResizeNormImg implements ImageProcessor {
 
         Mat result = finalImage.reshape(1, new int[]{imgC, imgH, imgW});
 
-        resizedImage.release();
-        finalImage.release();
-        img.release();
+        matManager.release(resizedImage);
+        matManager.release(finalImage);
+        matManager.release(img);
         return result;
     }
 

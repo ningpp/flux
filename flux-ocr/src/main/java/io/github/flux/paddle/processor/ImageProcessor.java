@@ -33,7 +33,7 @@ public interface ImageProcessor {
             Mat result = process(matManager, srcImg);
             results.add(result);
             if (result != srcImg) {
-                srcImg.release();
+                matManager.release(srcImg);
             }
         }
         return results;
