@@ -37,7 +37,7 @@ public class ObjectDetectionResize {
             img_size[0] / (double) ori_img_size[0],
             img_size[1] / (double) ori_img_size[1]
         };
-        img.release();
+        matManager.release(img);
         return new ObjectDetectionResizeResult(ori_img_size, result_img, img_size, scale_factors);
     }
 

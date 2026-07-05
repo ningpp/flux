@@ -33,7 +33,7 @@ public class NougatImageProcessor {
         NDArray imgNdArray = ImageUtil.toNDArrayUint8(rgbImg, manager);
         NDArray input = process(matManager, imgNdArray, manager);
 
-        rgbImg.release();
+        matManager.release(rgbImg);
         imgNdArray.close();
         return input;
     }
