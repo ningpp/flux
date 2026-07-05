@@ -120,29 +120,29 @@ public class PaddleFormulaRecognitionPredictor extends BatchPredictor<PreProcess
 
     @Override
     public List<TextResult> doBatchPredict(List<PreProcessResult> inputNDArrays, MatManager matManager, NDManager manager, Map<String, Object> extraParameters) {
+        NDList ndList = new NDList();
+        NDArray inputNdArray = null;
+        OnnxTensor onnxInput = null;
+        OrtSession.Result onnxResult = null;
         try {
-            NDList ndList = new NDList();
             ndList.addAll(PreProcessResult.getNDArrays(inputNDArrays));
-            NDArray inputNdArray = NDArrays.stack(ndList, 0);
+            inputNdArray = NDArrays.stack(ndList, 0);
             inputNDArrays.forEach(IOUtil::close);
 
             FloatBuffer dataBuffer = inputNdArray.toByteBuffer().asFloatBuffer();
             long[] shape = inputNdArray.getShape().getShape();
-            OnnxTensor onnxInput = OnnxTensor.createTensor(env, dataBuffer, shape);
+            onnxInput = OnnxTensor.createTensor(env, dataBuffer, shape);
 
             Map<String, OnnxTensor> inputs = new HashMap<>(inputNames.size());
             for (String inputName : inputNames) {
                 inputs.put(inputName, onnxInput);
             }
-            OrtSession.Result onnxResult = session.run(inputs, outputNames);
+            onnxResult = session.run(inputs, outputNames);
             Optional<OnnxValue> optinalResult = onnxResult.get(List.copyOf(outputNames).get(0));
             long[][] preditResult = null;
             List<String> texts = null;
             if (optinalResult.isPresent()) {
                 preditResult = (long[][]) optinalResult.get().getValue();
-                onnxResult.close();
-                onnxInput.close();
-
                 NDArray preds = manager.create(preditResult);
                 texts = postProcessor.call(preds);
                 preds.close();
@@ -157,6 +157,11 @@ public class PaddleFormulaRecognitionPredictor extends BatchPredictor<PreProcess
             return results;
         } catch (Exception e) {
             throw new FluxException(e);
+        } finally {
+            IOUtil.close(onnxResult);
+            IOUtil.close(onnxInput);
+            IOUtil.close(inputNdArray);
+            IOUtil.close(ndList);
         }
     }
 
