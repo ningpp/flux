@@ -51,7 +51,6 @@ import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -96,6 +95,10 @@ public class DocumentFigureClassifierPredictor extends BatchPredictor<PreProcess
     @Override
     public List<List<ClassificationResult>> doBatchPredict(List<PreProcessResult> mats, MatManager matManager,
                                                      NDManager manager, Map<String, Object> extraParameters) {
+        NDList ndList = new NDList();
+        NDArray inputNdArray = null;
+        OnnxTensor onnxInput = null;
+        OrtSession.Result onnxResult = null;
         try {
             List<List<ClassificationResult>> allResults = new ArrayList<>();
             Integer k = ParameterUtil.getInteger(extraParameters, "k");
@@ -104,44 +107,16 @@ public class DocumentFigureClassifierPredictor extends BatchPredictor<PreProcess
             }
 
             List<NDArray> inputNDArrays = PreProcessResult.getNDArrays(mats);
-            NDList ndList = new NDList();
             ndList.addAll(inputNDArrays);
-            NDArray inputNdArray = NDArrays.stack(ndList);
+            inputNdArray = NDArrays.stack(ndList);
             inputNDArrays.forEach(IOUtil::close);
             long[] shape = inputNdArray.getShape().getShape();
             var dataBuffer = inputNdArray.toByteBuffer().asFloatBuffer();
-            OnnxTensor onnxInput = OnnxTensor.createTensor(env, dataBuffer, shape);
+            onnxInput = OnnxTensor.createTensor(env, dataBuffer, shape);
 
-            /*
-            int height = mats.get(0).mat().rows();
-            int width = mats.get(0).mat().cols();
-            int channels = mats.get(0).mat().channels();
-            int oneSize = (int) (mats.get(0).mat().total() * channels);
-            int size = mats.size() * oneSize;
-            float[] floatDatas = new float[size];
-            int index = 0;
-            for (PreProcessResult ppr : mats) {
-                float[] oneDatas = new float[oneSize];
-                ppr.mat().get(0, 0, oneDatas);
-                System.arraycopy(oneDatas, 0, floatDatas, index, oneDatas.length);
-                index += oneSize;
-            }
-            FloatBuffer dataBuffer = FloatBuffer.wrap(floatDatas);
-            long[] shape = new long[] {
-                    mats.size(),
-                    channels,
-                    height,
-                    width
-            };
-            OnnxTensor onnxInput = OnnxTensor.createTensor(env, dataBuffer, shape);
-            */
-
-            OrtSession.Result onnxResult = session.run(Map.of(inputName, onnxInput));
+            onnxResult = session.run(Map.of(inputName, onnxInput));
             OnnxValue optinalResult = onnxResult.get(0);
             float[][] preditResult = (float[][]) optinalResult.getValue();
-            System.out.println("a".repeat(311));
-            System.out.println(Arrays.toString(preditResult[0]));
-            System.out.println("b".repeat(311));
             float[][] softmax = ArrayUtil.softmaxDim1(preditResult);
             TopkResult topkResult = topkProcessor.compute(softmax, k);
             for (int i = 0; i < mats.size(); i++) {
@@ -157,6 +132,11 @@ public class DocumentFigureClassifierPredictor extends BatchPredictor<PreProcess
             return allResults;
         } catch (Exception e) {
             throw new FluxException(e);
+        } finally {
+            IOUtil.close(onnxResult);
+            IOUtil.close(onnxInput);
+            IOUtil.close(inputNdArray);
+            IOUtil.close(ndList);
         }
     }
 
@@ -171,7 +151,13 @@ public class DocumentFigureClassifierPredictor extends BatchPredictor<PreProcess
         NDArray rescaled = DeiTImageProcessor.rescale(resized, 0.00392156862745098f);
         NDArray normalized = DeiTImageProcessor.normalize(rescaled,
                 new float[]{0.485f, 0.456f, 0.406f}, new float[]{0.47853944f, 0.4732864f, 0.47434163f}, ndManager);
-        return normalized.transpose(2, 0, 1);
+        NDArray result = normalized.transpose(2, 0, 1);
+        // Release intermediate NDArrays
+        IOUtil.close(imgNdArray);
+        IOUtil.close(resized);
+        IOUtil.close(rescaled);
+        IOUtil.close(normalized);
+        return result;
     }
 
     private Mat preprocess_wrong(MatManager matManager, Mat rgbMat) {
