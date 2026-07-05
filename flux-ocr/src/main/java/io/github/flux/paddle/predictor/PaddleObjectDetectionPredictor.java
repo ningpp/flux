@@ -118,7 +118,7 @@ public class PaddleObjectDetectionPredictor extends BatchPredictor<ProcessedMat,
         List<ObjectDetectionResult> results = predict(
                 List.of(new ProcessedMat(rgbImg.width(), rgbImg.height(), rgbImg)),
                 matManager, manager, layoutNms).get(0);
-        rgbImg.release();
+        matManager.release(rgbImg);
         return results;
     }
 
