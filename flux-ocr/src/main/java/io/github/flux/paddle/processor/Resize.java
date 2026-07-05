@@ -54,7 +54,7 @@ public class Resize implements ImageProcessor {
         Imgproc.resize(img,
                 resized, new Size(width, height),
                 1, 1, interp);
-        img.release();
+        matManager.release(img);
         return resized;
     }
 
