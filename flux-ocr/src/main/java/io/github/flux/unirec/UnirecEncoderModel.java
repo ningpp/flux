@@ -59,23 +59,34 @@ public class UnirecEncoderModel implements AutoCloseable {
     }
 
     public UnirecEncoderModelPredictResult predict(PreProcessResult ppr, MatManager matManager, NDManager ndManager) {
+        NDList ndList = new NDList();
+        NDArray inputNdArray = null;
+        OnnxTensor onnxInput = null;
+        OrtSession.Result result = null;
         try {
-            NDList ndList = new NDList();
             ndList.add(ImageUtil.toChannalNDArrayFloat(matManager, ppr.mat(), ndManager));
-            NDArray inputNdArray = NDArrays.stack(ndList);
+            inputNdArray = NDArrays.stack(ndList);
             IOUtil.close(ppr.mat());
             long[] shape = inputNdArray.getShape().getShape();
             var dataBuffer = inputNdArray.toByteBuffer().asFloatBuffer();
-            OnnxTensor onnxInput = OnnxTensor.createTensor(env, dataBuffer, shape);
-            Result result = session.run(Map.of("pixel_values", onnxInput));
-            IOUtil.close(onnxInput);
+            onnxInput = OnnxTensor.createTensor(env, dataBuffer, shape);
             IOUtil.close(inputNdArray);
+            inputNdArray = null;
             IOUtil.close(ndList);
+            ndList = null;
+            result = session.run(Map.of("pixel_values", onnxInput));
+            IOUtil.close(onnxInput);
+            onnxInput = null;
             return new UnirecEncoderModelPredictResult(
+                    result,
                     (OnnxTensor) result.get(0),
                     (OnnxTensor) result.get(1),
                     (OnnxTensor) result.get(2));
         } catch (Exception e) {
+            IOUtil.close(result);
+            IOUtil.close(onnxInput);
+            IOUtil.close(inputNdArray);
+            IOUtil.close(ndList);
             throw new FluxException(e);
         }
     }

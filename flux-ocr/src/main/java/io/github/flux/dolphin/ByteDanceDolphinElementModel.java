@@ -21,6 +21,7 @@ import ai.djl.huggingface.tokenizers.HuggingFaceTokenizer;
 import ai.djl.ndarray.NDManager;
 import ai.onnxruntime.OnnxTensor;
 import ai.onnxruntime.OrtEnvironment;
+import ai.onnxruntime.OrtSession;
 import io.github.flux.core.BatchPredictor;
 import io.github.flux.core.ModelInstanceKey;
 import io.github.flux.core.MatManager;
@@ -120,8 +121,9 @@ public class ByteDanceDolphinElementModel extends BatchPredictor<PreProcessResul
         try {
             String task_prompt = "<s>" + prompt + " <Answer/>";
             long[] decoder_input_ids = tokenizer.encode(task_prompt, false, false).getIds();
-            try (OnnxTensor encodeResult = encoderModel.predictOnnxTensor(PreProcessResult.getMats(images))) {
-                return decoderModel.predict(prompt, encodeResult, decoder_input_ids, manager, skipSpecialTokens);
+            try (OrtSession.Result encodeResult = encoderModel.predict(PreProcessResult.getMats(images))) {
+                OnnxTensor encoderTensor = (OnnxTensor) encodeResult.get(0);
+                return decoderModel.predict(prompt, encoderTensor, decoder_input_ids, manager, skipSpecialTokens);
             }
         } catch (Exception e) {
             throw new FluxException(e);

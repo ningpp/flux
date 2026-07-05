@@ -18,8 +18,43 @@
 package io.github.flux.unirec;
 
 import ai.onnxruntime.OnnxTensor;
+import ai.onnxruntime.OrtSession;
+import io.github.flux.util.IOUtil;
 
-public record UnirecEncoderModelPredictResult(OnnxTensor hiddenStates,
-                                              OnnxTensor crossK,
-                                              OnnxTensor crossV) {
+public class UnirecEncoderModelPredictResult implements AutoCloseable {
+    private final OrtSession.Result result;
+    private final OnnxTensor hiddenStates;
+    private final OnnxTensor crossK;
+    private final OnnxTensor crossV;
+
+    public UnirecEncoderModelPredictResult(OrtSession.Result result,
+                                           OnnxTensor hiddenStates,
+                                           OnnxTensor crossK,
+                                           OnnxTensor crossV) {
+        this.result = result;
+        this.hiddenStates = hiddenStates;
+        this.crossK = crossK;
+        this.crossV = crossV;
+    }
+
+    public OnnxTensor hiddenStates() {
+        return hiddenStates;
+    }
+
+    public OnnxTensor crossK() {
+        return crossK;
+    }
+
+    public OnnxTensor crossV() {
+        return crossV;
+    }
+
+    @Override
+    public void close() {
+        // Close the extracted OnnxTensors and the underlying Result
+        IOUtil.close(hiddenStates);
+        IOUtil.close(crossK);
+        IOUtil.close(crossV);
+        IOUtil.close(result);
+    }
 }

@@ -144,9 +144,7 @@ public class UnirecDecoderModel implements AutoCloseable {
                 IOUtil.close(pastKvPair.getLeft());
                 IOUtil.close(pastKvPair.getRight());
             }
-            IOUtil.close(encodeResult.hiddenStates());
-            IOUtil.close(encodeResult.crossK());
-            IOUtil.close(encodeResult.crossV());
+            IOUtil.close(encodeResult); // closes hiddenStates, crossK, crossV and underlying OrtSession.Result
             return new TextResult(clean_special_tokens(decodeTokenIds(ids)), ids, -1f);
         } catch (Exception e) {
             throw new FluxException(e);

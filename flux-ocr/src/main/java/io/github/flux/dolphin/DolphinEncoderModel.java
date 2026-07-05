@@ -56,10 +56,9 @@ public class DolphinEncoderModel implements AutoCloseable {
         }
     }
 
-    public OnnxTensor predictOnnxTensor(List<Mat> inputMats) throws OrtException {
+    public OrtSession.Result predict(List<Mat> inputMats) throws OrtException {
         try (OnnxTensor onnxInput = ImageUtil.matToOnnxTensor(inputMats, env)) {
-            OrtSession.Result onnxResult = session.run(Map.of(inputName, onnxInput));
-            return (OnnxTensor) onnxResult.get(0);
+            return session.run(Map.of(inputName, onnxInput));
         }
     }
 
