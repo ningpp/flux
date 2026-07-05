@@ -153,43 +153,53 @@ public class NougatLatexDecoderModel implements AutoCloseable {
         OnnxTensor encoder_hidden_states_tensor = OnnxTensor.createTensor(env, dataBuffer, shape);
 
         long[] inputIds = new long[]{decoderStartTokenId};
-        for (int i = 0; i < maxLength; i++) {
+        try {
+            for (int i = 0; i < maxLength; i++) {
 
-            OnnxTensor input_ids_tensor = OnnxTensor.createTensor(env, new long[][]{inputIds});
-            Map<String, OnnxTensor> inputs = new HashMap<>(2);
-            inputs.put("input_ids", input_ids_tensor);
-            inputs.put("encoder_hidden_states", encoder_hidden_states_tensor);
-            OrtSession.Result onnxResult = session.run(inputs, outputNames);
-            Optional<OnnxValue> optinalResult = onnxResult.get(List.copyOf(outputNames).get(0));
-            if (optinalResult.isPresent()) {
-                float[][][] decoderResultFloats = (float[][][]) optinalResult.get().getValue();
-                NDArray decoderResults = ArrayUtil.toNDArray(manager, decoderResultFloats);
-                // 等价于 [:, -1, :]
-                NDArray lastTokenLogits = decoderResults.get(":, -1, :");
+                OnnxTensor input_ids_tensor = OnnxTensor.createTensor(env, new long[][]{inputIds});
+                Map<String, OnnxTensor> inputs = new HashMap<>(2);
+                inputs.put("input_ids", input_ids_tensor);
+                inputs.put("encoder_hidden_states", encoder_hidden_states_tensor);
+                OrtSession.Result onnxResult = session.run(inputs, outputNames);
+                Optional<OnnxValue> optinalResult = onnxResult.get(List.copyOf(outputNames).get(0));
+                if (optinalResult.isPresent()) {
+                    float[][][] decoderResultFloats = (float[][][]) optinalResult.get().getValue();
+                    NDArray decoderResults = ArrayUtil.toNDArray(manager, decoderResultFloats);
+                    // 等价于 [:, -1, :]
+                    NDArray lastTokenLogits = decoderResults.get(":, -1, :");
 
-                NDArray nextTokenLogits = lastTokenLogits.toType(DataType.FLOAT32, true);
+                    NDArray nextTokenLogits = lastTokenLogits.toType(DataType.FLOAT32, true);
 
-                NDArray _nextTokens = nextTokenLogits.argMax(-1);
-                NDArray nextTokens = _nextTokens.toType(DataType.INT64, false);
+                    NDArray _nextTokens = nextTokenLogits.argMax(-1);
+                    NDArray nextTokens = _nextTokens.toType(DataType.INT64, false);
 
-                long[] nextTokenIds = nextTokens.toLongArray();
-                inputIds = ArrayUtil.concat(inputIds, nextTokenIds);
-                if (ArrayUtil.contains(nextTokenIds, eosTokenId)) {
-                    break;
+                    long[] nextTokenIds = nextTokens.toLongArray();
+                    inputIds = ArrayUtil.concat(inputIds, nextTokenIds);
+                    if (ArrayUtil.contains(nextTokenIds, eosTokenId)) {
+                        break;
+                    }
+                    // Release intermediate NDArrays
+                    nextTokens.close();
+                    _nextTokens.close();
+                    lastTokenLogits.close();
+                    decoderResults.close();
+                    nextTokenLogits.close();
                 }
+                IOUtil.close(onnxResult);
+                IOUtil.close(input_ids_tensor);
             }
-            IOUtil.close(onnxResult);
-            IOUtil.close(inputNdArray);
-            IOUtil.close(input_ids_tensor);
-        }
 
-        String text = tokenizer.decode(inputIds, true);
-        NDArray _sequences = manager.create(inputIds);
-        NDArray sequences = _sequences.reshape(1, inputIds.length);
-        var r = new TextResult(text, inputIds, -1);
-        sequences.close();
-        _sequences.close();
-        return r;
+            String text = tokenizer.decode(inputIds, true);
+            NDArray _sequences = manager.create(inputIds);
+            NDArray sequences = _sequences.reshape(1, inputIds.length);
+            var r = new TextResult(text, inputIds, -1);
+            sequences.close();
+            _sequences.close();
+            return r;
+        } finally {
+            IOUtil.close(encoder_hidden_states_tensor);
+            IOUtil.close(inputNdArray);
+        }
     }
 
     public TextResult predict(float[][][] encodeResultFloats, long[] decoder_input_ids, NDManager manager) throws OrtException {

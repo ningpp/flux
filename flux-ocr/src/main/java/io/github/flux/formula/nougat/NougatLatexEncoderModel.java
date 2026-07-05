@@ -62,16 +62,27 @@ public class NougatLatexEncoderModel implements AutoCloseable {
 
     public OnnxTensor batchPredict(List<NDArray> inputNDArrays, NDManager manager) throws OrtException {
         NDList ndList = new NDList();
-        ndList.addAll(inputNDArrays);
-        NDArray inputNdArray = NDArrays.stack(ndList);
-        inputNDArrays.forEach(IOUtil::close);
-        long[] shape = inputNdArray.getShape().getShape();
-        var dataBuffer = inputNdArray.toByteBuffer().asFloatBuffer();
-        IOUtil.close(inputNdArray);
-        IOUtil.close(ndList);
-        try (OnnxTensor onnxInput = OnnxTensor.createTensor(env, dataBuffer, shape)) {
-            OrtSession.Result onnxResult = session.run(Map.of(inputName, onnxInput));
-            return (OnnxTensor) onnxResult.get(0);
+        NDArray inputNdArray = null;
+        try {
+            ndList.addAll(inputNDArrays);
+            inputNdArray = NDArrays.stack(ndList);
+            inputNDArrays.forEach(IOUtil::close);
+            long[] shape = inputNdArray.getShape().getShape();
+            var dataBuffer = inputNdArray.toByteBuffer().asFloatBuffer();
+            // inputNdArray data is copied into dataBuffer, safe to close now
+            IOUtil.close(inputNdArray);
+            inputNdArray = null;
+            IOUtil.close(ndList);
+            ndList = null;
+            try (OnnxTensor onnxInput = OnnxTensor.createTensor(env, dataBuffer, shape)) {
+                OrtSession.Result onnxResult = session.run(Map.of(inputName, onnxInput));
+                // Return the OnnxTensor from result - caller is responsible for closing it
+                // (which also closes the underlying OrtSession.Result)
+                return (OnnxTensor) onnxResult.get(0);
+            }
+        } finally {
+            IOUtil.close(inputNdArray);
+            IOUtil.close(ndList);
         }
     }
 
