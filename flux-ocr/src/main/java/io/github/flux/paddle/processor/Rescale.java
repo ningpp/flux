@@ -35,14 +35,14 @@ public class Rescale implements ImageProcessor {
     public Mat process(MatManager matManager, Mat img) {
         Mat float64MatScaled = matManager.newMat();
         img.convertTo(float64MatScaled, CvType.CV_64FC3);
-        img.release();
+        matManager.release(img);
         Mat dest = matManager.newMat();
         Core.multiply(float64MatScaled, new Scalar(scale), dest);
-        float64MatScaled.release();
+        matManager.release(float64MatScaled);
 
         Mat float32MatScaled = matManager.newMat();
         dest.convertTo(float32MatScaled, CvType.CV_32FC3);
-        dest.release();
+        matManager.release(dest);
         return float32MatScaled;
     }
 

@@ -285,8 +285,8 @@ public class DBPostProcess {
         List<MatOfPoint> contours = new ArrayList<>();
         Mat hierarchy = matManager.newMat();
         Imgproc.findContours(mat, contours, hierarchy, Imgproc.RETR_LIST, Imgproc.CHAIN_APPROX_SIMPLE);
-        mat.release();
-        hierarchy.release();
+        matManager.release(mat);
+        matManager.release(hierarchy);
 
         int numContours = Math.min(contours.size(), maxCandidates);
         for (int idx = 0; idx < numContours; idx++) {
@@ -406,8 +406,8 @@ public class DBPostProcess {
         List<MatOfPoint> contours = new ArrayList<>();
         Mat hierarchy = matManager.newMat();
         Imgproc.findContours(mat, contours, hierarchy, Imgproc.RETR_LIST, Imgproc.CHAIN_APPROX_SIMPLE);
-        mat.release();
-        hierarchy.release();
+        matManager.release(mat);
+        matManager.release(hierarchy);
 
         // 4. iterate contours up to maxCandidates
         int numContours = Math.min(contours.size(), maxCandidates);
