@@ -75,7 +75,7 @@ public class LatexImageFormat implements ImageProcessor {
         Mat result = blob.reshape(1, newShape);
 
         // Release intermediate Mats to free memory
-        paddedImg.release();
+        matManager.release(paddedImg);
         blob.release();
 
         return result;
