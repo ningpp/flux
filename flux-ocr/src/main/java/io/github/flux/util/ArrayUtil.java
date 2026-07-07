@@ -34,6 +34,20 @@ public final class ArrayUtil {
                     new long[] {inputIds.length, inputIds[0].length});
     }
 
+    /**
+     * 仅取每一行的前 {@code cols} 列构造 OnnxTensor（形状 [rows, cols]）。
+     * 用于自回归解码：序列逐步增长，避免每步重新分配/拷贝整段已生成前缀，
+     * 也避免把预分配缓冲中尚未写入的垃圾数据送入模型。
+     */
+    public static OnnxTensor createOnnxTensor(long[][] inputIds, int cols, OrtEnvironment env) throws OrtException {
+        int rows = inputIds.length;
+        long[] flatData = new long[rows * cols];
+        for (int i = 0; i < rows; i++) {
+            System.arraycopy(inputIds[i], 0, flatData, i * cols, cols);
+        }
+        return OnnxTensor.createTensor(env, LongBuffer.wrap(flatData), new long[] {rows, cols});
+    }
+
     public static OnnxTensor createOnnxTensor(boolean[][][] data, OrtEnvironment env) throws OrtException {
         int d1 = data.length;
         int d2 = data[0].length;

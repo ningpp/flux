@@ -1,12 +1,10 @@
 package io.github.flux.blip;
 
 import ai.djl.huggingface.tokenizers.HuggingFaceTokenizer;
-import ai.djl.ndarray.NDArray;
 import ai.djl.ndarray.NDManager;
 import ai.onnxruntime.OrtEnvironment;
 import io.github.flux.core.BatchPredictor;
 import io.github.flux.core.MatManager;
-import io.github.flux.core.PreProcessResult;
 import io.github.flux.core.TextResult;
 import io.github.flux.exception.FluxException;
 import org.opencv.core.Mat;
@@ -14,10 +12,11 @@ import org.opencv.core.Mat;
 import java.io.File;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
-public class BlipModel extends BatchPredictor<PreProcessResult, TextResult> {
+public class BlipModel extends BatchPredictor<BlipModel.BlipPreProcessResult, TextResult> {
 
     private final BlipVisionEncoder visionEncoder;
     private final BlipTextDecoder textDecoder;
@@ -38,14 +37,23 @@ public class BlipModel extends BatchPredictor<PreProcessResult, TextResult> {
         }
     }
 
-    @Override
-    public PreProcessResult processRgb(MatManager matManager, Mat rgbMat, NDManager ndManager) {
-        NDArray array = BlipImageProcessor.process(rgbMat, matManager, ndManager);
-        return new PreProcessResult(null, array);
+    /**
+     * BLIP 预处理结果：仅持有一份归一化像素 float[]（形状 [C,H,W]），
+     * 不持有 DJL NDArray，从而彻底避免 NDArray 原生内存泄漏与冗余的来回拷贝。
+     */
+    public record BlipPreProcessResult(float[] pixelData) {
     }
 
     @Override
-    public List<TextResult> doBatchPredict(List<PreProcessResult> pprs, MatManager matManager, NDManager ndManager, Map<String, Object> extraParameters) {
+    public BlipPreProcessResult processRgb(MatManager matManager, Mat rgbMat, NDManager ndManager) {
+        float[] pixels = BlipImageProcessor.process(rgbMat, matManager);
+        // rgbMat 仅用于生成像素数据，使用完毕立即释放，避免 MatManager 跟踪表随推理张数增长（内存泄露）
+        matManager.release(rgbMat);
+        return new BlipPreProcessResult(pixels);
+    }
+
+    @Override
+    public List<TextResult> doBatchPredict(List<BlipPreProcessResult> pprs, MatManager matManager, NDManager ndManager, Map<String, Object> extraParameters) {
         int batchSize = pprs.size();
         if (batchSize == 0) return List.of();
 
@@ -58,7 +66,7 @@ public class BlipModel extends BatchPredictor<PreProcessResult, TextResult> {
         float[] pixelValues = new float[batchSize * singleImageSize];
 
         for (int i = 0; i < batchSize; i++) {
-            float[] imgData = pprs.get(i).ndArray().toFloatArray();
+            float[] imgData = pprs.get(i).pixelData();
             System.arraycopy(imgData, 0, pixelValues, i * singleImageSize, singleImageSize);
         }
 
@@ -67,43 +75,45 @@ public class BlipModel extends BatchPredictor<PreProcessResult, TextResult> {
             float[][][] encoderHiddenStates = visionEncoder.predict(pixelValues, batchSize);
 
             // 3. Text Decoder Loop
-            long[][] inputIds = new long[batchSize][1];
-            for (int i = 0; i < batchSize; i++) inputIds[i][0] = BOS_TOKEN;
+            // 预分配固定长度缓冲，序列逐步增长，避免每步重新分配“整段已生成前缀”（O(n^2) 拷贝）
+            int maxLen = MAX_NEW_TOKENS + 1;
+            long[][] sequences = new long[batchSize][maxLen];
+            for (int i = 0; i < batchSize; i++) {
+                sequences[i][0] = BOS_TOKEN;
+            }
 
             boolean[] finished = new boolean[batchSize];
+            int curLen = 1;
 
             for (int step = 0; step < MAX_NEW_TOKENS; step++) {
                 if (allFinished(finished)) break;
 
-                float[][][] logits = textDecoder.predict(inputIds, encoderHiddenStates);
-
-                int seqLen = inputIds[0].length;
-                long[][] nextInputIds = new long[batchSize][seqLen + 1];
+                // 仅用前 curLen 列构造输入，复用预分配缓冲
+                float[][][] logits = textDecoder.predict(sequences, curLen, encoderHiddenStates);
 
                 for (int b = 0; b < batchSize; b++) {
-                    System.arraycopy(inputIds[b], 0, nextInputIds[b], 0, seqLen);
-
                     if (finished[b]) {
-                        nextInputIds[b][seqLen] = SEP_TOKEN;
+                        sequences[b][curLen] = SEP_TOKEN;
                     } else {
-                        // Logits shape: [seqLen, vocabSize] for this batch
-                        float[] lastTokenLogits = logits[b][seqLen - 1];
+                        // logits[b] 形状: [curLen, vocabSize]，取最后一个 token 的 logits
+                        float[] lastTokenLogits = logits[b][curLen - 1];
                         int maxIdx = argmax(lastTokenLogits);
 
                         if (maxIdx == SEP_TOKEN) {
                             finished[b] = true;
                         }
-                        nextInputIds[b][seqLen] = maxIdx;
+                        sequences[b][curLen] = maxIdx;
                     }
                 }
-                inputIds = nextInputIds;
+                curLen++;
             }
 
             // 4. Decode
             List<TextResult> results = new ArrayList<>();
             for (int b = 0; b < batchSize; b++) {
-                String text = tokenizer.decode(inputIds[b], true);
-                results.add(new TextResult(text, inputIds[b], 1.0f));
+                long[] ids = Arrays.copyOf(sequences[b], curLen);
+                String text = tokenizer.decode(ids, true);
+                results.add(new TextResult(text, ids, 1.0f));
             }
             return results;
 
@@ -135,5 +145,7 @@ public class BlipModel extends BatchPredictor<PreProcessResult, TextResult> {
     public void close() throws Exception {
         if (visionEncoder != null) visionEncoder.close();
         if (textDecoder != null) textDecoder.close();
+        // 释放 tokenizer 持有的原生资源（词表/分词器句柄），否则长期持有会导致内存泄漏
+        if (tokenizer != null) tokenizer.close();
     }
 }

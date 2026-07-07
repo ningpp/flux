@@ -29,7 +29,15 @@ public class BlipTextDecoder implements AutoCloseable {
     }
 
     public float[][][] predict(long[][] inputIds, float[][][] encoderHiddenStates) throws OrtException {
-        try (OnnxTensor idsTensor = ArrayUtil.createOnnxTensor(inputIds, env);
+        return predict(inputIds, inputIds[0].length, encoderHiddenStates);
+    }
+
+    /**
+     * @param seqLen 仅取 {@code inputIds} 每行前 {@code seqLen} 列作为模型输入。
+     *               自回归解码时序列逐步增长，复用预分配缓冲、避免每步重复分配与拷贝前缀。
+     */
+    public float[][][] predict(long[][] inputIds, int seqLen, float[][][] encoderHiddenStates) throws OrtException {
+        try (OnnxTensor idsTensor = ArrayUtil.createOnnxTensor(inputIds, seqLen, env);
              OnnxTensor attTensor = ArrayUtil.createOnnxTensor(encoderHiddenStates, env);
              Result result = session.run(Map.of(
                      "input_ids", idsTensor,
