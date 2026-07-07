@@ -98,7 +98,14 @@ public class UnirecPredictor extends BatchPredictor<PreProcessResult, TextResult
         List<TextResult> results = new ArrayList<>(mats.size());
         for (PreProcessResult ppr : mats) {
             UnirecEncoderModelPredictResult encodeResult = encoderModel.predict(ppr, matManager, manager);
-            results.add(decoderModel.predict(encodeResult));
+            try {
+                results.add(decoderModel.predict(encodeResult));
+            } finally {
+                // Ensure the encoder result (3 tensors + OrtSession.Result) is released even
+                // if decoding throws. On the normal path the decoder already closes it, so this
+                // is an idempotent no-op there.
+                IOUtil.close(encodeResult);
+            }
         }
         return results;
     }

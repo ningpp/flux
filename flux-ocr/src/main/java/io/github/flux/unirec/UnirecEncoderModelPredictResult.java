@@ -51,10 +51,9 @@ public class UnirecEncoderModelPredictResult implements AutoCloseable {
 
     @Override
     public void close() {
-        // Close the extracted OnnxTensors and the underlying Result
-        IOUtil.close(hiddenStates);
-        IOUtil.close(crossK);
-        IOUtil.close(crossV);
+        // Closing the Result also closes the OnnxTensors extracted from it.
+        // Do not close hiddenStates/crossK/crossV separately to avoid
+        // "Closing an already closed tensor" warnings.
         IOUtil.close(result);
     }
 }

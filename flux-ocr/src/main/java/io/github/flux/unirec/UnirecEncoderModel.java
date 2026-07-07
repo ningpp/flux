@@ -17,9 +17,6 @@
  */
 package io.github.flux.unirec;
 
-import ai.djl.ndarray.NDArray;
-import ai.djl.ndarray.NDArrays;
-import ai.djl.ndarray.NDList;
 import ai.djl.ndarray.NDManager;
 import ai.onnxruntime.OnnxTensor;
 import ai.onnxruntime.OrtEnvironment;
@@ -29,8 +26,9 @@ import io.github.flux.core.MatManager;
 import io.github.flux.core.PreProcessResult;
 import io.github.flux.exception.FluxException;
 import io.github.flux.util.IOUtil;
-import io.github.flux.util.ImageUtil;
+import org.opencv.core.Mat;
 
+import java.nio.FloatBuffer;
 import java.util.Map;
 
 public class UnirecEncoderModel implements AutoCloseable {
@@ -59,21 +57,20 @@ public class UnirecEncoderModel implements AutoCloseable {
     }
 
     public UnirecEncoderModelPredictResult predict(PreProcessResult ppr, MatManager matManager, NDManager ndManager) {
-        NDList ndList = new NDList();
-        NDArray inputNdArray = null;
         OnnxTensor onnxInput = null;
         OrtSession.Result result = null;
         try {
-            ndList.add(ImageUtil.toChannalNDArrayFloat(matManager, ppr.mat(), ndManager));
-            inputNdArray = NDArrays.stack(ndList);
-            IOUtil.close(ppr.mat());
-            long[] shape = inputNdArray.getShape().getShape();
-            var dataBuffer = inputNdArray.toByteBuffer().asFloatBuffer();
-            onnxInput = OnnxTensor.createTensor(env, dataBuffer, shape);
-            IOUtil.close(inputNdArray);
-            inputNdArray = null;
-            IOUtil.close(ndList);
-            ndList = null;
+            // The preprocessor already produced a CHW-planar float Mat (see UnirecProcessor /
+            // ToCHWImage), i.e. the exact [C, H, W] layout the ONNX model expects. Feed it
+            // directly to OnnxTensor to avoid the DJL NDArray -> ByteBuffer -> OnnxTensor copies.
+            Mat mat = ppr.mat();
+            long[] shape = new long[]{1, mat.channels(), mat.height(), mat.width()};
+            int total = mat.height() * mat.width() * mat.channels();
+            float[] buf = new float[total];
+            mat.get(0, 0, buf);
+            // Release the input Mat AND drop it from the MatManager tracking table.
+            matManager.release(mat);
+            onnxInput = OnnxTensor.createTensor(env, FloatBuffer.wrap(buf), shape);
             result = session.run(Map.of("pixel_values", onnxInput));
             IOUtil.close(onnxInput);
             onnxInput = null;
@@ -85,8 +82,6 @@ public class UnirecEncoderModel implements AutoCloseable {
         } catch (Exception e) {
             IOUtil.close(result);
             IOUtil.close(onnxInput);
-            IOUtil.close(inputNdArray);
-            IOUtil.close(ndList);
             throw new FluxException(e);
         }
     }

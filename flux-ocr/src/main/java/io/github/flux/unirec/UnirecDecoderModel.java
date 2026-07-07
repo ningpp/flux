@@ -98,22 +98,28 @@ public class UnirecDecoderModel implements AutoCloseable {
 
             // Initialize empty past_key_values for first step
             // Shape: [batch_size, num_heads, 0, head_dim]
-            List<Pair<OnnxTensor, OnnxTensor>> past_key_values = new ArrayList<>();
+            List<Pair<OnnxTensor, OnnxTensor>> initialPastKeyValues = new ArrayList<>();
             int batch_size = (int) encodeResult.hiddenStates().getInfo().getShape()[0];
             for (int i = 0; i < num_decoder_layers; i++) {
                 float[][][][] empty_key = ArrayUtil.createZeros(batch_size, num_heads, 0, head_dim);
                 float[][][][] empty_value = ArrayUtil.createZeros(batch_size, num_heads, 0, head_dim);
-                past_key_values.add(Pair.of(ArrayUtil.createOnnxTensor(empty_key, env),
+                initialPastKeyValues.add(Pair.of(ArrayUtil.createOnnxTensor(empty_key, env),
                         ArrayUtil.createOnnxTensor(empty_value, env)));
             }
 
             OnnxTensor crossKOnnxTensor = encodeResult.crossK();
             OnnxTensor crossVOnnxTensor = encodeResult.crossV();
             int generatedTokens = 0;
+            // Holds the Result of the most recent decode step so its native handle can be
+            // released once the present_key_values it produced are no longer referenced.
+            DecodeStepResult dsr = null;
+            List<Pair<OnnxTensor, OnnxTensor>> past_key_values = initialPastKeyValues;
             for (int i = 0; i < maxTokens; i++) {
                 long current_token = generated_ids[i];
-                // Decode step
-                DecodeStepResult dsr = decode_step(
+                // Decode step closes only the newly created input tensors (input_ids,
+                // position_ids). The input past_key_values are owned by the previous step's
+                // Result and are closed when that Result is released below.
+                DecodeStepResult next = decode_step(
                         current_token,
                         i,
                         crossKOnnxTensor,
@@ -121,8 +127,15 @@ public class UnirecDecoderModel implements AutoCloseable {
                         past_key_values,
                         pad_token_id,
                         num_decoder_layers);
-                float[][][] logits = dsr.logits;
-                past_key_values = dsr.past_key_values;
+                // The previous step's Result owns its output tensors, which served as the
+                // current step's past_key_values input. Now that the current step has run,
+                // those tensors are no longer needed and are released with the Result.
+                if (dsr != null) {
+                    IOUtil.close(dsr.result());
+                }
+                dsr = next;
+                past_key_values = dsr.past_key_values();
+                float[][][] logits = dsr.logits();
                 // Get next token
                 long next_token_id = getNextTokenId(logits);
                 generated_ids[i+1] = next_token_id;
@@ -138,13 +151,17 @@ public class UnirecDecoderModel implements AutoCloseable {
             }
             long[] ids = new long[generatedTokens];
             System.arraycopy(generated_ids, 0, ids, 0, generatedTokens);
-            IOUtil.close(crossKOnnxTensor);
-            IOUtil.close(crossVOnnxTensor);
-            for (var pastKvPair : past_key_values) {
+
+            // Clean up: the final Result owns its output tensors (final past_key_values),
+            // so closing it releases them. The initial empty past_key_values are owned by us.
+            if (dsr != null) {
+                IOUtil.close(dsr.result());
+            }
+            for (var pastKvPair : initialPastKeyValues) {
                 IOUtil.close(pastKvPair.getLeft());
                 IOUtil.close(pastKvPair.getRight());
             }
-            IOUtil.close(encodeResult); // closes hiddenStates, crossK, crossV and underlying OrtSession.Result
+            // encodeResult is owned by the caller (UnirecPredictor) and closed in its finally block.
             return new TextResult(clean_special_tokens(decodeTokenIds(ids)), ids, -1f);
         } catch (Exception e) {
             throw new FluxException(e);
@@ -224,22 +241,20 @@ public class UnirecDecoderModel implements AutoCloseable {
         decoder_inputs.put("position_ids", positionIdsTensor);
         decoder_inputs.put("cross_k", crossKOnnxTensor);
         decoder_inputs.put("cross_v", crossVOnnxTensor);
-        List<OnnxTensor> pastOnnxTensors = new ArrayList<>();
         for (int i = 0; i < pastKeyValues.size(); i++) {
             OnnxTensor keyTensor = pastKeyValues.get(i).getLeft();
             OnnxTensor valueTensor = pastKeyValues.get(i).getRight();
             decoder_inputs.put("past_key_" + i, keyTensor);
             decoder_inputs.put("past_value_" + i, valueTensor);
-            pastOnnxTensors.add(keyTensor);
-            pastOnnxTensors.add(valueTensor);
         }
 
         Result result = session.run(decoder_inputs);
-        decoder_inputs.forEach((k,v)-> {
-            if (!"cross_k".equals(k) && !"cross_v".equals(k)) {
-                IOUtil.close(v);
-            }
-        });
+        // Close only the newly created input tensors (input_ids, position_ids).
+        // Do NOT close cross_k/cross_v - they are owned by the caller (the encoder result)
+        // and reused every step. Do NOT close past_key_values - they are outputs of the
+        // previous step's Result and are released when that Result is closed by the caller.
+        IOUtil.close(inputIdsTensor);
+        IOUtil.close(positionIdsTensor);
         float[][][] logits = (float[][][]) result.get(0).getValue();
         List<Pair<OnnxTensor, OnnxTensor>> present_key_values = new ArrayList<>();
         // Extract present_key_values
@@ -248,12 +263,14 @@ public class UnirecDecoderModel implements AutoCloseable {
                     (OnnxTensor) result.get(1 + i * 2),
                     (OnnxTensor) result.get(1 + i * 2 + 1)));
         }
-        IOUtil.close(result.get(0));
-        pastOnnxTensors.forEach(IOUtil::close);
-        return new DecodeStepResult(logits, present_key_values);
+        // The Result is returned to the caller and closed later (once its present_key_values
+        // outputs are no longer referenced), so its native handle is not leaked.
+        return new DecodeStepResult(logits, present_key_values, result);
     }
 
-    private record DecodeStepResult(float[][][] logits, List<Pair<OnnxTensor, OnnxTensor>> past_key_values) {
+    private record DecodeStepResult(float[][][] logits,
+                                    List<Pair<OnnxTensor, OnnxTensor>> past_key_values,
+                                    OrtSession.Result result) {
 
     }
 

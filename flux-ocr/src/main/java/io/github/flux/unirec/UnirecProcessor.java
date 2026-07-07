@@ -42,6 +42,9 @@ public class UnirecProcessor implements ImageProcessor {
         Scalar std = new Scalar(0.5, 0.5, 0.5);
         Core.subtract(floatImg, mean, floatImg);
         Core.divide(floatImg, std, floatImg);
+        // resized is no longer needed after convertTo; release it so a long-lived
+        // MatManager does not accumulate one tracked Mat per inference.
+        matManager.release(resized);
         return new ToCHWImage().process(matManager, floatImg);
     }
 
