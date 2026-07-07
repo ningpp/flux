@@ -26,10 +26,37 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class FalconOcrModel extends BatchPredictor<PreProcessResult, TextResult> {
 
-    public static final Set<String> MODEL_NAMES = Set.of("Falcon-OCR");
+    public static final Set<String> MODEL_NAMES = Set.of("Falcon-OCR", "Falcon-OCR-ONNX");
 
     private static final int DEFAULT_MAX_SEQ_LEN = 8192;
-    private static final Map<ModelInstanceKey, FalconOcrModel> INSTANCE_CACHE = new ConcurrentHashMap<>();
+
+    /**
+     * 共享实例缓存。
+     *
+     * <p>修复点：旧实现使用无界 {@code ConcurrentHashMap} 且只增不减，每个不同的
+     * {@link ModelInstanceKey}（含 modelRootDir/modelName/gpuIndex/customParams）都会创建并永久驻留一个
+     * {@link FalconOcrModel}。该实例持有 HuggingFaceTokenizer、ONNX OrtSession（GPU 下占显存）与
+     * OrtIoBindingNative（CUDA 资源），长期运行会持续累积直至 OOM，且在 GPU 上永久占用显存；同时
+     * {@code close()} 直接销毁共享实例却不从缓存移除，造成悬挂引用与 use-after-close。
+     *
+     * <p>现改为引用计数：仅当引用计数归零时才真正关闭底层资源并从缓存中移除，既保留“模型复用”的性能优势，
+     * 又避免无界增长与“共享实例被其中一个持有者关闭后其他持有者 use-after-close”的问题。
+     */
+    private static final Map<ModelInstanceKey, CacheEntry> INSTANCE_CACHE = new ConcurrentHashMap<>();
+    private static final Object CACHE_LOCK = new Object();
+
+    /**
+     * 缓存条目：持有共享模型实例及其引用计数。
+     */
+    private static final class CacheEntry {
+        final FalconOcrModel model;
+        int refCount;
+
+        CacheEntry(FalconOcrModel model) {
+            this.model = model;
+            this.refCount = 1;
+        }
+    }
 
     public static FalconOcrModel getSharedInstance(final String modelRootDir,
                                                    final String modelName,
@@ -37,18 +64,48 @@ public class FalconOcrModel extends BatchPredictor<PreProcessResult, TextResult>
                                                    final OrtEnvironment env,
                                                    final Map<String, Object> customParams) {
         ModelInstanceKey key = new ModelInstanceKey(modelRootDir, modelName, gpuIndex, customParams);
-        return INSTANCE_CACHE.computeIfAbsent(key,
-                k -> new FalconOcrModel(modelRootDir, modelName, gpuIndex, env, customParams));
+        synchronized (CACHE_LOCK) {
+            CacheEntry entry = INSTANCE_CACHE.get(key);
+            if (entry != null) {
+                entry.refCount++;
+                return entry.model;
+            }
+            FalconOcrModel created = new FalconOcrModel(modelRootDir, modelName, gpuIndex, env, customParams);
+            INSTANCE_CACHE.put(key, new CacheEntry(created));
+            return created;
+        }
     }
 
+    /**
+     * 当前缓存中的共享实例数量，主要用于内存泄露验证（归零表示无悬挂引用）。
+     */
+    public static int sharedInstanceCount() {
+        return INSTANCE_CACHE.size();
+    }
+
+    /**
+     * 关闭并清空所有共享实例（兜底/测试用）。
+     */
+    public static void clearSharedInstances() {
+        synchronized (CACHE_LOCK) {
+            for (CacheEntry entry : INSTANCE_CACHE.values()) {
+                entry.model.doClose();
+            }
+            INSTANCE_CACHE.clear();
+        }
+    }
+
+    private final ModelInstanceKey key;
     private final HuggingFaceTokenizer tokenizer;
     private final FalconOcrTokenKvModel tokenKvModel;
+    private volatile boolean closed = false;
 
     private FalconOcrModel(final String modelRootDir,
                            final String modelName,
                            final int gpuIndex,
                            final OrtEnvironment env,
                            final Map<String, Object> customParams) {
+        this.key = new ModelInstanceKey(modelRootDir, modelName, gpuIndex, customParams);
         if (!MODEL_NAMES.contains(modelName)) {
             throw new FluxException("not supported Falcon-OCR model: " + modelName);
         }
@@ -143,7 +200,27 @@ public class FalconOcrModel extends BatchPredictor<PreProcessResult, TextResult>
     }
 
     @Override
-    public void close() throws Exception {
+    public void close() {
+        synchronized (CACHE_LOCK) {
+            if (closed) {
+                return;
+            }
+            CacheEntry entry = INSTANCE_CACHE.get(key);
+            if (entry == null || entry.model != this) {
+                // 未命中（理论上不应发生）——直接关闭，避免资源悬挂泄漏。
+                closed = true;
+                doClose();
+                return;
+            }
+            if (--entry.refCount <= 0) {
+                INSTANCE_CACHE.remove(key);
+                closed = true;
+                doClose();
+            }
+        }
+    }
+
+    private void doClose() {
         IOUtil.close(tokenKvModel);
         IOUtil.close(tokenizer);
     }

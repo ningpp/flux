@@ -104,9 +104,23 @@ final class FalconOcrProcessor {
         }
 
         int batch = items.size();
-        int maxSeq = items.stream().mapToInt(i -> i.tokens.length).max().orElseThrow();
-        int maxHeight = items.stream().mapToInt(Preprocessed::height).max().orElseThrow();
-        int maxWidth = items.stream().mapToInt(Preprocessed::width).max().orElseThrow();
+        int maxSeq = 0;
+        int maxHeight = 0;
+        int maxWidth = 0;
+        for (Preprocessed item : items) {
+            if (item.tokens().length > maxSeq) {
+                maxSeq = item.tokens().length;
+            }
+            if (item.height() > maxHeight) {
+                maxHeight = item.height();
+            }
+            if (item.width() > maxWidth) {
+                maxWidth = item.width();
+            }
+        }
+        if (maxSeq == 0) {
+            throw new FluxException("Falcon-OCR batch has no tokens");
+        }
 
         long[][] tokens = new long[batch][maxSeq];
         long[][] posT = new long[batch][maxSeq];
@@ -116,16 +130,16 @@ final class FalconOcrProcessor {
 
         for (int b = 0; b < batch; b++) {
             Preprocessed item = items.get(b);
-            promptLengths[b] = item.tokens.length;
-            int offset = maxSeq - item.tokens.length;
+            promptLengths[b] = item.tokens().length;
+            int offset = maxSeq - item.tokens().length;
             Arrays.fill(tokens[b], PAD_TOKEN_ID);
             fillNaN(posHw[b]);
-            System.arraycopy(item.tokens, 0, tokens[b], offset, item.tokens.length);
+            System.arraycopy(item.tokens, 0, tokens[b], offset, item.tokens().length);
         }
 
-        float[][][][] paddedPixels = buildPaddedPixels(items, maxHeight, maxWidth);
         boolean[][][] pixelMask = buildPixelMask(items, maxHeight, maxWidth);
-        buildImagePatches(tokens, imagePatches, paddedPixels, pixelMask, maxHeight, maxWidth);
+        // 直接从每个 item.pixels 读取 patch 像素，避免分配 batch*maxHeight*maxWidth*3 的临时大数组。
+        buildImagePatches(tokens, imagePatches, items, pixelMask, maxHeight, maxWidth);
         buildPositions(tokens, posT, posHw, pixelMask, maxHeight, maxWidth);
         boolean[][][] attentionMask = buildAttentionMask(tokens);
 
@@ -352,22 +366,6 @@ final class FalconOcrProcessor {
         throw new FluxException("Falcon-OCR only supports formula and table, got: " + category);
     }
 
-    private static float[][][][] buildPaddedPixels(List<Preprocessed> items, int maxHeight, int maxWidth) {
-        float[][][][] out = new float[items.size()][maxHeight][maxWidth][3];
-        for (int b = 0; b < items.size(); b++) {
-            Preprocessed item = items.get(b);
-            for (int y = 0; y < item.height; y++) {
-                for (int x = 0; x < item.width; x++) {
-                    int src = (y * item.width + x) * 3;
-                    out[b][y][x][0] = item.pixels[src];
-                    out[b][y][x][1] = item.pixels[src + 1];
-                    out[b][y][x][2] = item.pixels[src + 2];
-                }
-            }
-        }
-        return out;
-    }
-
     private static boolean[][][] buildPixelMask(List<Preprocessed> items, int maxHeight, int maxWidth) {
         boolean[][][] out = new boolean[items.size()][maxHeight][maxWidth];
         for (int b = 0; b < items.size(); b++) {
@@ -381,7 +379,7 @@ final class FalconOcrProcessor {
 
     private static void buildImagePatches(long[][] tokens,
                                           float[][][] imagePatches,
-                                          float[][][][] paddedPixels,
+                                          List<Preprocessed> items,
                                           boolean[][][] pixelMask,
                                           int maxHeight,
                                           int maxWidth) {
@@ -390,6 +388,9 @@ final class FalconOcrProcessor {
         int patchRows = maxHeight / PATCH_SIZE;
         int patchCols = maxWidth / PATCH_SIZE;
         for (int b = 0; b < tokens.length; b++) {
+            Preprocessed item = items.get(b);
+            int itemWidth = item.width();
+            float[] itemPixels = item.pixels();
             int tokenPos = firstImageTokenIndex(tokens[b]);
             for (int pr = 0; pr < patchRows; pr++) {
                 for (int pc = 0; pc < patchCols; pc++) {
@@ -403,11 +404,13 @@ final class FalconOcrProcessor {
                     int y0 = pr * PATCH_SIZE;
                     int x0 = pc * PATCH_SIZE;
                     for (int yy = 0; yy < PATCH_SIZE; yy++) {
+                        int row = y0 + yy;
                         for (int xx = 0; xx < PATCH_SIZE; xx++) {
-                            float[] pixel = paddedPixels[b][y0 + yy][x0 + xx];
-                            imagePatches[b][tokenPos][out++] = pixel[0];
-                            imagePatches[b][tokenPos][out++] = pixel[1];
-                            imagePatches[b][tokenPos][out++] = pixel[2];
+                            int col = x0 + xx;
+                            int src = (row * itemWidth + col) * 3;
+                            imagePatches[b][tokenPos][out++] = itemPixels[src];
+                            imagePatches[b][tokenPos][out++] = itemPixels[src + 1];
+                            imagePatches[b][tokenPos][out++] = itemPixels[src + 2];
                         }
                     }
                     tokenPos++;

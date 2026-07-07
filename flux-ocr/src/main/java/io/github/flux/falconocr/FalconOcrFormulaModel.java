@@ -10,10 +10,12 @@ import org.opencv.core.Mat;
 
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class FalconOcrFormulaModel extends BatchPredictor<PreProcessResult, TextResult> {
 
     private final FalconOcrModel model;
+    private final AtomicBoolean closed = new AtomicBoolean(false);
 
     public FalconOcrFormulaModel(final String modelRootDir,
                                  final String modelName,
@@ -38,6 +40,8 @@ public class FalconOcrFormulaModel extends BatchPredictor<PreProcessResult, Text
 
     @Override
     public void close() throws Exception {
-        model.close();
+        if (closed.compareAndSet(false, true)) {
+            model.close();
+        }
     }
 }
