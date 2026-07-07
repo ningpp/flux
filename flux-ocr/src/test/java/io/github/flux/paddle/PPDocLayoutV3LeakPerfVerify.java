@@ -112,7 +112,7 @@ public class PPDocLayoutV3LeakPerfVerify {
 
                     // 释放 ProcessedMat 持有的原始 Mat（实际已被 Resize 内部释放，此处幂等）
                     for (ProcessedMat pm : processedMats) {
-                        pm.release();
+                        pm.release(matManager);
                     }
 
                     int matCount = matManager.trackedMatCount();

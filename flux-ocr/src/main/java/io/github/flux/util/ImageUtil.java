@@ -104,7 +104,7 @@ public final class ImageUtil {
             byte[] channelData = new byte[channelSize];
             channel.get(0, 0, channelData);
             System.arraycopy(channelData, 0, chwData, c * channelSize, channelSize);
-            IOUtil.close(channel);
+            matManager.release(channel);
         }
 
         Mat chw = matManager.newMat(height, width, CvType.CV_8SC3);
@@ -129,7 +129,7 @@ public final class ImageUtil {
             float[] channelData = new float[channelSize];
             channel.get(0, 0, channelData);
             System.arraycopy(channelData, 0, chwData, c * channelSize, channelSize);
-            IOUtil.close(channel);
+            matManager.release(channel);
         }
 
         Mat chw = matManager.newMat(height, width, CvType.CV_32FC3);
@@ -335,8 +335,8 @@ public final class ImageUtil {
         Rect roi = new Rect(startx, starty, endx - startx, endy - starty);
         Mat mat = matManager.newMat(src, roi);
 
-        Mat result = mat.clone();
-        IOUtil.close(mat);
+        Mat result = matManager.cloneMat(mat);
+        matManager.release(mat);
         return result;
     }
 
@@ -617,8 +617,8 @@ public final class ImageUtil {
         // Divide by std: (image - mean) / std
         Core.divide(meanSubtracted, std, normalizedImage);
 
-        image.release();
-        meanSubtracted.release();
+        matManager.release(image);
+        matManager.release(meanSubtracted);
         return normalizedImage;
     }
 
@@ -649,7 +649,7 @@ public final class ImageUtil {
                 paddingColor
         );
 
-        image.release();
+        matManager.release(image);
         return paddedImage;
     }
 

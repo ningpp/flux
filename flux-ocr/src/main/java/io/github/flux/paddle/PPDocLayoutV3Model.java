@@ -160,12 +160,13 @@ public class PPDocLayoutV3Model extends BatchPredictor<ProcessedMat, List<Object
                 Float threshold = ParameterUtil.getFloat(extraParameters, "ppdoclayoutv3.threshold");
                 float thresh = threshold != null ? threshold : DEFAULT_THRESHOLD;
 
-                List<List<ObjectDetectionResult>> results = POST_PROCESSOR.process(logits, bboxes, orderLogits, thresh, targetSizes);
-                // Close NDArrays after post-processor has consumed them
-                logits.close();
-                bboxes.close();
-                orderLogits.close();
-                return results;
+                try {
+                    return POST_PROCESSOR.process(logits, bboxes, orderLogits, thresh, targetSizes);
+                } finally {
+                    IOUtil.close(logits);
+                    IOUtil.close(bboxes);
+                    IOUtil.close(orderLogits);
+                }
             } finally {
                 // 释放 ONNX 输入张量与预处理产生的 Mat（ToCHW 输出，约 7.68MB/张），
                 // 避免长期存活的 MatManager 无界累积。

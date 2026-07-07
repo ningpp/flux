@@ -9,4 +9,12 @@ public record ProcessedMat(int oriWidth, int oriHeight, Mat processed) {
         IOUtil.close(processed);
     }
 
+    public void release(MatManager matManager) {
+        if (matManager != null) {
+            matManager.release(processed);
+        } else {
+            release();
+        }
+    }
+
 }

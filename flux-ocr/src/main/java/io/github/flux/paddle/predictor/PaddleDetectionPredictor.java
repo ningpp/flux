@@ -114,35 +114,42 @@ public class PaddleDetectionPredictor implements AutoCloseable {
             List<TextDetectionResult> tdResults = new ArrayList<>();
             for (int b = 0; b < data.length; b++) {
                 NDList preds = new NDList();
-                preds.add(ArrayUtil.toNDArray(manager, data[b]));
+                List<NDArray> postBoxes = List.of();
+                try {
+                    preds.add(ArrayUtil.toNDArray(manager, data[b]));
 
-                Pair<List<NDArray>, List<Float>> postResult = dbPostProcess.call(
-                        matManager,
-                        preds,
-                        detResizeResults.get(b).getLeft().imgShape(),
-                        thresh == null ? dbPostProcess.getThresh() : thresh,
-                        boxThresh == null ? dbPostProcess.getBoxThresh() : boxThresh,
-                        unclipRatio == null ? dbPostProcess.getUnclipRatio() : unclipRatio
-                );
+                    Pair<List<NDArray>, List<Float>> postResult = dbPostProcess.call(
+                            matManager,
+                            preds,
+                            detResizeResults.get(b).getLeft().imgShape(),
+                            thresh == null ? dbPostProcess.getThresh() : thresh,
+                            boxThresh == null ? dbPostProcess.getBoxThresh() : boxThresh,
+                            unclipRatio == null ? dbPostProcess.getUnclipRatio() : unclipRatio
+                    );
 
-                int[][][] polys = new int[postResult.getKey().size()][][];
-                int index = 0;
-                for (NDArray array : postResult.getKey()) {
-                    long[] arrayShape = array.getShape().getShape();
-                    int rows = (int) arrayShape[0];
-                    int cols = (int) arrayShape[1];
-                    int[][] result = new int[rows][cols];
-                    for (int i = 0; i < rows; i++) {
-                        for (int j = 0; j < cols; j++) {
-                            result[i][j] = array.getInt(i, j);
+                    postBoxes = postResult.getKey();
+                    int[][][] polys = new int[postBoxes.size()][][];
+                    int index = 0;
+                    for (NDArray array : postBoxes) {
+                        long[] arrayShape = array.getShape().getShape();
+                        int rows = (int) arrayShape[0];
+                        int cols = (int) arrayShape[1];
+                        int[][] result = new int[rows][cols];
+                        for (int i = 0; i < rows; i++) {
+                            for (int j = 0; j < cols; j++) {
+                                result[i][j] = array.getInt(i, j);
+                            }
                         }
+                        polys[index] = result;
+                        index++;
                     }
-                    polys[index] = result;
-                    array.close();
-                    index++;
+                    tdResults.add(new TextDetectionResult(polys, postResult.getValue()));
+                } finally {
+                    for (NDArray array : postBoxes) {
+                        array.close();
+                    }
+                    preds.close();
                 }
-                preds.close();
-                tdResults.add(new TextDetectionResult(polys, postResult.getValue()));
             }
             return tdResults;
         } finally {

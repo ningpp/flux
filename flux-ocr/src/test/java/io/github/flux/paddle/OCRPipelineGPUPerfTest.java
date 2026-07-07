@@ -121,84 +121,87 @@ public class OCRPipelineGPUPerfTest {
                     String fileName = new File(pdfFile).getName();
                     System.out.println("--- Processing: " + fileName + " ---");
 
-                    // Convert PDF pages to images (timed separately)
-                    LocalDateTime pdfConvertStart = LocalDateTime.now();
-                    List<String> imagePaths = convertPdfToImages(pdfFile);
-                    LocalDateTime pdfConvertEnd = LocalDateTime.now();
-                    long pdfConvertNanos = Duration.between(pdfConvertStart, pdfConvertEnd).toNanos();
-                    int pageCount = imagePaths.size();
-                    System.out.println("  Pages: " + pageCount);
-                    System.out.printf("  PDF-to-Image total: %.2f ms, avg %.2f ms/page%n",
-                        pdfConvertNanos / 1000_000d, pdfConvertNanos / 1000_000d / (double) pageCount);
+                    List<String> imagePaths = new ArrayList<>();
+                    try {
+                        // Convert PDF pages to images (timed separately)
+                        LocalDateTime pdfConvertStart = LocalDateTime.now();
+                        imagePaths = convertPdfToImages(pdfFile);
+                        LocalDateTime pdfConvertEnd = LocalDateTime.now();
+                        long pdfConvertNanos = Duration.between(pdfConvertStart, pdfConvertEnd).toNanos();
+                        int pageCount = imagePaths.size();
+                        System.out.println("  Pages: " + pageCount);
+                        System.out.printf("  PDF-to-Image total: %.2f ms, avg %.2f ms/page%n",
+                            pdfConvertNanos / 1000_000d, pdfConvertNanos / 1000_000d / (double) pageCount);
 
-                    long fileOcrNanosSum = 0;
-                    int successCount = 0;
+                        long fileOcrNanosSum = 0;
+                        int successCount = 0;
 
-                    // Process pages one by one for accurate per-page timing
-                    for (int i = 0; i < imagePaths.size(); i++) {
-                        String imagePath = imagePaths.get(i);
-                        try {
-                            LocalDateTime pageStart = LocalDateTime.now();
-                            List<List<OCRPipelineResult>> results = pipeline.predict(List.of(imagePath), params);
-                            LocalDateTime pageEnd = LocalDateTime.now();
+                        // Process pages one by one for accurate per-page timing
+                        for (int i = 0; i < imagePaths.size(); i++) {
+                            String imagePath = imagePaths.get(i);
+                            try {
+                                LocalDateTime pageStart = LocalDateTime.now();
+                                List<List<OCRPipelineResult>> results = pipeline.predict(List.of(imagePath), params);
+                                LocalDateTime pageEnd = LocalDateTime.now();
 
-                            long pageNanos = Duration.between(pageStart, pageEnd).toNanos();
-                            fileOcrNanosSum += pageNanos;
-                            successCount++;
+                                long pageNanos = Duration.between(pageStart, pageEnd).toNanos();
+                                fileOcrNanosSum += pageNanos;
+                                successCount++;
 
-                            // Print brief result summary
-                            List<OCRPipelineResult> pageResults = results.get(0);
-                            int regionCount = 0;
-                            int textLineCount = 0;
-                            int formulaCount = 0;
-                            int tableCount = 0;
-                            for (OCRPipelineResult r : pageResults) {
-                                if (r.layoutRegions() != null) {
-                                    for (LayoutRegionResult region : r.layoutRegions()) {
-                                        regionCount++;
-                                        switch (region.regionType()) {
-                                            case "text" ->
-                                                textLineCount += region.textResults() != null ? region.textResults().size() : 0;
-                                            case "formula" -> formulaCount++;
-                                            case "table" -> tableCount++;
+                                // Print brief result summary
+                                List<OCRPipelineResult> pageResults = results.get(0);
+                                int regionCount = 0;
+                                int textLineCount = 0;
+                                int formulaCount = 0;
+                                int tableCount = 0;
+                                for (OCRPipelineResult r : pageResults) {
+                                    if (r.layoutRegions() != null) {
+                                        for (LayoutRegionResult region : r.layoutRegions()) {
+                                            regionCount++;
+                                            switch (region.regionType()) {
+                                                case "text" ->
+                                                    textLineCount += region.textResults() != null ? region.textResults().size() : 0;
+                                                case "formula" -> formulaCount++;
+                                                case "table" -> tableCount++;
+                                            }
                                         }
                                     }
                                 }
+                                System.out.printf("  Page %2d: OCR %7.2f ms, %d regions (text:%d, formula:%d, table:%d)%n",
+                                    i + 1, pageNanos / 1000_000d, regionCount, textLineCount, formulaCount, tableCount);
+                            } catch (Exception e) {
+                                System.out.printf("  Page %2d: FAILED - %s%n", i + 1, e.getMessage());
                             }
-                            System.out.printf("  Page %2d: OCR %7.2f ms, %d regions (text:%d, formula:%d, table:%d)%n",
-                                i + 1, pageNanos / 1000_000d, regionCount, textLineCount, formulaCount, tableCount);
-                        } catch (Exception e) {
-                            System.out.printf("  Page %2d: FAILED - %s%n", i + 1, e.getMessage());
                         }
-                    }
 
-                    long fileE2ENanosSum = pdfConvertNanos + fileOcrNanosSum;
-                    double fileAvgE2EMs = fileE2ENanosSum / 1000_000d / (double) pageCount;
-                    double fileAvgOcrMs = fileOcrNanosSum / 1000_000d / (double) pageCount;
+                        long fileE2ENanosSum = pdfConvertNanos + fileOcrNanosSum;
+                        double fileAvgE2EMs = fileE2ENanosSum / 1000_000d / (double) pageCount;
+                        double fileAvgOcrMs = successCount == 0 ? 0 : fileOcrNanosSum / 1000_000d / (double) successCount;
 
-                    totalE2ENanos += fileE2ENanosSum;
-                    totalOcrOnlyNanos += fileOcrNanosSum;
-                    totalPages += pageCount;
-                    totalSuccessPages += successCount;
+                        totalE2ENanos += fileE2ENanosSum;
+                        totalOcrOnlyNanos += fileOcrNanosSum;
+                        totalPages += pageCount;
+                        totalSuccessPages += successCount;
 
-                    fileE2ENanos.put(fileName, fileE2ENanosSum);
-                    fileOcrNanos.put(fileName, fileOcrNanosSum);
-                    filePages.put(fileName, pageCount);
-                    fileSuccessPages.put(fileName, successCount);
+                        fileE2ENanos.put(fileName, fileE2ENanosSum);
+                        fileOcrNanos.put(fileName, fileOcrNanosSum);
+                        filePages.put(fileName, pageCount);
+                        fileSuccessPages.put(fileName, successCount);
 
-                    System.out.printf("  OCR total: %.2f ms%n", fileOcrNanosSum / 1000_000d);
-                    System.out.printf("  E2E avg per page (PDF+OCR): %.2f ms%n", fileAvgE2EMs);
-                    System.out.printf("  OCR avg per page (exclude PDF): %.2f ms%n", fileAvgOcrMs);
-
-                    // Clean up temp images
-                    for (String imagePath : imagePaths) {
-                        new File(imagePath).delete();
+                        System.out.printf("  OCR total: %.2f ms%n", fileOcrNanosSum / 1000_000d);
+                        System.out.printf("  E2E avg per page (PDF+OCR): %.2f ms%n", fileAvgE2EMs);
+                        System.out.printf("  OCR avg per page (exclude PDF): %.2f ms%n", fileAvgOcrMs);
+                    } finally {
+                        // Clean up temp images even if OCR fails mid-file
+                        for (String imagePath : imagePaths) {
+                            new File(imagePath).delete();
+                        }
                     }
                 }
             }
             // Summary
             double overallAvgE2EMs = totalE2ENanos / 1000_000d / (double) totalPages;
-            double overallAvgOcrMs = totalOcrOnlyNanos / 1000_000d / (double) totalSuccessPages;
+            double overallAvgOcrMs = totalSuccessPages == 0 ? 0 : totalOcrOnlyNanos / 1000_000d / (double) totalSuccessPages;
             System.out.println("\n========== Performance Summary ==========");
             System.out.printf("Total iterations: %d%n", iterations);
             System.out.printf("Total pages: %d (success: %d)%n", totalPages, totalSuccessPages);
@@ -214,10 +217,11 @@ public class OCRPipelineGPUPerfTest {
                 long e2e = fileE2ENanos.get(fileName);
                 long ocr = fileOcrNanos.get(fileName);
                 long pdf = e2e - ocr;
+                double ocrAvg = success == 0 ? 0 : ocr / 1000_000d / (double) success;
                 System.out.printf("  %-30s %6d %8.2f %8.2f %8.2f%n",
                         fileName, pages,
                         e2e / 1000_000d / (double) pages,
-                        ocr / 1000_000d / (double) success,
+                        ocrAvg,
                         pdf / 1000_000d / (double) pages);
             }
         }
@@ -233,6 +237,7 @@ public class OCRPipelineGPUPerfTest {
 
             String tempPath = System.getProperty("java.io.tmpdir") + File.separator + "flux_warmup.png";
             org.opencv.imgcodecs.Imgcodecs.imwrite(tempPath, rgbMat);
+            matManager.release(mat);
             matManager.release(rgbMat);
 
             pipeline.predict(List.of(tempPath), params);

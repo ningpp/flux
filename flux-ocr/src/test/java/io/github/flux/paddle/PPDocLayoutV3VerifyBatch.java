@@ -114,7 +114,7 @@ public class PPDocLayoutV3VerifyBatch {
 
                     // Release mats
                     for (ProcessedMat pm : processedMats) {
-                        pm.release();
+                        pm.release(matManager);
                     }
                 }
 

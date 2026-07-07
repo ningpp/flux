@@ -58,13 +58,18 @@ public class MatManager implements AutoCloseable {
 
     public Mat cloneMat(Mat mat) {
         Mat cloned = mat.clone();
-        resources.put(cloned.getNativeObjAddr(), cloned);
-        return cloned;
+        return track(cloned);
     }
 
     public Mat newMat(Size size, int type, Scalar s) {
         Mat mat = new Mat(size, type, s);
-        resources.put(mat.getNativeObjAddr(), mat);
+        return track(mat);
+    }
+
+    public Mat track(Mat mat) {
+        if (mat != null) {
+            resources.put(mat.getNativeObjAddr(), mat);
+        }
         return mat;
     }
 

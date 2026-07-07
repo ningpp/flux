@@ -267,7 +267,7 @@ public class DetResize {
         int maxW = Math.max(32, w);
 
         // Create a matrix of ones with the same type as the input image
-        Mat ones = Mat.ones(maxH, maxW, im.type());
+        Mat ones = matManager.track(Mat.ones(maxH, maxW, im.type()));
         Mat imPad = matManager.newMat();
         // Multiply by the scalar value to set all elements to the desired value
         Core.multiply(ones, new Scalar(value), imPad);

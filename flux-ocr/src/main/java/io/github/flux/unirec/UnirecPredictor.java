@@ -35,6 +35,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class UnirecPredictor extends BatchPredictor<PreProcessResult, TextResult> {
 
@@ -53,6 +54,7 @@ public class UnirecPredictor extends BatchPredictor<PreProcessResult, TextResult
     private final UnirecEncoderModel encoderModel;
     private final UnirecDecoderModel decoderModel;
     private final AtomicBoolean closed = new AtomicBoolean();
+    private final AtomicInteger refCount = new AtomicInteger();
 
     /**
      * Gets a shared instance of UnirecPredictor for the given configuration.
@@ -72,8 +74,14 @@ public class UnirecPredictor extends BatchPredictor<PreProcessResult, TextResult
                                                      final OrtEnvironment env,
                                                      final Map<String, Object> customParams) {
         ModelInstanceKey key = new ModelInstanceKey(modelRootDir, modelName, gpuIndex, customParams);
-        return INSTANCE_CACHE.computeIfAbsent(key, k ->
-            new UnirecPredictor(key, modelRootDir, modelName, gpuIndex, env, customParams));
+        UnirecPredictor predictor = INSTANCE_CACHE.compute(key, (k, existing) -> {
+            if (existing == null || existing.closed.get()) {
+                existing = new UnirecPredictor(k, modelRootDir, modelName, gpuIndex, env, customParams);
+            }
+            existing.retain();
+            return existing;
+        });
+        return predictor;
     }
 
     private UnirecPredictor(ModelInstanceKey key, final String modelRootDir,
@@ -91,6 +99,10 @@ public class UnirecPredictor extends BatchPredictor<PreProcessResult, TextResult
                 new File(modelRootDir + File.separator + modelName, "unirec_decoder.onnx").getAbsolutePath(),
                 new File(modelRootDir + File.separator + modelName, "unirec_tokenizer_mapping.json").getAbsolutePath(),
                 gpuIndex, env);
+    }
+
+    private void retain() {
+        refCount.incrementAndGet();
     }
 
     @Override
@@ -117,6 +129,14 @@ public class UnirecPredictor extends BatchPredictor<PreProcessResult, TextResult
 
     @Override
     public void close() throws Exception {
+        int remaining = refCount.decrementAndGet();
+        if (remaining > 0) {
+            return;
+        }
+        if (remaining < 0) {
+            refCount.set(0);
+            return;
+        }
         if (!closed.compareAndSet(false, true)) {
             return;
         }

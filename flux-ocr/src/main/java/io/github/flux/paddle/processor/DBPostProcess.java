@@ -176,19 +176,24 @@ public class DBPostProcess {
         // preds.get(0) is assumed to be [batch, ...], so split on axis 0
         NDArray batchPred = preds.get(0);
         int size = (int) batchPred.getShape().getShape()[0];
-        for (int i = 0; i < size; i++) {
-            NDArray pred = batchPred.get(i);
+        try {
+            for (int i = 0; i < size; i++) {
+                NDArray pred = batchPred.get(i);
+                try {
+                    // process() returns a Pair<NDArray, Float>
+                    Pair<List<NDArray>, List<Float>> result = this.process(matManager, pred, imageShapes, t, bt, ur);
 
-            // process() returns a Pair<NDArray, Float>
-            Pair<List<NDArray>, List<Float>> result = this.process(matManager, pred, imageShapes, t, bt, ur);
-
-            boxes.addAll(result.getKey());
-            scores.addAll(result.getValue());
-            pred.close();
+                    boxes.addAll(result.getKey());
+                    scores.addAll(result.getValue());
+                } finally {
+                    pred.close();
+                }
+            }
+            return Pair.of(boxes, scores);
+        } catch (RuntimeException | Error e) {
+            closeNdArrays(boxes);
+            throw e;
         }
-
-        batchPred.close();
-        return Pair.of(boxes, scores);
     }
 
     /**
@@ -211,26 +216,23 @@ public class DBPostProcess {
     ) {
         // 1) segmentation mask: pred > thresh => boolean mask
         NDArray segmentation = pred.gt(thresh);
+        try {
+            // 2) unpack original image size (we ignore ratioH, ratioW here)
+            int srcH = Double.valueOf(imageShapes[0]).intValue();
+            int srcW = Double.valueOf(imageShapes[1]).intValue();
 
-        // 2) unpack original image size (we ignore ratioH, ratioW here)
-        int srcH = Double.valueOf(imageShapes[0]).intValue();
-        int srcW = Double.valueOf(imageShapes[1]).intValue();
-
-        // 5) extract boxes & scores based on boxType
-        if ("poly".equals(boxType)) {
-            Pair<List<NDArray>, List<Float>> result = polygonsFromBitmap(matManager, pred, segmentation, srcW, srcH, boxThresh, unclipRatio);
+            // 5) extract boxes & scores based on boxType
+            if ("poly".equals(boxType)) {
+                return polygonsFromBitmap(matManager, pred, segmentation, srcW, srcH, boxThresh, unclipRatio);
+            } else if ("quad".equals(boxType)) {
+                return boxesFromBitmap(matManager, pred, segmentation, srcW, srcH, boxThresh, unclipRatio);
+            } else {
+                throw new IllegalArgumentException(
+                        "boxType can only be one of ['quad', 'poly'], but got: " + boxType
+                );
+            }
+        } finally {
             segmentation.close();
-            pred.close();
-            return result;
-        } else if ("quad".equals(boxType)) {
-            Pair<List<NDArray>, List<Float>> result = boxesFromBitmap(matManager, pred, segmentation, srcW, srcH, boxThresh, unclipRatio);
-            segmentation.close();
-            pred.close();
-            return result;
-        } else {
-            throw new IllegalArgumentException(
-                    "boxType can only be one of ['quad', 'poly'], but got: " + boxType
-            );
         }
     }
 
@@ -265,17 +267,8 @@ public class DBPostProcess {
         mat.put(0, 0, binBytes);
         */
 
-        // 2. 将 bitmap * 255 转为 uint8 类型，不发生额外内存复制（in-place）
-        NDArray mul = bitmap.mul(255);
-        NDArray mask = mul.toType(DataType.UINT8, true);
-
-        // 3. 从 NDArray 中获取底层 byte 数据
-        ByteBuffer bb = mask.toByteBuffer();
-        byte[] data = new byte[bb.remaining()];
-        bb.get(data);
-        mask.close();
-        mul.close();
-        bitmap.close();
+        byte[] data = bitmapToUint8Bytes(bitmap);
+        float[] predFlat = pred.toFloatArray();
 
         // 4. 构造 OpenCV 的 Mat (单通道 8bit)
         Mat mat = matManager.newMat(height, width, CvType.CV_8UC1);
@@ -284,62 +277,76 @@ public class DBPostProcess {
         // 3. find contours
         List<MatOfPoint> contours = new ArrayList<>();
         Mat hierarchy = matManager.newMat();
-        Imgproc.findContours(mat, contours, hierarchy, Imgproc.RETR_LIST, Imgproc.CHAIN_APPROX_SIMPLE);
-        matManager.release(mat);
-        matManager.release(hierarchy);
-
-        int numContours = Math.min(contours.size(), maxCandidates);
-        for (int idx = 0; idx < numContours; idx++) {
-            MatOfPoint contour = contours.get(idx);
-            Pair<Point[], Float> miniBoxPair = getMiniBoxes(contour);
-            Point[] points = miniBoxPair.getKey();
-            Float sside = miniBoxPair.getValue();
-            if (Float.compare(sside, minSize) < 0) {
-                continue;
-            }
-
-            // MatOfPoint matOfPoint = new MatOfPoint();
-            // fromArray(matOfPoint, points);
-
-            float score = boxScoreFast(pred, points);
-            if (score < boxThresh) {
-                continue;
-            }
-            float[][] unclipped = unclip(points, unclipRatio);
-
-
-            Point[] unclippedPts2f = new Point[unclipped.length];
-            for (int i = 0; i < unclipped.length; i++) {
-                float x = unclipped[i][0];
-                float y = unclipped[i][1];
-                unclippedPts2f[i] = new Point(x, y);
-            }
-            MatOfPoint unclippedMatOfPoint = new MatOfPoint();
-            fromArray(unclippedMatOfPoint, unclippedPts2f);
-
-            miniBoxPair = getMiniBoxes(unclippedMatOfPoint);
-            unclippedMatOfPoint.release();
-            points = miniBoxPair.getKey();
-            sside = miniBoxPair.getValue();
-            if (Float.compare(sside, minSize + 2) < 0) {
-                continue;
-            }
-
-            float[][] scaled = new float[points.length][2];
-            for (int i = 0; i < points.length; i++) {
-                int x = Math.round((float) points[i].x * widthScale);
-                int y = Math.round((float) points[i].y * heightScale);
-                scaled[i][0] = Math.max(0, Math.min(x, destWidth));
-                scaled[i][1] = Math.max(0, Math.min(y, destHeight));
-            }
-
-            NDArray boxArr = pred.getManager().create(scaled);
-            NDArray boxArrInt32 = boxArr.toType(DataType.INT32, true);
-            boxArr.close();
-            boxes.add(boxArrInt32);
-            scores.add(score);
+        try {
+            Imgproc.findContours(mat, contours, hierarchy, Imgproc.RETR_LIST, Imgproc.CHAIN_APPROX_SIMPLE);
+        } finally {
+            matManager.release(mat);
+            matManager.release(hierarchy);
         }
-        return Pair.of(boxes, scores);
+
+        boolean success = false;
+        try {
+            int numContours = Math.min(contours.size(), maxCandidates);
+            for (int idx = 0; idx < numContours; idx++) {
+                MatOfPoint contour = contours.get(idx);
+                Pair<Point[], Float> miniBoxPair = getMiniBoxes(contour);
+                Point[] points = miniBoxPair.getKey();
+                Float sside = miniBoxPair.getValue();
+                if (Float.compare(sside, minSize) < 0) {
+                    continue;
+                }
+
+                // MatOfPoint matOfPoint = new MatOfPoint();
+                // fromArray(matOfPoint, points);
+
+                float score = boxScoreFast(matManager, predFlat, height, width, points);
+                if (score < boxThresh) {
+                    continue;
+                }
+                float[][] unclipped = unclip(points, unclipRatio);
+
+                Point[] unclippedPts2f = new Point[unclipped.length];
+                for (int i = 0; i < unclipped.length; i++) {
+                    float x = unclipped[i][0];
+                    float y = unclipped[i][1];
+                    unclippedPts2f[i] = new Point(x, y);
+                }
+                MatOfPoint unclippedMatOfPoint = new MatOfPoint();
+                try {
+                    fromArray(unclippedMatOfPoint, unclippedPts2f);
+
+                    miniBoxPair = getMiniBoxes(unclippedMatOfPoint);
+                    points = miniBoxPair.getKey();
+                    sside = miniBoxPair.getValue();
+                    if (Float.compare(sside, minSize + 2) < 0) {
+                        continue;
+                    }
+
+                    float[][] scaled = new float[points.length][2];
+                    for (int i = 0; i < points.length; i++) {
+                        int x = Math.round((float) points[i].x * widthScale);
+                        int y = Math.round((float) points[i].y * heightScale);
+                        scaled[i][0] = Math.max(0, Math.min(x, destWidth));
+                        scaled[i][1] = Math.max(0, Math.min(y, destHeight));
+                    }
+
+                    NDArray boxArr = pred.getManager().create(scaled);
+                    NDArray boxArrInt32 = boxArr.toType(DataType.INT32, true);
+                    boxArr.close();
+                    boxes.add(boxArrInt32);
+                    scores.add(score);
+                } finally {
+                    unclippedMatOfPoint.release();
+                }
+            }
+            success = true;
+            return Pair.of(boxes, scores);
+        } finally {
+            releaseContours(contours);
+            if (!success) {
+                closeNdArrays(boxes);
+            }
+        }
     }
 
 
@@ -385,18 +392,8 @@ public class DBPostProcess {
         mat.put(0, 0, binBytes);
         */
 
-        // 2. 将 bitmap * 255 转为 uint8 类型，不发生额外内存复制（in-place）
-        NDArray mul = bitmap.mul(255f);
-        NDArray mask = mul.toType(DataType.UINT8, true);
-        // saveNDArrayByteToTxt(mask, "d:\\bitmap255ed-java-bytes-1751555076-3c5ffc5292184f76ba44c82cac645bd3.txt", true);
-
-        // 3. 从 NDArray 中获取底层 byte 数据
-        ByteBuffer bb = mask.toByteBuffer();
-        byte[] data = new byte[bb.remaining()];
-        bb.get(data);
-        mask.close();
-        mul.close();
-        bitmap.close();
+        byte[] data = bitmapToUint8Bytes(bitmap);
+        float[] predFlat = pred.toFloatArray();
 
         // 4. 构造 OpenCV 的 Mat (单通道 8bit)
         Mat mat = matManager.newMat(height, width, CvType.CV_8UC1);
@@ -405,78 +402,92 @@ public class DBPostProcess {
         // 3. find contours
         List<MatOfPoint> contours = new ArrayList<>();
         Mat hierarchy = matManager.newMat();
-        Imgproc.findContours(mat, contours, hierarchy, Imgproc.RETR_LIST, Imgproc.CHAIN_APPROX_SIMPLE);
-        matManager.release(mat);
-        matManager.release(hierarchy);
-
-        // 4. iterate contours up to maxCandidates
-        int numContours = Math.min(contours.size(), maxCandidates);
-        for (int idx = 0; idx < numContours; idx++) {
-            MatOfPoint contour = contours.get(idx);
-            // approximate polygon
-            MatOfPoint2f pts2f = new MatOfPoint2f(contour.toArray());
-            contour.release();
-            double epsilon = 0.002 * Imgproc.arcLength(pts2f, true);
-            MatOfPoint2f approx2f = new MatOfPoint2f();
-            Imgproc.approxPolyDP(pts2f, approx2f, epsilon, true);
-
-            try {
-                Point[] pts = toArray(approx2f);
-                if (pts.length < 4) {
-                    continue;
-                }
-
-                // 5. compute box score
-                float score = boxScoreFast(pred, pts);
-                if (score < boxThresh) {
-                    continue;
-                }
-
-                // 6. unclip
-                float[][] unclipped = unclip(pts, unclipRatio);
-                if (unclipped == null || unclipped.length <= 1) {
-                    continue;
-                }
-
-                // Build an array of Point2f
-                Point[] unclippedPts2f = new Point[unclipped.length];
-                for (int i = 0; i < unclipped.length; i++) {
-                    float x = unclipped[i][0];
-                    float y = unclipped[i][1];
-                    unclippedPts2f[i] = new Point(x, y);
-                }
-                MatOfPoint unclippedMatOfPoint = new MatOfPoint();
-                fromArray(unclippedMatOfPoint, unclippedPts2f);
-
-                // 7. filter by min size
-                Pair<Point[], Float> mini = getMiniBoxes(unclippedMatOfPoint);
-                Point[] miniPoints = mini.getKey();
-                unclippedMatOfPoint.release();
-                if (Float.compare(mini.getValue(), minSize + 2) < 0) {
-                    continue;
-                }
-
-                // 8. scale back to original image size
-                float[][] scaled = new float[miniPoints.length][2];
-                for (int i = 0; i < miniPoints.length; i++) {
-                    int x = Math.round((float) miniPoints[i].x * widthScale);
-                    int y = Math.round((float) miniPoints[i].y * heightScale);
-                    scaled[i][0] = Math.max(0, Math.min(x, destWidth));
-                    scaled[i][1] = Math.max(0, Math.min(y, destHeight));
-                }
-
-                // 9. convert to NDArray and append
-                NDArray boxArr = pred.getManager().create(scaled);
-                boxes.add(boxArr);
-                scores.add(score);
-            } finally {
-                // 每个轮廓产生的原生 MatOfPoint2f 必须释放，否则随轮廓数累积泄露
-                pts2f.release();
-                approx2f.release();
-            }
+        try {
+            Imgproc.findContours(mat, contours, hierarchy, Imgproc.RETR_LIST, Imgproc.CHAIN_APPROX_SIMPLE);
+        } finally {
+            matManager.release(mat);
+            matManager.release(hierarchy);
         }
 
-        return Pair.of(boxes, scores);
+        boolean success = false;
+        try {
+            // 4. iterate contours up to maxCandidates
+            int numContours = Math.min(contours.size(), maxCandidates);
+            for (int idx = 0; idx < numContours; idx++) {
+                MatOfPoint contour = contours.get(idx);
+                // approximate polygon
+                MatOfPoint2f pts2f = new MatOfPoint2f(contour.toArray());
+                MatOfPoint2f approx2f = new MatOfPoint2f();
+                try {
+                    double epsilon = 0.002 * Imgproc.arcLength(pts2f, true);
+                    Imgproc.approxPolyDP(pts2f, approx2f, epsilon, true);
+
+                    Point[] pts = toArray(approx2f);
+                    if (pts.length < 4) {
+                        continue;
+                    }
+
+                    // 5. compute box score
+                    float score = boxScoreFast(matManager, predFlat, height, width, pts);
+                    if (score < boxThresh) {
+                        continue;
+                    }
+
+                    // 6. unclip
+                    float[][] unclipped = unclip(pts, unclipRatio);
+                    if (unclipped == null || unclipped.length <= 1) {
+                        continue;
+                    }
+
+                    // Build an array of Point2f
+                    Point[] unclippedPts2f = new Point[unclipped.length];
+                    for (int i = 0; i < unclipped.length; i++) {
+                        float x = unclipped[i][0];
+                        float y = unclipped[i][1];
+                        unclippedPts2f[i] = new Point(x, y);
+                    }
+                    MatOfPoint unclippedMatOfPoint = new MatOfPoint();
+                    try {
+                        fromArray(unclippedMatOfPoint, unclippedPts2f);
+
+                        // 7. filter by min size
+                        Pair<Point[], Float> mini = getMiniBoxes(unclippedMatOfPoint);
+                        Point[] miniPoints = mini.getKey();
+                        if (Float.compare(mini.getValue(), minSize + 2) < 0) {
+                            continue;
+                        }
+
+                        // 8. scale back to original image size
+                        float[][] scaled = new float[miniPoints.length][2];
+                        for (int i = 0; i < miniPoints.length; i++) {
+                            int x = Math.round((float) miniPoints[i].x * widthScale);
+                            int y = Math.round((float) miniPoints[i].y * heightScale);
+                            scaled[i][0] = Math.max(0, Math.min(x, destWidth));
+                            scaled[i][1] = Math.max(0, Math.min(y, destHeight));
+                        }
+
+                        // 9. convert to NDArray and append
+                        NDArray boxArr = pred.getManager().create(scaled);
+                        boxes.add(boxArr);
+                        scores.add(score);
+                    } finally {
+                        unclippedMatOfPoint.release();
+                    }
+                } finally {
+                    // 每个轮廓产生的原生 MatOfPoint2f 必须释放，否则随轮廓数累积泄露
+                    pts2f.release();
+                    approx2f.release();
+                }
+            }
+
+            success = true;
+            return Pair.of(boxes, scores);
+        } finally {
+            releaseContours(contours);
+            if (!success) {
+                closeNdArrays(boxes);
+            }
+        }
     }
 
     /**
@@ -487,14 +498,12 @@ public class DBPostProcess {
      * @return the mean score inside the polygon
      */
     private float boxScoreFast(
-            final NDArray bitmap,
+            MatManager matManager,
+            final float[] bitmapFlat,
+            final int h,
+            final int w,
             final Point[] boxPts
     ) {
-        // 1) get shape
-        long[] shape = bitmap.getShape().getShape();  // [H, W]
-        final int h = (int) shape[0];
-        final int w = (int) shape[1];
-
         // 2) compute bounding box of polygon
         double minX = Double.MAX_VALUE, maxX = Double.MIN_VALUE;
         double minY = Double.MAX_VALUE, maxY = Double.MIN_VALUE;
@@ -512,40 +521,72 @@ public class DBPostProcess {
         // 3) create mask for the region
         final int maskH = ymax - ymin + 1;
         final int maskW = xmax - xmin + 1;
-        Mat mask = Mat.zeros(maskH, maskW, CvType.CV_8UC1);
-
-        // 4) shift polygon coords and fill
-        Point[] shifted = new Point[boxPts.length];
-        for (int i = 0; i < boxPts.length; i++) {
-            shifted[i] = new Point(boxPts[i].x - xmin, boxPts[i].y - ymin);
-        }
+        Mat mask = matManager.track(Mat.zeros(maskH, maskW, CvType.CV_8UC1));
         MatOfPoint mop = new MatOfPoint();
-        fromArray(mop, shifted);
-        List<MatOfPoint> ptsList = new ArrayList<>();
-        ptsList.add(mop);
-        Imgproc.fillPoly(mask, ptsList, new Scalar(1));
+        try {
 
-        // 5) flatten bitmap to Java array for fast access
-        float[] flat = bitmap.toType(DataType.FLOAT32, false).toFloatArray();
+            // 4) shift polygon coords and fill
+            Point[] shifted = new Point[boxPts.length];
+            for (int i = 0; i < boxPts.length; i++) {
+                shifted[i] = new Point(boxPts[i].x - xmin, boxPts[i].y - ymin);
+            }
+            fromArray(mop, shifted);
+            List<MatOfPoint> ptsList = new ArrayList<>();
+            ptsList.add(mop);
+            Imgproc.fillPoly(mask, ptsList, new Scalar(1));
 
-        // 6) read mask bytes and compute mean over polygon
-        byte[] maskBytes = new byte[maskH * maskW];
-        mask.get(0, 0, maskBytes);
-        double sum = 0;
-        int count = 0;
-        for (int yy = ymin; yy <= ymax; yy++) {
-            for (int xx = xmin; xx <= xmax; xx++) {
-                int mi = (yy - ymin) * maskW + (xx - xmin);
-                if ((maskBytes[mi] & 0xFF) != 0) {
-                    sum += flat[yy * w + xx];
-                    count++;
+            // 6) read mask bytes and compute mean over polygon
+            byte[] maskBytes = new byte[maskH * maskW];
+            mask.get(0, 0, maskBytes);
+            double sum = 0;
+            int count = 0;
+            for (int yy = ymin; yy <= ymax; yy++) {
+                for (int xx = xmin; xx <= xmax; xx++) {
+                    int mi = (yy - ymin) * maskW + (xx - xmin);
+                    if ((maskBytes[mi] & 0xFF) != 0) {
+                        sum += bitmapFlat[yy * w + xx];
+                        count++;
+                    }
                 }
             }
+            return count > 0 ? (float) (sum / count) : 0f;
+        } finally {
+            // 释放原生 Mat/MatOfPoint，避免逐候选框累积的原生内存泄露（boxScoreFast 每框调用一次）
+            matManager.release(mask);
+            mop.release();
         }
-        // 释放原生 Mat/MatOfPoint，避免逐候选框累积的原生内存泄露（boxScoreFast 每框调用一次）
-        mask.release();
-        mop.release();
-        return count > 0 ? (float) (sum / count) : 0f;
+    }
+
+    private byte[] bitmapToUint8Bytes(NDArray bitmap) {
+        NDArray mul = null;
+        NDArray mask = null;
+        try {
+            mul = bitmap.mul(255);
+            mask = mul.toType(DataType.UINT8, true);
+            ByteBuffer bb = mask.toByteBuffer();
+            byte[] data = new byte[bb.remaining()];
+            bb.get(data);
+            return data;
+        } finally {
+            if (mask != null) {
+                mask.close();
+            }
+            if (mul != null) {
+                mul.close();
+            }
+        }
+    }
+
+    private void releaseContours(List<MatOfPoint> contours) {
+        for (MatOfPoint contour : contours) {
+            contour.release();
+        }
+    }
+
+    private void closeNdArrays(List<NDArray> arrays) {
+        for (NDArray array : arrays) {
+            array.close();
+        }
     }
 
 
@@ -623,8 +664,6 @@ public class DBPostProcess {
         float shortSide = (float) Math.min(minRect.size.width, minRect.size.height);
 
         contour2f.release();
-        contour.release();
-
         return Pair.of(box, shortSide);
     }
 
@@ -642,36 +681,40 @@ public class DBPostProcess {
     ) {
         // 1) 计算面积和周长
         MatOfPoint2f contour2f = new MatOfPoint2f();
-        fromArray(contour2f, boxPts);
-        double area = Imgproc.contourArea(contour2f);
-        double length = Imgproc.arcLength(contour2f, true);
-        double distance = area * unclipRatio / length;
+        try {
+            fromArray(contour2f, boxPts);
+            double area = Imgproc.contourArea(contour2f);
+            double length = Imgproc.arcLength(contour2f, true);
+            double distance = area * unclipRatio / length;
 
-        // 2) 构造 Path64 并添加顶点（四舍五入到 long）
-        Path64 subject = new Path64();
-        for (Point p : boxPts) {
-            subject.add(new Point64(Math.round(p.x), Math.round(p.y)));
+            // 2) 构造 Path64 并添加顶点（四舍五入到 long）
+            Path64 subject = new Path64();
+            for (Point p : boxPts) {
+                subject.add(new Point64(Math.round(p.x), Math.round(p.y)));
+            }
+
+            // 3) 执行偏移：AddPath + Execute
+            ClipperOffset offsetter = new ClipperOffset();
+            offsetter.AddPath(subject, JoinType.Round, EndType.Polygon);
+
+            Paths64 solution = new Paths64();
+            offsetter.Execute(distance, solution);
+
+            // 4) 取第一个结果路径并转换回 float[][]
+            if (solution.isEmpty()) {
+                return new float[0][];
+            }
+            Path64 expandedPath = solution.get(0);
+            float[][] expanded = new float[expandedPath.size()][2];
+            for (int i = 0; i < expandedPath.size(); i++) {
+                Point64 pt = expandedPath.get(i);
+                expanded[i][0] = pt.x;
+                expanded[i][1] = pt.y;
+            }
+            return expanded;
+        } finally {
+            contour2f.release();
         }
-
-        // 3) 执行偏移：AddPath + Execute
-        ClipperOffset offsetter = new ClipperOffset();
-        offsetter.AddPath(subject, JoinType.Round, EndType.Polygon);
-
-        Paths64 solution = new Paths64();
-        offsetter.Execute(distance, solution);
-
-        // 4) 取第一个结果路径并转换回 float[][]
-        if (solution.isEmpty()) {
-            return new float[0][];
-        }
-        Path64 expandedPath = solution.get(0);
-        float[][] expanded = new float[expandedPath.size()][2];
-        for (int i = 0; i < expandedPath.size(); i++) {
-            Point64 pt = expandedPath.get(i);
-            expanded[i][0] = pt.x;
-            expanded[i][1] = pt.y;
-        }
-        return expanded;
     }
 
 }
