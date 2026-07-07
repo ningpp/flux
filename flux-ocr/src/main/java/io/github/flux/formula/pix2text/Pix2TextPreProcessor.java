@@ -26,8 +26,14 @@ import org.opencv.imgproc.Imgproc;
 
 public class Pix2TextPreProcessor {
 
-    public NDArray process(MatManager matManager, Mat rgbImg, NDManager manager) {
-        DeiTImageProcessor deitProcessor = DeiTImageProcessor.builder()
+    /**
+     * 预处理配置是固定不变的，因此 DeiTImageProcessor 只构建一次并复用，
+     * 避免每次 process 调用都重复分配 Builder 与多个 HashMap（性能优化）。
+     */
+    private final DeiTImageProcessor deitProcessor;
+
+    public Pix2TextPreProcessor() {
+        this.deitProcessor = DeiTImageProcessor.builder()
                 .setDoResize(true)
                 .setSize(384, 384)
                 .setDoCenterCrop(false)
@@ -41,7 +47,9 @@ public class Pix2TextPreProcessor {
                 // 在 OpenCV 中，对应的是：cv2.INTER_CUBIC  # 值为 2
                 .setResampleMode(Imgproc.INTER_CUBIC)
                 .build();
+    }
 
+    public NDArray process(MatManager matManager, Mat rgbImg, NDManager manager) {
         NDArray imgNdArray = ImageUtil.toNDArrayUint8(rgbImg, manager);
         NDArray input = deitProcessor.preprocess(imgNdArray, matManager, manager);
 

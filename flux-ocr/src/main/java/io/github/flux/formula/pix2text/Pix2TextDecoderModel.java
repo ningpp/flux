@@ -75,55 +75,77 @@ public class Pix2TextDecoderModel implements AutoCloseable {
     }
 
     public List<TextResult> batchPredict(float[][][] encodeResultFloats) throws OrtException {
-        FloatBuffer dataBuffer = FloatBuffer.wrap(ArrayUtil.flat(encodeResultFloats));
-        long[] shape = new long[] {
-                encodeResultFloats.length,
-                encodeResultFloats[0].length,
-                encodeResultFloats[0][0].length
-        };
+        int encB = encodeResultFloats.length;
+        int encS = encodeResultFloats[0].length;
+        int encH = encodeResultFloats[0][0].length;
+        // Flatten encoder hidden states (row-major: [batch, seq, hidden]) using System.arraycopy
+        // per row, which avoids the slow element-by-element triple loop and reduces allocation.
+        float[] encFlat = new float[encB * encS * encH];
+        int encIdx = 0;
+        for (int i = 0; i < encB; i++) {
+            for (int j = 0; j < encS; j++) {
+                System.arraycopy(encodeResultFloats[i][j], 0, encFlat, encIdx, encH);
+                encIdx += encH;
+            }
+        }
+        FloatBuffer dataBuffer = FloatBuffer.wrap(encFlat);
+        long[] shape = new long[] {encB, encS, encH};
         OnnxTensor encoderHiddenStates = OnnxTensor.createTensor(env, dataBuffer, shape);
         try {
-            int batchSize = (int) shape[0];
-            long[][] inputIds = new long[batchSize][];
-            for (int i = 0; i < batchSize; i++) {
-                inputIds[i] = new long[]{decoderStartTokenId};
+            int batchSize = encB;
+
+            // Performance: avoid reallocating inputIds (ArrayUtil.concat) and re-flattening
+            // (ArrayUtil.flat) on every autoregressive step. Use a single preallocated flat
+            // buffer of size [batch * (maxLength + 1)] laid out row-major as [batch, seqLen]:
+            //   input_ids[j][pos] == flatInput[pos * batchSize + j]
+            // This makes each decoding step allocation-free (only a reused LongBuffer view).
+            long[] flatInput = new long[batchSize * (maxLength + 1)];
+            for (int j = 0; j < batchSize; j++) {
+                flatInput[j] = decoderStartTokenId; // column 0
             }
 
             long[][] generated_tokens = new long[batchSize][];
-            for (int i = 0; i < batchSize; i++) {
-                generated_tokens[i] = new long[0];
+            for (int j = 0; j < batchSize; j++) {
+                generated_tokens[j] = new long[0];
             }
             long curLen = 1;
             boolean[] finished = new boolean[batchSize];
-            for (int i = 0; i < maxLength; i++) {
-                long[] flat = ArrayUtil.flat(inputIds);
-                LongBuffer buffer = LongBuffer.wrap(flat);
-                try (OnnxTensor input_ids_tensor = OnnxTensor.createTensor(env, buffer, new long[] {inputIds.length, inputIds[0].length});
+            for (int step = 0; step < maxLength; step++) {
+                LongBuffer buffer = LongBuffer.wrap(flatInput).position(0).limit((int) (batchSize * curLen));
+                try (OnnxTensor input_ids_tensor = OnnxTensor.createTensor(env, buffer, new long[] {batchSize, curLen});
                      OrtSession.Result onnxResult = session.run(Map.of("input_ids", input_ids_tensor, "encoder_hidden_states", encoderHiddenStates))) {
-                    OnnxValue onnxValue = onnxResult.get(0);
-                    float[][][] decoderResultFloats = (float[][][]) onnxValue.getValue();
-                    long[][] nextIds = new long[batchSize][1];
+                    // OnnxValue obtained from Result is owned by Result and will be closed when Result closes.
+                    float[][][] decoderResultFloats = (float[][][]) onnxResult.get(0).getValue();
                     for (int j = 0; j < batchSize; j++) {
+                        long nextToken;
                         if (finished[j]) {
-                            nextIds[j][0] = padTokenId;
-                            continue;
+                            nextToken = padTokenId;
+                        } else {
+                            float[] lastLogit = decoderResultFloats[j][(int) (curLen - 1)];
+                            nextToken = ArrayUtil.argmax(lastLogit);
+                            if (nextToken == eosTokenId) {
+                                finished[j] = true;
+                            }
                         }
-                        float[] lastLogit = decoderResultFloats[j][(int) (curLen - 1)];
-                        long nextToken = ArrayUtil.argmax(lastLogit);
-                        nextIds[j][0] = nextToken;
-
-                        generated_tokens[j] = ArrayUtil.concat(generated_tokens[j], new long[] {nextToken});
-                        if (nextToken == eosTokenId) {
-                            finished[j] = true;
-                        }
+                        // write the next token at column `curLen`
+                        flatInput[(int) (curLen * batchSize + j)] = nextToken;
                     }
-                    inputIds = ArrayUtil.concat(inputIds, nextIds);
                     curLen++;
 
                     if (ArrayUtil.allTrue(finished)) {
                         break;
                     }
                 }
+            }
+
+            // Reconstruct generated tokens (everything except the start token, columns 1..curLen-1)
+            int outLen = (int) (curLen - 1);
+            for (int j = 0; j < batchSize; j++) {
+                long[] tokens = new long[outLen];
+                for (int k = 1; k <= outLen; k++) {
+                    tokens[k - 1] = flatInput[k * batchSize + j];
+                }
+                generated_tokens[j] = tokens;
             }
 
             List<TextResult> results = new ArrayList<>();

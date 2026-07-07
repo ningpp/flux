@@ -48,6 +48,7 @@ public class Pix2TextFormulaRecognitionPredictor extends BatchPredictor<PreProce
     private final Pix2TextEncoderModel encoderModel;
     private final Pix2TextDecoderModel decoderModel;
     private final HuggingFaceTokenizer tokenizer;
+    private final Pix2TextPreProcessor preProcessor;
 
     public Pix2TextFormulaRecognitionPredictor(final String modelRootDir,
                                                final String modelName,
@@ -66,9 +67,10 @@ public class Pix2TextFormulaRecognitionPredictor extends BatchPredictor<PreProce
         }
 
         final String modelDir = modelRootDir + File.separator + modelName;
+        this.preProcessor = new Pix2TextPreProcessor();
         this.encoderModel = new Pix2TextEncoderModel(
                 new File(modelDir, "encoder_model.onnx").getAbsolutePath(),
-                gpuIndex, env, new Pix2TextPreProcessor()
+                gpuIndex, env, this.preProcessor
         );
 
         try {
@@ -83,7 +85,7 @@ public class Pix2TextFormulaRecognitionPredictor extends BatchPredictor<PreProce
 
     @Override
     public PreProcessResult processRgb(MatManager matManager, Mat rgbMat, NDManager manager) {
-        return new PreProcessResult(null, new Pix2TextPreProcessor().process(matManager, rgbMat, manager));
+        return new PreProcessResult(null, preProcessor.process(matManager, rgbMat, manager));
     }
 
     @Override

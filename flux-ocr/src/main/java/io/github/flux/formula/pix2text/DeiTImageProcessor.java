@@ -29,6 +29,7 @@ import org.opencv.core.CvType;
 import org.opencv.core.Mat;
 import org.opencv.imgproc.Imgproc;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -207,12 +208,16 @@ public class DeiTImageProcessor {
      * @return Normalized image as NDArray
      */
     public static NDArray normalize(NDArray image, float[] mean, float[] std, NDManager manager) {
-        // Convert mean and std to NDArrays
-        NDArray meanArray = manager.create(mean).reshape(1, 1, 3);
-        NDArray stdArray = manager.create(std).reshape(1, 1, 3);
-
-        // Normalize: (image - mean) / std
-        return image.sub(meanArray).div(stdArray);
+        // 直接以目标形状创建，避免 reshape 产生“视图”，否则视图的底层 base
+        // (manager.create(mean) 得到的 1-D 数组) 在本方法结束后不会被释放 -> 泄露。
+        try (NDArray meanArray = manager.create(mean, new Shape(1, 1, 3));
+             NDArray stdArray = manager.create(std, new Shape(1, 1, 3))) {
+            // (image - mean) 会产生一个临时 NDArray，必须显式关闭，否则泄露。
+            NDArray tmp = image.sub(meanArray);
+            NDArray out = tmp.div(stdArray);
+            tmp.close();
+            return out;
+        }
     }
 
     /**
@@ -255,49 +260,82 @@ public class DeiTImageProcessor {
         Shape shape = imgNdArray.getShape();
         boolean isBatch = shape.dimension() == 4; // (batch, height, width, channels)
 
+        NDArray batchInput = imgNdArray;
         if (!isBatch) {
             // Add batch dimension if single image
-            imgNdArray = imgNdArray.expandDims(0);
+            batchInput = imgNdArray.expandDims(0);
         }
 
-        NDList processedImages = new NDList();
-        long batchSize = imgNdArray.getShape().get(0);
+        List<NDArray> processedImages = new ArrayList<>();
+        long batchSize = batchInput.getShape().get(0);
 
-        for (int i = 0; i < batchSize; i++) {
-            NDArray image = imgNdArray.get(i);
+        try {
+            for (int i = 0; i < batchSize; i++) {
+                NDArray image = batchInput.get(i);
 
-            // Apply transformations
-            if (doResize) {
-                image = resize(matManager, image, size.get("height"), size.get("width"));
+                // Apply transformations.
+                // IMPORTANT: each transform returns a NEW NDArray owned by `manager`.
+                // The previous reference must be closed explicitly, otherwise the
+                // intermediate arrays leak inside the (possibly long-lived) manager
+                // and accumulate across invocations -> OOM in a server scenario.
+                if (doResize) {
+                    NDArray resized = resize(matManager, image, size.get("height"), size.get("width"));
+                    image.close();
+                    image = resized;
+                }
+
+                if (doCenterCrop) {
+                    NDArray cropped = centerCrop(image, cropSize.get("height"), cropSize.get("width"), manager);
+                    image.close();
+                    image = cropped;
+                }
+
+                if (doRescale) {
+                    NDArray rescaled = rescale(image, rescaleFactor);
+                    image.close();
+                    image = rescaled;
+                }
+
+                if (doNormalize) {
+                    NDArray normalized = normalize(image, imageMean, imageStd, manager);
+                    image.close();
+                    image = normalized;
+                }
+
+                // Convert to channels-first format (C, H, W).
+                // transpose 返回的是 image(normalized) 的“视图”，其底层 base 必须显式关闭，
+                // 否则 normalized 会残留于 manager 中形成泄露。
+                NDArray transposed = image.transpose(2, 0, 1);
+                image.close();
+                processedImages.add(transposed);
             }
 
-            if (doCenterCrop) {
-                image = centerCrop(image, cropSize.get("height"), cropSize.get("width"), manager);
+            // Stack all processed images. NDArrays.stack() copies the inputs into a
+            // new array, so the per-image arrays in `processedImages` can be released
+            // immediately to avoid them lingering in the manager.
+            NDArray stacked = NDArrays.stack(new NDList(processedImages));
+            for (NDArray p : processedImages) {
+                p.close();
             }
 
-            if (doRescale) {
-                image = rescale(image, rescaleFactor);
+            // Remove batch dimension if input was single image.
+            // 注意：squeeze(0) 返回的是 stacked 结果的“视图”，其底层 base(stacked)
+            // 在视图被关闭时并不会释放，会导致泄露。因此这里 materialize 出一个
+            // 独立的数组，并显式关闭 stacked base。
+            if (!isBatch) {
+                NDArray squeezed = stacked.squeeze(0);
+                NDArray result = squeezed.duplicate();
+                squeezed.close();
+                stacked.close();
+                return result;
             }
-
-            if (doNormalize) {
-                image = normalize(image, imageMean, imageStd, manager);
+            return stacked;
+        } finally {
+            // Close the expanded batch dimension wrapper if we created it
+            if (!isBatch) {
+                batchInput.close();
             }
-
-            // Convert to channels-first format (C, H, W)
-            image = image.transpose(2, 0, 1);
-
-            processedImages.add(image);
         }
-
-        // Stack all processed images
-        NDArray result = NDArrays.stack(processedImages);
-
-        // Remove batch dimension if input was single image
-        if (!isBatch) {
-            result = result.squeeze(0);
-        }
-
-        return result;
     }
 
     /**
