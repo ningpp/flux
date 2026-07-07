@@ -29,6 +29,11 @@ public class GotOcr2Model extends BatchPredictor<PreProcessResult, TextResult> {
     private final GotOcr2EmbedModel embedModel;
     private final GotOcr2DecoderModel decoderModel;
     private final HuggingFaceTokenizer tokenizer;
+    /**
+     * 固定 prompt 的 token 序列（含 256 个 &lt;imgpad&gt;），每次推理完全相同。
+     * 在构造期一次性 tokenize 并缓存，避免自回归解码前反复执行昂贵的 tokenizer.encode。
+     */
+    private final long[] cachedPromptIds;
 
     static {
         FormulaRecognitionModel.getRegistry().register(MODEL_NAMES, GotOcr2Model::new);
@@ -56,6 +61,12 @@ public class GotOcr2Model extends BatchPredictor<PreProcessResult, TextResult> {
                     env,
                     4096
             );
+            String imgpadStr = "<imgpad>".repeat(256);
+            String prompt = "<|im_start|>system\n"
+                    + "You should follow the instructions carefully and explain your answers in detail.<|im_end|><|im_start|>user\n"
+                    + "<img>" + imgpadStr + "</img>\n"
+                    + " OCR with format: <|im_end|><|im_start|>assistant\n";
+            this.cachedPromptIds = tokenizer.encode(prompt).getIds();
         } catch (Exception e) {
             throw new FluxException(e);
         }
@@ -64,18 +75,16 @@ public class GotOcr2Model extends BatchPredictor<PreProcessResult, TextResult> {
     @Override
     public List<TextResult> doBatchPredict(List<PreProcessResult> pprs, MatManager matManager, NDManager ndManager, Map<String, Object> extraParameters) {
         final long image_token_index = 151859;
-        String imgpadStr = "<imgpad>".repeat(256);
-        String prompt = "<|im_start|>system\n"
-                + "You should follow the instructions carefully and explain your answers in detail.<|im_end|><|im_start|>user\n"
-                + "<img>" + imgpadStr + "</img>\n"
-                + " OCR with format: <|im_end|><|im_start|>assistant\n";
-        long[] one_input_ids = tokenizer.encode(prompt).getIds();
+        long[] one_input_ids = cachedPromptIds;
         long[][] inputIds = new long[pprs.size()][];
         for (int i = 0; i < pprs.size(); i++) {
             inputIds[i] = one_input_ids;
         }
         try {
             float[][][] image_features = encoderModel.predict(PreProcessResult.getNDArrays(pprs));
+            // 预处理 NDArray 在编码器拷贝入 buffer 后即不再需要，立即释放，
+            // 避免其滞留于（可能长期存活的）NDManager 中逐步累积 -> 内存泄露。
+            pprs.forEach(IOUtil::close);
             float[][][] inputs_embeds = embedModel.predict(inputIds);
             prepare_inputs_embeds(inputIds, image_token_index, image_features, inputs_embeds);
 
