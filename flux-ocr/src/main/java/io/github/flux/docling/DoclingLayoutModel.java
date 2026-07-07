@@ -36,6 +36,7 @@ import io.github.flux.paddle.processor.RtdetrPostProcessor;
 import io.github.flux.paddle.processor.ToCHWImage;
 import io.github.flux.util.ArrayUtil;
 import io.github.flux.util.ImageUtil;
+import io.github.flux.util.IOUtil;
 import io.github.flux.util.ParameterUtil;
 import org.opencv.core.Mat;
 import org.opencv.imgproc.Imgproc;
@@ -125,27 +126,39 @@ public class DoclingLayoutModel extends BatchPredictor<ProcessedMat, List<Object
                 targetSizes[1][i] = mat.processed().cols();
                 i++;
             }
-            List<Mat> processed = new ArrayList<>(mats.stream().map(ProcessedMat::processed).toList());
-            for (ImageProcessor processor : PREPROCESSORS) {
-                processed = processor.process(matManager, processed);
-            }
+        List<Mat> processed = new ArrayList<>(mats.stream().map(ProcessedMat::processed).toList());
+        for (ImageProcessor processor : PREPROCESSORS) {
+            processed = processor.process(matManager, processed);
+        }
 
-            try (
-                    OnnxTensor onnxInput = ImageUtil.matToOnnxTensor(processed, env);
-                    OrtSession.Result onnxResult = session.run(Map.of(inputName, onnxInput))
-            ) {
-                Optional<OnnxValue> logitsResult = onnxResult.get("logits");
-                Optional<OnnxValue> predBoxesResult = onnxResult.get("pred_boxes");
+        // 修复前版本从未释放预处理最终产生的 CHW Mat：matToOnnxTensor 已将像素数据拷贝进张量，
+        // 但这些 Mat 仍被长期存活的 MatManager 跟踪，导致原生内存无界累积（内存泄露）。
+        // 这里把 onnxInput 移出 try-with-resources，在 finally 中保证张量与 Mat 均被释放。
+        OnnxTensor onnxInput = ImageUtil.matToOnnxTensor(processed, env);
+        try (OrtSession.Result onnxResult = session.run(Map.of(inputName, onnxInput))) {
+            Optional<OnnxValue> logitsResult = onnxResult.get("logits");
+            Optional<OnnxValue> predBoxesResult = onnxResult.get("pred_boxes");
 
-                List<List<ObjectDetectionResult>> allResults = new ArrayList<>();
-                if (logitsResult.isPresent() && predBoxesResult.isPresent()) {
-                    NDArray logits = ArrayUtil.toNDArray(manager, (float[][][]) logitsResult.get().getValue());
-                    NDArray bboxes = ArrayUtil.toNDArray(manager, (float[][][]) predBoxesResult.get().getValue());
+            List<List<ObjectDetectionResult>> allResults = new ArrayList<>();
+            if (logitsResult.isPresent() && predBoxesResult.isPresent()) {
+                // 使用独立子管理器承载 logits/bboxes 以及后处理（RtdetrPostProcessor）产生的全部
+                // 临时 NDArray（约 38 个，如 scaleFct、scores、boxes 等）。这些临时资源随子管理器
+                // 关闭而立即释放，不会停留在外层（可能长期存活）的 NDManager 中累积，避免 NDArray 泄露。
+                try (NDManager subMgr = manager.newSubManager()) {
+                    NDArray logits = ArrayUtil.toNDArray(subMgr, (float[][][]) logitsResult.get().getValue());
+                    NDArray bboxes = ArrayUtil.toNDArray(subMgr, (float[][][]) predBoxesResult.get().getValue());
                     allResults.addAll(POST_PROCESSOR.process(logits, bboxes, threshold, targetSizes, true));
                 }
-
-                return allResults;
             }
+
+            return allResults;
+        } finally {
+            // 释放 ONNX 输入张量（幂等）与预处理最终产生的 CHW Mat（约 7.68MB/张，640×640×3×4B）。
+            IOUtil.close(onnxInput);
+            for (Mat m : processed) {
+                matManager.release(m);
+            }
+        }
         } catch (Exception e) {
             throw new FluxException(e);
         }
