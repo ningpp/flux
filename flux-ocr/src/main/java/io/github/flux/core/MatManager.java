@@ -68,13 +68,33 @@ public class MatManager implements AutoCloseable {
         return mat;
     }
 
+    /**
+     * 当前被跟踪（尚未释放）的 Mat 数量。
+     * 用于内存泄露验证：长期存活的 MatManager 在每轮推理后该值应回归到基线。
+     */
+    public int trackedMatCount() {
+        return resources.size();
+    }
+
     public void release(Mat mat) {
-        if (mat != null) {
-            long addr = mat.getNativeObjAddr();
-            if (resources.containsKey(addr)) {
-                resources.remove(addr);
-            }
+        // Idempotent: only release if the Mat is still tracked.
+        // Some ImageProcessor implementations release their input Mat internally
+        // while callers may also attempt to release it; this prevents double-free.
+        if (mat != null && resources.remove(mat.getNativeObjAddr()) != null) {
             IOUtil.close(mat);
+        }
+    }
+
+    /**
+     * 释放一批被跟踪的 Mat 并从跟踪表中移除。
+     * 用于释放 {@link #split(Mat)} 产生的临时 Mat，避免跟踪表无限累积（内存泄露）。
+     */
+    public void releaseAll(List<Mat> mats) {
+        if (mats == null) {
+            return;
+        }
+        for (Mat mat : mats) {
+            release(mat);
         }
     }
 

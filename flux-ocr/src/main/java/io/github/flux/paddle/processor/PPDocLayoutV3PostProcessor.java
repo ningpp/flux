@@ -21,7 +21,9 @@ import ai.djl.ndarray.NDArray;
 import ai.djl.ndarray.NDArrays;
 import ai.djl.ndarray.NDList;
 import ai.djl.ndarray.NDManager;
+import ai.djl.ndarray.index.NDIndex;
 import ai.djl.ndarray.types.DataType;
+import ai.djl.ndarray.types.Shape;
 import io.github.flux.core.ObjectDetectionResult;
 import io.github.flux.exception.FluxException;
 
@@ -77,8 +79,15 @@ public class PPDocLayoutV3PostProcessor {
         if (targetSizes != null) {
             NDArray imgH = manager.create(targetSizes[0]);
             NDArray imgW = manager.create(targetSizes[1]);
-            NDArray scaleFct = NDArrays.stack(new NDList(imgW, imgH, imgW, imgH), 1).expandDims(1);
-            boxes = boxes.mul(scaleFct);
+            NDArray stacked = NDArrays.stack(new NDList(imgW, imgH, imgW, imgH), 1);
+            NDArray scaleFct = stacked.expandDims(1);
+            stacked.close();
+            NDArray scaledBoxes = boxes.mul(scaleFct);
+            boxes.close();
+            imgH.close();
+            imgW.close();
+            scaleFct.close();
+            boxes = scaledBoxes;
         }
 
         // 4. Sigmoid on logits → scores, then topk
@@ -94,20 +103,45 @@ public class PPDocLayoutV3PostProcessor {
 
         // 5. Derive labels and box (query) indices
         NDArray labels = indices.mod(numClasses);
-        NDArray boxIndices = indices.div(numClasses).floor();
+        NDArray divTemp = indices.div(numClasses);
+        NDArray boxIndices = divTemp.floor();
+        divTemp.close();
 
-        // 6. Gather boxes using box indices
+        // 6. Gather boxes using box indices.
+        //    注意：本环境使用的 DJL 引擎（ONNX Runtime）的 gather() 会在 manager 上额外
+        //    注册一个内部临时 NDArray((1,300,4)) 且不返回引用，导致无法 close、长期存活的
+        //    manager 上无界累积泄露。因此这里手动按索引拷贝，绕开 gather 的内部实现。
         long[] boxShape = boxes.getShape().getShape();
-        NDArray expandedBoxIndices = boxIndices.expandDims(-1).tile(new long[]{1, 1, boxShape[boxShape.length - 1]});
-        NDArray finalBoxes = boxes.gather(expandedBoxIndices, 1);
-
-        // 7. Gather order sequences using box indices
+        int numQueriesDim = (int) boxShape[1];
+        int boxLastDim = (int) boxShape[boxShape.length - 1];
         int batchSize = (int) topScores.getShape().get(0);
         int topK = (int) topScores.getShape().get(1);
+        NDArray finalBoxes = manager.create(new Shape(batchSize, topK, boxLastDim), DataType.FLOAT32);
+        for (int b = 0; b < batchSize; b++) {
+            NDArray bbi = boxIndices.get(b);
+            NDArray bbiInt = bbi.toType(DataType.INT32, true);
+            int[] idx = bbiInt.toIntArray();
+            bbiInt.close();
+            bbi.close();
+            NDArray srcBoxes = boxes.get(b);
+            for (int k = 0; k < topK; k++) {
+                int qi = Math.max(0, Math.min(idx[k], numQueriesDim - 1));
+                NDArray oneBox = srcBoxes.get(qi);
+                finalBoxes.set(new NDIndex(b, k), oneBox);
+                oneBox.close();
+            }
+            srcBoxes.close();
+        }
+
+        // 7. Gather order sequences using box indices
         int numQueries = (int) orderLogits.getShape().get(1);
         int[] gatheredOrderSeqs = new int[batchSize * topK];
         for (int b = 0; b < batchSize; b++) {
-            int[] batchBoxIndices = boxIndices.get(b).toType(DataType.INT32, true).toIntArray();
+            NDArray bbi = boxIndices.get(b);
+            NDArray batchBoxIdxArr = bbi.toType(DataType.INT32, true);
+            int[] batchBoxIndices = batchBoxIdxArr.toIntArray();
+            batchBoxIdxArr.close();
+            bbi.close();
             for (int k = 0; k < topK; k++) {
                 int qi = Math.max(0, Math.min(batchBoxIndices[k], numQueries - 1));
                 gatheredOrderSeqs[b * topK + k] = orderSeqs[b * numQueries + qi];
@@ -126,13 +160,19 @@ public class PPDocLayoutV3PostProcessor {
             NDArray mask = imageScores.gte(threshold);
             NDArray filteredScores = imageScores.booleanMask(mask);
             NDArray filteredLabels = imageLabels.booleanMask(mask);
-            var boxMask = mask.expandDims(-1).tile(new long[]{1, boxShape[boxShape.length - 1]});
+            NDArray maskExpanded = mask.expandDims(-1);
+            NDArray boxMask = maskExpanded.tile(new long[]{1, boxShape[boxShape.length - 1]});
+            maskExpanded.close();
             NDArray filteredBoxes = imageBoxes.booleanMask(boxMask, 0);
 
             // Gather order sequences for filtered detections
             float[] imgScores = filteredScores.toFloatArray();
-            float[] imgBboxes = filteredBoxes.expandDims(-1).toFloatArray();
-            int[] imgLabels = filteredLabels.toType(DataType.INT32, true).toIntArray();
+            NDArray filteredBoxesForFloat = filteredBoxes.expandDims(-1);
+            float[] imgBboxes = filteredBoxesForFloat.toFloatArray();
+            filteredBoxesForFloat.close();
+            NDArray imgLabelsArr = filteredLabels.toType(DataType.INT32, true);
+            int[] imgLabels = imgLabelsArr.toIntArray();
+            imgLabelsArr.close();
 
             // Build (index, orderSeq) pairs for filtered detections
             int size = imgScores.length;
@@ -169,6 +209,12 @@ public class PPDocLayoutV3PostProcessor {
             filteredScores.close();
             filteredLabels.close();
             filteredBoxes.close();
+            mask.close();
+            boxMask.close();
+            // .get(i) 产生的 view 同样登记在 manager 资源表中，需显式关闭
+            imageScores.close();
+            imageLabels.close();
+            imageBoxes.close();
         }
 
         // Clean up intermediate NDArrays
@@ -177,9 +223,13 @@ public class PPDocLayoutV3PostProcessor {
         indices.close();
         labels.close();
         boxIndices.close();
-        expandedBoxIndices.close();
         finalBoxes.close();
         scores.close();
+
+        // 显式关闭输入 NDArray（调用方通常也会关闭，此处幂等，确保长期存活 manager 不累积）
+        outBbox.close();
+        outLogits.close();
+        orderLogits.close();
 
         return allResults;
     }
@@ -262,6 +312,20 @@ public class PPDocLayoutV3PostProcessor {
         NDArray bottomRightX = centerX.add(halfWidth);
         NDArray bottomRightY = centerY.add(halfHeight);
 
-        return NDArrays.stack(new NDList(topLeftX, topLeftY, bottomRightX, bottomRightY), -1);
+        NDArray result = NDArrays.stack(new NDList(topLeftX, topLeftY, bottomRightX, bottomRightY), -1);
+
+        // 关闭所有中间 NDArray（含 .get(...) 产生的 view：DJL 会把它们登记进 manager 资源表，
+        // 不关闭会随长期存活的 manager 累积泄露；它们底层与输入共享，关闭仅递减引用计数，安全）
+        topLeftX.close();
+        topLeftY.close();
+        bottomRightX.close();
+        bottomRightY.close();
+        centerX.close();
+        centerY.close();
+        width.close();
+        height.close();
+        halfWidth.close();
+        halfHeight.close();
+        return result;
     }
 }

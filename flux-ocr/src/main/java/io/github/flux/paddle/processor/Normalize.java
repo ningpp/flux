@@ -18,7 +18,6 @@
 package io.github.flux.paddle.processor;
 
 import io.github.flux.core.MatManager;
-import io.github.flux.util.IOUtil;
 import org.opencv.core.Core;
 import org.opencv.core.CvType;
 import org.opencv.core.Mat;
@@ -81,9 +80,12 @@ public class Normalize implements ImageProcessor {
 
         Mat res = matManager.newMat();
         Core.merge(splitIm, res);
-        IOUtil.close(splitIm);
-        IOUtil.close(matFloat32);
-        IOUtil.close(mat);
+        // 通过 MatManager 释放拆分出的通道 Mat，避免只调用 Mat.release() 导致跟踪表无限增长
+        for (Mat channel : splitIm) {
+            matManager.release(channel);
+        }
+        matManager.release(matFloat32);
+        matManager.release(mat);
         return res;
     }
 }

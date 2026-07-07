@@ -26,8 +26,6 @@ import org.opencv.core.Scalar;
 import org.opencv.core.Size;
 import org.opencv.imgproc.Imgproc;
 
-import java.util.List;
-
 /**
  * Gemini 2.5 Pro
  */
@@ -83,24 +81,15 @@ public class OCRResizeNormImg implements ImageProcessor {
             Imgproc.resize(img, resizedImage, new Size(resizedW, imgH));
         }
 
-        // Convert to float32
-        resizedImage.convertTo(resizedImage, CvType.CV_32F);
-
-        // Transpose from HWC to CHW
-        List<Mat> channels = matManager.split(resizedImage);
-        Mat transposed = matManager.newMat();
-        Core.merge(channels, transposed);
-        // The actual transpose of axes (like numpy.transpose(2,0,1)) is complex.
-        // A common way for deep learning is to split channels and then process.
-        // For normalization, we can do it before splitting.
-
         // Normalization: (image / 255.0 - 0.5) / 0.5
+        // 直接以 1/255 缩放一次性将 uint8 转为 float32，去除冗余的第一次 convertTo。
         resizedImage.convertTo(resizedImage, CvType.CV_32F, 1.0 / 255.0);
         Core.subtract(resizedImage, new Scalar(0.5, 0.5, 0.5), resizedImage);
         Core.divide(resizedImage, new Scalar(0.5, 0.5, 0.5), resizedImage);
 
-        // Create padding image
-        Mat paddingIm = Mat.zeros(imgH, imgW, CvType.CV_32FC3);
+        // Create padding image - use MatManager to ensure proper tracking
+        Mat paddingIm = matManager.newMat(imgH, imgW, CvType.CV_32FC3);
+        paddingIm.setTo(new Scalar(0, 0, 0));
         Mat roi = matManager.newMat(paddingIm, new Rect(0, 0, resizedW, imgH));
         resizedImage.copyTo(roi);
 
@@ -121,10 +110,6 @@ public class OCRResizeNormImg implements ImageProcessor {
         }
         finalImage.put(0, 0, finalImageData);
 
-        for (Mat mat : channels) {
-            matManager.release(mat);
-        }
-        matManager.release(transposed);
         matManager.release(resizedImage);
         matManager.release(roi);
         matManager.release(paddingIm);

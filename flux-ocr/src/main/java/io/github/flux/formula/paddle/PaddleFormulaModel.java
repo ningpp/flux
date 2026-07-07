@@ -87,6 +87,11 @@ public class PaddleFormulaModel extends BatchPredictor<PreProcessResult, TextRes
     boolean initialPkvSelfClosed = false;
     try {
       OnnxTensor pv = createPixelValuesTensor(mats);
+      // 预处理 NDArray 在拼入像素张量后即不再需要，立即释放，避免其滞留于
+      // （可能长期存活的）NDManager 中逐步累积 -> 内存泄露。
+      for (PreProcessResult ppr : mats) {
+        IOUtil.close(ppr);
+      }
       try {
         encoderResult = encoderSession.run(Map.of("pv", pv));
       } finally {
@@ -264,11 +269,24 @@ public class PaddleFormulaModel extends BatchPredictor<PreProcessResult, TextRes
     var resized = resize(margined, matManager, 768, false, null);
     var thumbnailed = thumbnail(resized, matManager, 768, 768);
     var padded = padImage(thumbnailed, matManager, 768, 768);
-    var rescaleAndNormalize = rescaleAndNormalize(padded, matManager, true, 0.00392156862745098,
+    var rescaled = rescaleAndNormalize(padded, matManager, true, 0.00392156862745098,
         true, new double[] {0.7931, 0.7931, 0.7931},
         new double[]{0.1738, 0.1738, 0.1738});
-    var ndarray = ImageUtil.toNDArrayFloat(rescaleAndNormalize, ndManager);
-    return new PreProcessResult(null, ndarray.transpose(2, 0, 1));
+    var ndarray = ImageUtil.toNDArrayFloat(rescaled, ndManager);
+    var transposed = ndarray.transpose(2, 0, 1);
+    // transpose 返回的是 ndarray 的视图，其底层 base(ndarray) 在视图关闭时不会自动释放，
+    // 会残留于 NDManager（内存泄露）。duplicate 出独立副本后关闭视图与 base，
+    // 确保仅返回 1 个独立 NDArray。Mat 已全部在使用后释放。
+    var resultNd = transposed.duplicate();
+    transposed.close();
+    ndarray.close();
+    matManager.release(margined);
+    matManager.release(resized);
+    matManager.release(thumbnailed);
+    matManager.release(padded);
+    matManager.release(rescaled);
+    matManager.release(rgbMat);
+    return new PreProcessResult(null, resultNd);
   }
 
   @Override
@@ -308,6 +326,12 @@ public class PaddleFormulaModel extends BatchPredictor<PreProcessResult, TextRes
 
     Mat normalized = matManager.newMat();
     Core.merge(channels, normalized);
+
+    // split 产生的 3 个单通道 Mat 仅用于逐通道减均值/除标准差，merge 后不再需要，
+    // 必须释放，否则它们会残留在 MatManager 跟踪表中（此前每轮泄漏 3 个 Mat）。
+    matManager.releaseAll(channels);
+    // result 仅在 split 前作为中间缓冲，split 后不再需要，同样必须释放（每轮泄漏 1 个 Mat）。
+    matManager.release(result);
 
     return normalized;
   }
@@ -633,6 +657,7 @@ public class PaddleFormulaModel extends BatchPredictor<PreProcessResult, TextRes
 
     // 整张图一样
     if (maxVal == minVal) {
+      matManager.release(gray);
       return image;
     }
 
@@ -667,6 +692,10 @@ public class PaddleFormulaModel extends BatchPredictor<PreProcessResult, TextRes
 
     // 没有内容
     if (nonZero.empty()) {
+      matManager.release(gray);
+      matManager.release(normalized);
+      matManager.release(mask);
+      matManager.release(nonZero);
       return image;
     }
 
@@ -674,7 +703,14 @@ public class PaddleFormulaModel extends BatchPredictor<PreProcessResult, TextRes
     Rect rect = Imgproc.boundingRect(new MatOfPoint(nonZero));
 
     // crop
-    return matManager.newMat(image, rect);
+    Mat cropped = matManager.newMat(image, rect);
+    // gray/normalized/mask/nonZero 仅为求 bounding rect 的临时 Mat，用完即释放，
+    // 否则每个 cropMargin 调用会残留 4 个 Mat（此前每轮泄漏的主要来源）。
+    matManager.release(gray);
+    matManager.release(normalized);
+    matManager.release(mask);
+    matManager.release(nonZero);
+    return cropped;
   }
 
 }

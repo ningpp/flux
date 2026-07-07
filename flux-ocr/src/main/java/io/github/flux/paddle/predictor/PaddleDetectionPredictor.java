@@ -101,11 +101,12 @@ public class PaddleDetectionPredictor implements AutoCloseable {
         for (Mat sameSizeMat : sameSizeMats) {
             DetResizeResultV2 resizedResult = detResize.process(matManager, List.of(sameSizeMat),
                     limitSideLen, limitType, maxSideLimit).get(0);
-            detResizeResults.add(Pair.of(resizedResult,
-                    transform(List.of(resizedResult.resizeImg()), matManager, preProcessors).get(0)));
+            Mat preprocessed = transform(List.of(resizedResult.resizeImg()), matManager, preProcessors).get(0);
+            detResizeResults.add(Pair.of(resizedResult, preprocessed));
         }
         try (
-                OnnxTensor onnxInput = ImageUtil.matToOnnxTensor(detResizeResults.stream().map(Pair::getRight).toList(), env);
+                OnnxTensor onnxInput = ImageUtil.matToOnnxTensor(
+                        detResizeResults.stream().map(Pair::getRight).toList(), env);
                 OrtSession.Result onnxResult = session.run(Map.of(inputName, onnxInput))
         ) {
             OnnxValue outputResult = onnxResult.get(0);
@@ -144,6 +145,16 @@ public class PaddleDetectionPredictor implements AutoCloseable {
                 tdResults.add(new TextDetectionResult(polys, postResult.getValue()));
             }
             return tdResults;
+        } finally {
+            // 释放检测预处理阶段产生的 Mat，避免长期存活的 MatManager 累积原生内存。
+            // sameSizeMats 可能已被 detResize 内部释放，pair.getRight()（预处理结果）在
+            // matToOnnxTensor 拷贝数据后不再需要；matManager.release 幂等，重复释放安全。
+            for (Mat sameSizeMat : sameSizeMats) {
+                matManager.release(sameSizeMat);
+            }
+            for (Pair<DetResizeResultV2, Mat> pair : detResizeResults) {
+                matManager.release(pair.getRight());
+            }
         }
     }
 

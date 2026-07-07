@@ -86,6 +86,17 @@ public class PaddleDocOrientationPredictor extends BatchPredictor<PreProcessResu
     public List<ClassificationResult> doBatchPredict(List<PreProcessResult> mats, MatManager matManager, NDManager manager, Map<String, Object> extraParameters) {
         List<ClassificationResult> results = new ArrayList<>();
         List<List<ClassificationResult>> batchKrs = predictor.doBatchPredict(mats, extraParameters);
+        // 输入 Mat 由本预测器在 processRgb 中创建并交由 MatManager 跟踪；
+        // 推理（含张量构建）结束后必须经由 MatManager 释放，否则长期存活的
+        // MatManager.trackedMatCount() 不会回归基线（内存泄露）。
+        for (PreProcessResult ppr : mats) {
+            if (ppr.mat() != null) {
+                matManager.release(ppr.mat());
+            }
+            if (ppr.ndArray() != null) {
+                ppr.ndArray().close();
+            }
+        }
         for (var krs : batchKrs) {
             results.add(krs.get(0));
         }

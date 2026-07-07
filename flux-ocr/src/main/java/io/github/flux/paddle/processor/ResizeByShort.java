@@ -19,7 +19,6 @@ package io.github.flux.paddle.processor;
 
 import ai.djl.modality.cv.Image.Interpolation;
 import io.github.flux.core.MatManager;
-import io.github.flux.util.IOUtil;
 import org.opencv.core.Mat;
 import org.opencv.core.Size;
 import org.opencv.imgproc.Imgproc;
@@ -56,7 +55,7 @@ public class ResizeByShort implements ImageProcessor {
         Imgproc.resize(img,
                 resized, new Size(rescaledWidth, rescaledHeight),
                 1, 1, interp.ordinal());
-        IOUtil.close(img);
+        matManager.release(img);
         return resized;
     }
 }

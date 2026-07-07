@@ -69,8 +69,11 @@ public class ResizeNdArray {
                 1, 1, interp);
         // 这个和Python的结果不一样ai.djl.modality.cv.util.NDImageUtils.resize(img, rescaledWidth, rescaledHeight, interp)
         NDArray ndArray = ImageUtil.toNDArray(matManager, resized, img.getManager(), null);
-        IOUtil.close((Mat) cv2Img.getWrappedImage());
-        IOUtil.close(resized);
+        // 必须用 matManager.release 而非 IOUtil.close(Mat)：后者只释放原生内存，
+        // 不会把 Mat 从 MatManager 的跟踪表中移除，会导致 trackedMatCount 无界增长（内存泄露）。
+        matManager.release((Mat) cv2Img.getWrappedImage());
+        matManager.release(resized);
+        // img 是 NDArray，用 IOUtil 关闭（注意：不是 matManager.release）
         IOUtil.close(img);
         return ndArray;
     }

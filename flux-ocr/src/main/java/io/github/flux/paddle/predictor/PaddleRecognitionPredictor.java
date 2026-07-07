@@ -99,6 +99,14 @@ public class PaddleRecognitionPredictor implements AutoCloseable {
                 preds.close();
             }
             return allResults;
+        } finally {
+            // Release padded and transformed Mats that are no longer needed after inference
+            for (Mat padded : padedImages) {
+                matManager.release(padded);
+            }
+            for (Mat transformed : transformedResults) {
+                matManager.release(transformed);
+            }
         }
     }
 

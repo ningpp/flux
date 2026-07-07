@@ -86,10 +86,12 @@ public class DetPostProcessor {
             NDArray scores = currentBoxes.get(":, 1");
             NDArray categories = currentBoxes.get(":, 0");
             NDArray mask = scores.gt(thresh).logicalAnd(categories.gt(-1));
-            currentBoxes = currentBoxes.get(mask);
+            NDArray filtered = currentBoxes.get(mask);
+            currentBoxes.close();
+            currentBoxes = filtered;
         } else if (threshold instanceof Map) {
             Map<Integer, Float> thresholdMap = (Map<Integer, Float>) threshold;
-            NDList filteredBoxesList = new NDList();
+            List<NDArray> filteredBoxesList = new ArrayList<>();
             NDArray uniqueCategories = manager.create(Arrays.stream(currentBoxes.get(":, 0").toIntArray()).distinct().toArray());
 
             for (NDArray catIdArray : uniqueCategories.split(uniqueCategories.getShape().get(0))) {
@@ -103,11 +105,14 @@ public class DetPostProcessor {
                 NDArray mask = scores.gt(categoryThreshold).logicalAnd(categories.gt(-1));
                 filteredBoxesList.add(categoryBoxes.get(mask));
             }
+            NDArray filtered;
             if (!filteredBoxesList.isEmpty()) {
-                currentBoxes = NDArrays.concat(filteredBoxesList, 0);
+                filtered = NDArrays.concat(new NDList(filteredBoxesList), 0);
             } else {
-                currentBoxes = manager.create(new Shape(0, currentBoxes.getShape().get(1)));
+                filtered = manager.create(new Shape(0, currentBoxes.getShape().get(1)));
             }
+            currentBoxes.close();
+            currentBoxes = filtered;
         }
 
         // Apply layout NMS
@@ -118,7 +123,9 @@ public class DetPostProcessor {
             long[] indices = selected_indices.stream().mapToLong(i -> i).toArray();
             // Create a 1D NDArray from the indices array.
             NDArray selectedIndices = manager.create(indices);
-            currentBoxes = currentBoxes.get(selectedIndices);
+            NDArray nmsBoxes = currentBoxes.get(selectedIndices);
+            currentBoxes.close();
+            currentBoxes = nmsBoxes;
         }
 
         // Filter large boxes for "image" category
@@ -128,26 +135,27 @@ public class DetPostProcessor {
             int imageIndex = labels.indexOf("image");
             if (imageIndex != -1) {
                 long imgArea = imgSize[0] * imgSize[1];
-                NDList filteredBoxes = new NDList();
+                List<NDArray> filteredBoxes = new ArrayList<>();
                 for (NDArray box : currentBoxes.split(currentBoxes.getShape().get(0))) {
-                    box = box.squeeze(0);
-                    float[] boxValue = box.toFloatArray();
-                    int labelIndex = (int) box.getFloat(0);
+                    NDArray boxSqueezed = box.squeeze(0);
+                    int labelIndex = (int) boxSqueezed.getFloat(0);
                     if (labelIndex == imageIndex) {
-                        float xmin = Math.max(0, box.getFloat(2));
-                        float ymin = Math.max(0, box.getFloat(3));
-                        float xmax = Math.min(imgSize[0], box.getFloat(4));
-                        float ymax = Math.min(imgSize[1], box.getFloat(5));
+                        float xmin = Math.max(0, boxSqueezed.getFloat(2));
+                        float ymin = Math.max(0, boxSqueezed.getFloat(3));
+                        float xmax = Math.min(imgSize[0], boxSqueezed.getFloat(4));
+                        float ymax = Math.min(imgSize[1], boxSqueezed.getFloat(5));
                         float boxArea = (xmax - xmin) * (ymax - ymin);
                         if (boxArea <= areaThres * imgArea) {
-                            filteredBoxes.add(box.expandDims(0));
+                            filteredBoxes.add(boxSqueezed.expandDims(0));
                         }
                     } else {
-                        filteredBoxes.add(box.expandDims(0));
+                        filteredBoxes.add(boxSqueezed.expandDims(0));
                     }
                 }
                 if (!filteredBoxes.isEmpty()) {
-                    currentBoxes = NDArrays.concat(filteredBoxes, 0);
+                    NDArray concatBoxes = NDArrays.concat(new NDList(filteredBoxes), 0);
+                    currentBoxes.close();
+                    currentBoxes = concatBoxes;
                 }
             }
         }
@@ -163,12 +171,15 @@ public class DetPostProcessor {
                 if (!"union".equals(mode)) {
                     NDArray[] containment = checkContainment(currentBoxes, formulaIndex, -1, mode); // Pass -1 for category_index
                     NDArray containedByOther = containment[1];
+                    NDArray filtered;
                     if ("large".equals(mode)) {
-                        currentBoxes = currentBoxes.get(containedByOther.eq(0));
+                        filtered = currentBoxes.get(containedByOther.eq(0));
                     } else { // small
                         NDArray containsOther = containment[0];
-                        currentBoxes = currentBoxes.get(containsOther.eq(0).logicalOr(containedByOther.eq(1)));
+                        filtered = currentBoxes.get(containsOther.eq(0).logicalOr(containedByOther.eq(1)));
                     }
+                    currentBoxes.close();
+                    currentBoxes = filtered;
                 }
             } else if (layoutMergeBboxesMode instanceof Map) {
                 Map<Integer, String> modeMap = (Map<Integer, String>) layoutMergeBboxesMode;
@@ -188,7 +199,9 @@ public class DetPostProcessor {
                         }
                     }
                 }
-                currentBoxes = currentBoxes.get(keepMask);
+                NDArray mergedBoxes = currentBoxes.get(keepMask);
+                currentBoxes.close();
+                currentBoxes = mergedBoxes;
             }
         }
 
@@ -384,13 +397,13 @@ public class DetPostProcessor {
         // TODO: Implement your box containment logic here.
         // This should return two boolean NDArrays indicating which boxes contain others
         // and which are contained by others.
-        try (NDManager manager = boxes.getManager().newSubManager()) {
-            long numBoxes = boxes.getShape().get(0);
-            return new NDArray[]{
-                    manager.zeros(new Shape(numBoxes), DataType.INT32),
-                    manager.zeros(new Shape(numBoxes), DataType.INT32)
-            };
-        }
+        // Use the parent manager (not a sub-manager) so the returned arrays remain valid after return.
+        NDManager manager = boxes.getManager();
+        long numBoxes = boxes.getShape().get(0);
+        return new NDArray[]{
+                manager.zeros(new Shape(numBoxes), DataType.INT32),
+                manager.zeros(new Shape(numBoxes), DataType.INT32)
+        };
     }
 
     /**

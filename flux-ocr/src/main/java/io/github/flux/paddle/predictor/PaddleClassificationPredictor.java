@@ -20,6 +20,7 @@ package io.github.flux.paddle.predictor;
 import ai.onnxruntime.OnnxTensor;
 import ai.onnxruntime.OnnxValue;
 import ai.onnxruntime.OrtEnvironment;
+import ai.onnxruntime.OrtException;
 import ai.onnxruntime.OrtSession;
 import io.github.flux.core.ClassificationResult;
 import io.github.flux.core.MatManager;
@@ -28,10 +29,10 @@ import io.github.flux.core.TopkResult;
 import io.github.flux.exception.FluxException;
 import io.github.flux.paddle.processor.ImageProcessor;
 import io.github.flux.paddle.processor.TopkProcessor;
-import io.github.flux.util.ImageUtil;
 import io.github.flux.util.ParameterUtil;
 import org.opencv.core.Mat;
 
+import java.nio.FloatBuffer;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -43,6 +44,9 @@ public class PaddleClassificationPredictor implements AutoCloseable {
     private final String inputName;
     private final List<ImageProcessor> preProcessors;
     private final TopkProcessor topkProcessor;
+    // 复用单块临时 buffer（约 3*H*W 个 float），避免每帧重新分配，降低 GC 压力与峰值内存。
+    // 单个 predictor 对应固定输入尺寸，且 OrtSession 非线程安全（不并发调用），故可安全复用。
+    private float[] oneDatas;
 
     public PaddleClassificationPredictor(final String modelFile,
                                          final int gpuIndex,
@@ -96,7 +100,7 @@ public class PaddleClassificationPredictor implements AutoCloseable {
             }
 
             try (
-                    OnnxTensor onnxInput = ImageUtil.matToOnnxTensor(PreProcessResult.getMats(pprs), env);
+                    OnnxTensor onnxInput = toOnnxTensor(pprs);
                     OrtSession.Result onnxResult = session.run(Map.of(inputName, onnxInput));
             ) {
                 OnnxValue optinalResult = onnxResult.get(0);
@@ -116,6 +120,44 @@ public class PaddleClassificationPredictor implements AutoCloseable {
                 return allResults;
             }
         } catch (Exception e) {
+            throw new FluxException(e);
+        }
+    }
+
+    /**
+     * 将预处理后的 Mat 列表拼接为 NCHW 的 OnnxTensor。
+     * 复用实例级 {@link #oneDatas} 临时 buffer（单张尺寸固定），避免每帧重新分配
+     * 约 3*H*W 个 float（文档方向模型约 602KB），降低 GC 压力与峰值内存。
+     */
+    private OnnxTensor toOnnxTensor(List<PreProcessResult> pprs) {
+        List<Mat> mats = PreProcessResult.getMats(pprs);
+        int height = mats.get(0).rows();
+        int width = mats.get(0).cols();
+        int channels = mats.get(0).channels();
+        int oneSize = (int) (mats.get(0).total() * channels);
+        int size = mats.size() * oneSize;
+
+        float[] floatDatas = new float[size];
+        if (oneDatas == null || oneDatas.length != oneSize) {
+            oneDatas = new float[oneSize];
+        }
+        int index = 0;
+        for (Mat pad : mats) {
+            pad.get(0, 0, oneDatas);
+            System.arraycopy(oneDatas, 0, floatDatas, index, oneDatas.length);
+            index += oneSize;
+        }
+
+        FloatBuffer dataBuffer = FloatBuffer.wrap(floatDatas);
+        long[] shape = new long[] {
+                mats.size(),
+                channels,
+                height,
+                width
+        };
+        try {
+            return OnnxTensor.createTensor(env, dataBuffer, shape);
+        } catch (OrtException e) {
             throw new FluxException(e);
         }
     }

@@ -18,11 +18,8 @@
 package io.github.flux.paddle.processor;
 
 import io.github.flux.core.MatManager;
-import io.github.flux.util.IOUtil;
 import org.opencv.core.CvType;
 import org.opencv.core.Mat;
-
-import java.util.List;
 
 /**
  * Reorder the dimensions of the image from HWC to CHW.
@@ -32,25 +29,34 @@ public class ToCHWImage implements ImageProcessor {
     @Override
     public Mat process(MatManager matManager, Mat img) {
 
-        // Split channels
-        List<Mat> channels = matManager.split(img);
-
         int height = img.rows();
         int width = img.cols();
         int channelSize = height * width;
 
-        float[] chwData = new float[3 * channelSize];
+        // 一次性读取 HWC 交错浮点数据，再在 Java 中重排为 CHW 平面布局。
+        // 相比 split(3 个 native Mat) + 3 次 get + merge，减少 native 分配与 JNI 调用，
+        // 同时保证写入 CHW Mat 的底层 buffer 与优化前逐通道拷贝的结果完全一致。
+        int total = 3 * channelSize;
+        float[] hwc = new float[total];
+        img.get(0, 0, hwc);
 
-        for (int c = 0; c < 3; c++) {
-            Mat channel = channels.get(c);
-            float[] channelData = new float[channelSize];
-            channel.get(0, 0, channelData);
-            System.arraycopy(channelData, 0, chwData, c * channelSize, channelSize);
-            IOUtil.close(channel);
+        float[] chwData = new float[total];
+        for (int h = 0; h < height; h++) {
+            int rowBase = h * width;
+            for (int w = 0; w < width; w++) {
+                int src = (rowBase + w) * 3;
+                int dst = rowBase + w;
+                chwData[dst] = hwc[src];                       // R plane
+                chwData[dst + channelSize] = hwc[src + 1];      // G plane
+                chwData[dst + 2 * channelSize] = hwc[src + 2];  // B plane
+            }
         }
 
         Mat chw = matManager.newMat(height, width, CvType.CV_32FC3);
         chw.put(0, 0, chwData);
+
+        // 释放输入 Mat（上一步 Normalize 产生的临时 Mat），避免长期存活的 MatManager 累积
+        matManager.release(img);
 
         return chw;
     }

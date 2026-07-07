@@ -36,6 +36,7 @@ import io.github.flux.paddle.processor.Resize;
 import io.github.flux.paddle.processor.ToCHWImage;
 import io.github.flux.util.ArrayUtil;
 import io.github.flux.util.ImageUtil;
+import io.github.flux.util.IOUtil;
 import io.github.flux.util.ParameterUtil;
 import org.opencv.core.Mat;
 import org.opencv.imgproc.Imgproc;
@@ -140,8 +141,8 @@ public class PPDocLayoutV3Model extends BatchPredictor<ProcessedMat, List<Object
             }
 
             // ONNX inference
+            OnnxTensor onnxInput = ImageUtil.matToOnnxTensor(processed, env);
             try (
-                    OnnxTensor onnxInput = ImageUtil.matToOnnxTensor(processed, env);
                     OrtSession.Result onnxResult = session.run(Map.of(inputName, onnxInput))
             ) {
                 Optional<OnnxValue> logitsResult = onnxResult.get("logits");
@@ -159,7 +160,19 @@ public class PPDocLayoutV3Model extends BatchPredictor<ProcessedMat, List<Object
                 Float threshold = ParameterUtil.getFloat(extraParameters, "ppdoclayoutv3.threshold");
                 float thresh = threshold != null ? threshold : DEFAULT_THRESHOLD;
 
-                return POST_PROCESSOR.process(logits, bboxes, orderLogits, thresh, targetSizes);
+                List<List<ObjectDetectionResult>> results = POST_PROCESSOR.process(logits, bboxes, orderLogits, thresh, targetSizes);
+                // Close NDArrays after post-processor has consumed them
+                logits.close();
+                bboxes.close();
+                orderLogits.close();
+                return results;
+            } finally {
+                // 释放 ONNX 输入张量与预处理产生的 Mat（ToCHW 输出，约 7.68MB/张），
+                // 避免长期存活的 MatManager 无界累积。
+                IOUtil.close(onnxInput);
+                for (Mat m : processed) {
+                    matManager.release(m);
+                }
             }
         } catch (FluxException e) {
             throw e;

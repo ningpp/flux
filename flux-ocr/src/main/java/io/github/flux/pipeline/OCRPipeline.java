@@ -152,8 +152,13 @@ public class OCRPipeline {
         float oriScore = oriScores.get(i);
         Mat srcImage;
         if (oriLabel != null && oriScore > 0.3f) {
-          srcImage = ImageUtil.rotateImage(matManager, bgrImage, Double.parseDouble(oriLabel));
-          matManager.release(bgrImage); // bgrImage no longer needed after rotation
+          double angle = Double.parseDouble(oriLabel);
+          if (angle < 1e-7) {
+            srcImage = bgrImage;
+          } else {
+            srcImage = ImageUtil.rotateImage(matManager, bgrImage, angle);
+            matManager.release(bgrImage); // bgrImage no longer needed after rotation
+          }
         } else {
           srcImage = bgrImage; // reuse bgrImage as srcImage
         }

@@ -420,54 +420,60 @@ public class DBPostProcess {
             MatOfPoint2f approx2f = new MatOfPoint2f();
             Imgproc.approxPolyDP(pts2f, approx2f, epsilon, true);
 
-            Point[] pts = toArray(approx2f);
-            if (pts.length < 4) {
-                continue;
-            }
+            try {
+                Point[] pts = toArray(approx2f);
+                if (pts.length < 4) {
+                    continue;
+                }
 
-            // 5. compute box score
-            float score = boxScoreFast(pred, pts);
-            if (score < boxThresh) {
-                continue;
-            }
+                // 5. compute box score
+                float score = boxScoreFast(pred, pts);
+                if (score < boxThresh) {
+                    continue;
+                }
 
-            // 6. unclip
-            float[][] unclipped = unclip(pts, unclipRatio);
-            if (unclipped == null || unclipped.length <= 1) {
-                continue;
-            }
+                // 6. unclip
+                float[][] unclipped = unclip(pts, unclipRatio);
+                if (unclipped == null || unclipped.length <= 1) {
+                    continue;
+                }
 
-            // Build an array of Point2f
-            Point[] unclippedPts2f = new Point[unclipped.length];
-            for (int i = 0; i < unclipped.length; i++) {
-                float x = unclipped[i][0];
-                float y = unclipped[i][1];
-                unclippedPts2f[i] = new Point(x, y);
-            }
-            MatOfPoint unclippedMatOfPoint = new MatOfPoint();
-            fromArray(unclippedMatOfPoint, unclippedPts2f);
+                // Build an array of Point2f
+                Point[] unclippedPts2f = new Point[unclipped.length];
+                for (int i = 0; i < unclipped.length; i++) {
+                    float x = unclipped[i][0];
+                    float y = unclipped[i][1];
+                    unclippedPts2f[i] = new Point(x, y);
+                }
+                MatOfPoint unclippedMatOfPoint = new MatOfPoint();
+                fromArray(unclippedMatOfPoint, unclippedPts2f);
 
-            // 7. filter by min size
-            Pair<Point[], Float> mini = getMiniBoxes(unclippedMatOfPoint);
-            Point[] miniPoints = mini.getKey();
-            unclippedMatOfPoint.release();
-            if (Float.compare(mini.getValue(), minSize + 2) < 0) {
-                continue;
-            }
+                // 7. filter by min size
+                Pair<Point[], Float> mini = getMiniBoxes(unclippedMatOfPoint);
+                Point[] miniPoints = mini.getKey();
+                unclippedMatOfPoint.release();
+                if (Float.compare(mini.getValue(), minSize + 2) < 0) {
+                    continue;
+                }
 
-            // 8. scale back to original image size
-            float[][] scaled = new float[miniPoints.length][2];
-            for (int i = 0; i < miniPoints.length; i++) {
-                int x = Math.round((float) miniPoints[i].x * widthScale);
-                int y = Math.round((float) miniPoints[i].y * heightScale);
-                scaled[i][0] = Math.max(0, Math.min(x, destWidth));
-                scaled[i][1] = Math.max(0, Math.min(y, destHeight));
-            }
+                // 8. scale back to original image size
+                float[][] scaled = new float[miniPoints.length][2];
+                for (int i = 0; i < miniPoints.length; i++) {
+                    int x = Math.round((float) miniPoints[i].x * widthScale);
+                    int y = Math.round((float) miniPoints[i].y * heightScale);
+                    scaled[i][0] = Math.max(0, Math.min(x, destWidth));
+                    scaled[i][1] = Math.max(0, Math.min(y, destHeight));
+                }
 
-            // 9. convert to NDArray and append
-            NDArray boxArr = pred.getManager().create(scaled);
-            boxes.add(boxArr);
-            scores.add(score);
+                // 9. convert to NDArray and append
+                NDArray boxArr = pred.getManager().create(scaled);
+                boxes.add(boxArr);
+                scores.add(score);
+            } finally {
+                // 每个轮廓产生的原生 MatOfPoint2f 必须释放，否则随轮廓数累积泄露
+                pts2f.release();
+                approx2f.release();
+            }
         }
 
         return Pair.of(boxes, scores);
@@ -536,6 +542,9 @@ public class DBPostProcess {
                 }
             }
         }
+        // 释放原生 Mat/MatOfPoint，避免逐候选框累积的原生内存泄露（boxScoreFast 每框调用一次）
+        mask.release();
+        mop.release();
         return count > 0 ? (float) (sum / count) : 0f;
     }
 

@@ -18,9 +18,8 @@
 package io.github.flux.paddle.processor;
 
 import io.github.flux.core.MatManager;
-import io.github.flux.util.IOUtil;
 import org.opencv.core.Mat;
-import org.opencv.core.Range;
+import org.opencv.core.Rect;
 
 /**
  * Crop transform.
@@ -73,17 +72,17 @@ public class Crop implements ImageProcessor {
         int x2 = Math.min(w, x1 + cropW);
         int y2 = Math.min(h, y1 + cropH);
 
-        return slice(img, x1, y1, x2, y2);
+        return slice(matManager, img, x1, y1, x2, y2);
     }
 
-    public static Mat slice(Mat img, int x1, int y1, int x2, int y2) {
-        // Create Range objects for rows (y1 to y2) and columns (x1 to x2)
-        Range rowRange = new Range(y1, y2);
-        Range colRange = new Range(x1, x2);
-
-        // Extract the submatrix using the ranges
-        Mat result = img.submat(rowRange, colRange);
-        IOUtil.close(img);
+    public static Mat slice(MatManager matManager, Mat img, int x1, int y1, int x2, int y2) {
+        // 通过 MatManager 创建子矩阵：语义等价于 img.submat，但子矩阵会被登记到
+        // 跟踪表，且底层 buffer 与父 Mat 共享（引用计数 +1）。
+        // 随后经由 MatManager 释放父 Mat：既把父 Mat 从跟踪表移除，又因子矩阵仍持有
+        // 引用而保证底层 buffer 不会被提前释放；下游 Normalize 释放该子矩阵时 buffer
+        // 才真正回收，从而消除“跟踪表幽灵条目 + 原生 buffer 泄露”两类问题。
+        Mat result = matManager.newMat(img, new Rect(x1, y1, x2 - x1, y2 - y1));
+        matManager.release(img);
         return result;
     }
 

@@ -65,9 +65,9 @@ public class OCRPipelineGPUPerfTest {
     public static void main(String[] args) throws Exception {
         org.bytedeco.javacpp.Loader.load(org.bytedeco.opencv.opencv_java.class);
 
-        int iterations = 10;
-        int recognitionBatchSize = 2;
-        int formulaBatchSize = 2;
+        int iterations = 15;
+        int recognitionBatchSize = 4;
+        int formulaBatchSize = 1;
         // Verify PDF files exist
         for (String pdfFile : PDF_FILES) {
             File f = new File(pdfFile);
@@ -233,6 +233,7 @@ public class OCRPipelineGPUPerfTest {
 
             String tempPath = System.getProperty("java.io.tmpdir") + File.separator + "flux_warmup.png";
             org.opencv.imgcodecs.Imgcodecs.imwrite(tempPath, rgbMat);
+            matManager.release(rgbMat);
 
             pipeline.predict(List.of(tempPath), params);
 
@@ -258,6 +259,8 @@ public class OCRPipelineGPUPerfTest {
                         + baseName + "_page_" + (i + 1) + ".png";
                 org.opencv.imgcodecs.Imgcodecs.imwrite(imagePath, rgbMat);
                 imagePaths.add(imagePath);
+                matManager.release(mat);
+                matManager.release(rgbMat);
             }
         }
         return imagePaths;

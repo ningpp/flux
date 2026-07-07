@@ -50,9 +50,10 @@ public final class ImageUtil {
         int oneSize = (int) (transformedResults.get(0).total() * channels);
         int size = transformedResults.size() * oneSize;
         float[] floatDatas = new float[size];
+        // 复用单块临时 buffer，避免每帧重新分配 7.68MB，降低 GC 压力与峰值内存
+        float[] oneDatas = new float[oneSize];
         int index = 0;
         for (Mat pad : transformedResults) {
-            float[] oneDatas = new float[oneSize];
             pad.get(0, 0, oneDatas);
             System.arraycopy(oneDatas, 0, floatDatas, index, oneDatas.length);
             index += oneSize;
@@ -763,6 +764,8 @@ public final class ImageUtil {
         byte[] buf = new byte[mat.height() * mat.width() * mat.channels()];
         mat.get(0, 0, buf);
         Shape shape = new Shape(mat.height(), mat.width(), mat.channels());
+        // 读取完成后必须释放临时 Mat，否则会残留在 MatManager 跟踪表中（内存泄露）
+        matManager.release(mat);
         return manager.create(ByteBuffer.wrap(buf), shape, DataType.UINT8);
     }
 

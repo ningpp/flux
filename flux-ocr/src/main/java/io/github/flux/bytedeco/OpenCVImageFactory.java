@@ -90,25 +90,38 @@ public class OpenCVImageFactory extends ImageFactory {
         if (shape.dimension() == 4) {
             throw new UnsupportedOperationException("Batch is not supported");
         }
-        array = array.toType(DataType.UINT8, false);
+        // toType 可能返回新数组（视图/临时），使用完数据后必须关闭，否则泄露。
+        // 仅关闭“新创建”的临时数组，绝不关闭调用方传入的 array 本身。
+        NDArray typed = array.toType(DataType.UINT8, false);
+        boolean typedIsNew = typed != array;
         boolean grayScale = shape.get(0) == 1 || shape.get(2) == 1;
         if (grayScale) {
             // expected CHW
             int width = Math.toIntExact(shape.get(2));
             int height = Math.toIntExact(shape.get(1));
             Mat img = matManager.newMat(height, width, CvType.CV_8UC1);
-            img.put(0, 0, array.toByteArray());
+            img.put(0, 0, typed.toByteArray());
+            if (typedIsNew) {
+                typed.close();
+            }
             return new OpenCVImage(matManager, img);
         }
-        if (NDImageUtils.isCHW(shape)) {
-            array = array.transpose(1, 2, 0);
-            shape = array.getShape();
+        // CHW 需要转成 HWC；transpose 返回视图，需在使用后关闭。
+        NDArray transposed = typed;
+        if (NDImageUtils.isCHW(typed.getShape())) {
+            transposed = typed.transpose(1, 2, 0);
         }
-        int width = Math.toIntExact(shape.get(1));
-        int height = Math.toIntExact(shape.get(0));
+        int width = Math.toIntExact(transposed.getShape().get(1));
+        int height = Math.toIntExact(transposed.getShape().get(0));
         Mat img = matManager.newMat(height, width, CvType.CV_8UC3);
-        img.put(0, 0, array.toByteArray());
+        img.put(0, 0, transposed.toByteArray());
         Imgproc.cvtColor(img, img, Imgproc.COLOR_RGB2BGR);
+        if (transposed != typed) {
+            transposed.close();
+        }
+        if (typedIsNew) {
+            typed.close();
+        }
         return new OpenCVImage(matManager, img);
     }
 

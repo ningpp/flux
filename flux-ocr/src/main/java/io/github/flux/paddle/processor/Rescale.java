@@ -33,16 +33,13 @@ public class Rescale implements ImageProcessor {
 
     @Override
     public Mat process(MatManager matManager, Mat img) {
-        Mat float64MatScaled = matManager.newMat();
-        img.convertTo(float64MatScaled, CvType.CV_64FC3);
-        matManager.release(img);
-        Mat dest = matManager.newMat();
-        Core.multiply(float64MatScaled, new Scalar(scale), dest);
-        matManager.release(float64MatScaled);
-
+        // 直接转 float32 并乘以缩放因子，避免“先转 CV_64FC3 再转回 CV_32FC3”的两次转换，
+        // 省去一个 ~9.8MB（640×640×3×8B）的临时分配。1/255 归一化在 float32 下的误差 < 1e-7，
+        // 对模型输入精度无影响。
         Mat float32MatScaled = matManager.newMat();
-        dest.convertTo(float32MatScaled, CvType.CV_32FC3);
-        matManager.release(dest);
+        img.convertTo(float32MatScaled, CvType.CV_32FC3);
+        Core.multiply(float32MatScaled, new Scalar(scale), float32MatScaled);
+        matManager.release(img);
         return float32MatScaled;
     }
 
