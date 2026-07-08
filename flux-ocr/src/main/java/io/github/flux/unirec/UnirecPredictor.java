@@ -93,12 +93,17 @@ public class UnirecPredictor extends BatchPredictor<PreProcessResult, TextResult
         if (!MODEL_NAMES.contains(modelName)) {
             throw new FluxException("not supported unirec model: " + modelName);
         }
+        UnirecRuntimeConfig runtimeConfig = UnirecRuntimeConfig.from(gpuIndex, customParams);
         this.encoderModel = new UnirecEncoderModel(
-                new File(modelRootDir + File.separator + modelName, "unirec_encoder.onnx").getAbsolutePath(), gpuIndex, env);
+                new File(modelRootDir + File.separator + modelName, "unirec_encoder.onnx").getAbsolutePath(),
+                runtimeConfig.encoderGpuIndex(),
+                env);
         this.decoderModel = new UnirecDecoderModel(
                 new File(modelRootDir + File.separator + modelName, "unirec_decoder.onnx").getAbsolutePath(),
                 new File(modelRootDir + File.separator + modelName, "unirec_tokenizer_mapping.json").getAbsolutePath(),
-                gpuIndex, env);
+                runtimeConfig.decoderGpuIndex(),
+                env,
+                runtimeConfig.maxTokens());
     }
 
     private void retain() {
@@ -111,11 +116,10 @@ public class UnirecPredictor extends BatchPredictor<PreProcessResult, TextResult
         for (PreProcessResult ppr : mats) {
             UnirecEncoderModelPredictResult encodeResult = encoderModel.predict(ppr, matManager, manager);
             try {
-                results.add(decoderModel.predict(encodeResult));
+                results.add(decoderModel.predict(encodeResult, matManager));
             } finally {
                 // Ensure the encoder result (3 tensors + OrtSession.Result) is released even
-                // if decoding throws. On the normal path the decoder already closes it, so this
-                // is an idempotent no-op there.
+                // if decoding throws.
                 IOUtil.close(encodeResult);
             }
         }

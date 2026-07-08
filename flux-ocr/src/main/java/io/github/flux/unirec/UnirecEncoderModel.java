@@ -26,7 +26,6 @@ import ai.onnxruntime.OrtSession.Result;
 import io.github.flux.core.MatManager;
 import io.github.flux.core.PreProcessResult;
 import io.github.flux.exception.FluxException;
-import io.github.flux.util.IOUtil;
 import org.opencv.core.Mat;
 
 import java.nio.FloatBuffer;
@@ -67,18 +66,19 @@ public class UnirecEncoderModel implements AutoCloseable {
             mat.get(0, 0, buf);
             // Release the input Mat AND drop it from the MatManager tracking table.
             matManager.release(mat);
-            onnxInput = OnnxTensor.createTensor(env, FloatBuffer.wrap(buf), shape);
-            result = session.run(Map.of("pixel_values", onnxInput));
-            IOUtil.close(onnxInput);
+            onnxInput = matManager.createOnnxTensor(env, FloatBuffer.wrap(buf), shape);
+            result = matManager.runSession(session, Map.of("pixel_values", onnxInput));
+            matManager.release(onnxInput);
             onnxInput = null;
             return new UnirecEncoderModelPredictResult(
+                    matManager,
                     result,
                     (OnnxTensor) result.get(0),
                     (OnnxTensor) result.get(1),
                     (OnnxTensor) result.get(2));
         } catch (Exception e) {
-            IOUtil.close(result);
-            IOUtil.close(onnxInput);
+            matManager.release(result);
+            matManager.release(onnxInput);
             throw new FluxException(e);
         }
     }

@@ -19,18 +19,21 @@ package io.github.flux.unirec;
 
 import ai.onnxruntime.OnnxTensor;
 import ai.onnxruntime.OrtSession;
-import io.github.flux.util.IOUtil;
+import io.github.flux.core.MatManager;
 
 public class UnirecEncoderModelPredictResult implements AutoCloseable {
+    private final MatManager matManager;
     private final OrtSession.Result result;
     private final OnnxTensor hiddenStates;
     private final OnnxTensor crossK;
     private final OnnxTensor crossV;
 
-    public UnirecEncoderModelPredictResult(OrtSession.Result result,
+    public UnirecEncoderModelPredictResult(MatManager matManager,
+                                           OrtSession.Result result,
                                            OnnxTensor hiddenStates,
                                            OnnxTensor crossK,
                                            OnnxTensor crossV) {
+        this.matManager = matManager;
         this.result = result;
         this.hiddenStates = hiddenStates;
         this.crossK = crossK;
@@ -54,6 +57,6 @@ public class UnirecEncoderModelPredictResult implements AutoCloseable {
         // Closing the Result also closes the OnnxTensors extracted from it.
         // Do not close hiddenStates/crossK/crossV separately to avoid
         // "Closing an already closed tensor" warnings.
-        IOUtil.close(result);
+        matManager.release(result);
     }
 }

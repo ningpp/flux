@@ -26,6 +26,7 @@ import ai.onnxruntime.OrtSession.Result;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import io.github.flux.core.MatManager;
 import io.github.flux.core.TextResult;
 import io.github.flux.exception.FluxException;
 import io.github.flux.util.ArrayUtil;
@@ -57,13 +58,23 @@ public class UnirecDecoderModel implements AutoCloseable {
     private final OrtEnvironment env;
     private final OrtSession session;
     private final String[] id2tokens;
+    private final int maxTokens;
 
     public UnirecDecoderModel(final String modelFile,
                               final String tokenFile,
                               final int gpuIndex,
                               final OrtEnvironment env) {
+        this(modelFile, tokenFile, gpuIndex, env, UnirecRuntimeConfig.DEFAULT_MAX_TOKENS);
+    }
+
+    public UnirecDecoderModel(final String modelFile,
+                              final String tokenFile,
+                              final int gpuIndex,
+                              final OrtEnvironment env,
+                              final int maxTokens) {
         try {
             this.env = env;
+            this.maxTokens = Math.max(1, maxTokens);
             this.session = OnnxSessionUtil.createSession(env, modelFile, gpuIndex);
 
             JsonElement jsonElement = JsonParser.parseString(Files.readString(Paths.get(tokenFile), StandardCharsets.UTF_8));
@@ -84,12 +95,11 @@ public class UnirecDecoderModel implements AutoCloseable {
         }
     }
 
-    public TextResult predict(UnirecEncoderModelPredictResult encodeResult) {
+    public TextResult predict(UnirecEncoderModelPredictResult encodeResult, MatManager matManager) {
         try {
             int num_decoder_layers = 6;
             int num_heads = 6;
             int head_dim = 128;
-            int maxTokens = 2048;
             long[] generated_ids = new long[maxTokens + 1];
             generated_ids[0] = bos_token_id;
 
@@ -100,8 +110,8 @@ public class UnirecDecoderModel implements AutoCloseable {
             for (int i = 0; i < num_decoder_layers; i++) {
                 float[][][][] empty_key = ArrayUtil.createZeros(batch_size, num_heads, 0, head_dim);
                 float[][][][] empty_value = ArrayUtil.createZeros(batch_size, num_heads, 0, head_dim);
-                initialPastKeyValues.add(Pair.of(ArrayUtil.createOnnxTensor(empty_key, env),
-                        ArrayUtil.createOnnxTensor(empty_value, env)));
+                initialPastKeyValues.add(Pair.of(matManager.track(ArrayUtil.createOnnxTensor(empty_key, env)),
+                        matManager.track(ArrayUtil.createOnnxTensor(empty_value, env))));
             }
 
             OnnxTensor crossKOnnxTensor = encodeResult.crossK();
@@ -123,12 +133,13 @@ public class UnirecDecoderModel implements AutoCloseable {
                         crossVOnnxTensor,
                         past_key_values,
                         pad_token_id,
-                        num_decoder_layers);
+                        num_decoder_layers,
+                        matManager);
                 // The previous step's Result owns its output tensors, which served as the
                 // current step's past_key_values input. Now that the current step has run,
                 // those tensors are no longer needed and are released with the Result.
                 if (dsr != null) {
-                    IOUtil.close(dsr.result());
+                    matManager.release(dsr.result());
                 }
                 dsr = next;
                 past_key_values = dsr.past_key_values();
@@ -152,11 +163,11 @@ public class UnirecDecoderModel implements AutoCloseable {
             // Clean up: the final Result owns its output tensors (final past_key_values),
             // so closing it releases them. The initial empty past_key_values are owned by us.
             if (dsr != null) {
-                IOUtil.close(dsr.result());
+                matManager.release(dsr.result());
             }
             for (var pastKvPair : initialPastKeyValues) {
-                IOUtil.close(pastKvPair.getLeft());
-                IOUtil.close(pastKvPair.getRight());
+                matManager.release(pastKvPair.getLeft());
+                matManager.release(pastKvPair.getRight());
             }
             // encodeResult is owned by the caller (UnirecPredictor) and closed in its finally block.
             return new TextResult(clean_special_tokens(decodeTokenIds(ids)), ids, -1f);
@@ -223,15 +234,16 @@ public class UnirecDecoderModel implements AutoCloseable {
                                          OnnxTensor crossVOnnxTensor,
                                          List<Pair<OnnxTensor, OnnxTensor>> pastKeyValues,
                                          long paddingIdx,
-                                         int num_decoder_layers) throws OrtException {
+                                         int num_decoder_layers,
+                                         MatManager matManager) throws OrtException {
 
         // Prepare inputs
         LongBuffer inputIds = LongBuffer.wrap(new long[] { input_id });
-        OnnxTensor inputIdsTensor = OnnxTensor.createTensor(env, inputIds, new long[] {1, 1});
+        OnnxTensor inputIdsTensor = matManager.track(OnnxTensor.createTensor(env, inputIds, new long[] {1, 1}));
 
         // Use M2M100's position ID calculation with past_key_values_length
         LongBuffer positionIds = LongBuffer.wrap(new long[] { paddingIdx + 1 + pastLength });
-        OnnxTensor positionIdsTensor = OnnxTensor.createTensor(env, positionIds, new long[] {1, 1});
+        OnnxTensor positionIdsTensor = matManager.track(OnnxTensor.createTensor(env, positionIds, new long[] {1, 1}));
 
         Map<String, OnnxTensor> decoder_inputs = new HashMap<>();
         decoder_inputs.put("input_ids", inputIdsTensor);
@@ -245,13 +257,13 @@ public class UnirecDecoderModel implements AutoCloseable {
             decoder_inputs.put("past_value_" + i, valueTensor);
         }
 
-        Result result = session.run(decoder_inputs);
+        Result result = matManager.runSession(session, decoder_inputs);
         // Close only the newly created input tensors (input_ids, position_ids).
         // Do NOT close cross_k/cross_v - they are owned by the caller (the encoder result)
         // and reused every step. Do NOT close past_key_values - they are outputs of the
         // previous step's Result and are released when that Result is closed by the caller.
-        IOUtil.close(inputIdsTensor);
-        IOUtil.close(positionIdsTensor);
+        matManager.release(inputIdsTensor);
+        matManager.release(positionIdsTensor);
         float[][][] logits = (float[][][]) result.get(0).getValue();
         List<Pair<OnnxTensor, OnnxTensor>> present_key_values = new ArrayList<>();
         // Extract present_key_values
