@@ -52,6 +52,8 @@ public class OCRPipelineGPUPerfTest {
     private static final String FORMULA_MODEL_DIR = "D:\\models\\formula";
     private static final int DPI = 300;
     private static final int GPU_INDEX = 0;
+    private static final int TABLE_DECODER_GPU_INDEX = -1;
+    private static final int TABLE_MAX_TOKENS = 768;
 
     private static final String[] PDF_FILES = {
         // https://hjfy.top/arxiv/2606.13108
@@ -84,7 +86,11 @@ public class OCRPipelineGPUPerfTest {
              TextLineOrientationModel textLineOriModel = new TextLineOrientationModel(OCR_MODEL_DIR, "PP-LCNet_x1_0_textline_ori", env, GPU_INDEX);
              LayoutModel layoutModel = new LayoutModel(LAYOUT_MODEL_DIR, "PP-DocLayoutV3", GPU_INDEX, env);
              FormulaRecognitionModel formulaModel = new FormulaRecognitionModel(FORMULA_MODEL_DIR, "pix2text-mfr-1.5", GPU_INDEX, env);
-             TableModel tableModel = new TableModel(FORMULA_MODEL_DIR, "unirec-0.1b", GPU_INDEX, env)) {
+             TableModel tableModel = new TableModel(FORMULA_MODEL_DIR, "unirec-0.1b", GPU_INDEX, env,
+                     Map.of(
+                             "unirec.decoderGpuIndex", TABLE_DECODER_GPU_INDEX,
+                             "unirec.maxTokens", TABLE_MAX_TOKENS
+                     ))) {
 
             OCRPipeline pipeline = new OCRPipeline(
                     detModel, recModel,
@@ -103,6 +109,8 @@ public class OCRPipelineGPUPerfTest {
             System.out.println("\n========== GPU Performance Benchmark ==========");
             System.out.println("DPI: " + DPI);
             System.out.println("GPU Index: " + GPU_INDEX);
+            System.out.println("Table decoder GPU Index: " + TABLE_DECODER_GPU_INDEX);
+            System.out.println("Table max tokens: " + TABLE_MAX_TOKENS);
             System.out.println();
 
             long totalE2ENanos = 0;       // end-to-end (PDF+OCR)

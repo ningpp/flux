@@ -22,7 +22,6 @@ import ai.djl.modality.cv.Image.Interpolation;
 import ai.djl.ndarray.NDArray;
 import io.github.flux.bytedeco.OpenCVImageFactory;
 import io.github.flux.core.MatManager;
-import io.github.flux.util.IOUtil;
 import io.github.flux.util.ImageUtil;
 import org.opencv.core.Mat;
 import org.opencv.core.Size;
@@ -49,8 +48,11 @@ public class ResizeNdArray {
     public List<NDArray> process(MatManager matManager, List<NDArray> imgs) {
         var res = new ArrayList<NDArray>();
         for (var img : imgs) {
-            res.add(resize(matManager, img));
-            img.close();
+            NDArray resized = resize(matManager, img);
+            res.add(resized);
+            if (resized != img) {
+                img.close();
+            }
         }
         return res;
     }
@@ -73,8 +75,7 @@ public class ResizeNdArray {
         // 不会把 Mat 从 MatManager 的跟踪表中移除，会导致 trackedMatCount 无界增长（内存泄露）。
         matManager.release((Mat) cv2Img.getWrappedImage());
         matManager.release(resized);
-        // img 是 NDArray，用 IOUtil 关闭（注意：不是 matManager.release）
-        IOUtil.close(img);
+        // img 由调用方 process() 统一关闭（仅在 resize 创建了新 NDArray 时）。
         return ndArray;
     }
 

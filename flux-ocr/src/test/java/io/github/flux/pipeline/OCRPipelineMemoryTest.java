@@ -52,10 +52,12 @@ class OCRPipelineMemoryTest {
         try (MatManager matManager = new MatManager();
              NDManager ndManager = NDManager.newBaseManager()) {
             int baseline = matManager.trackedMatCount();
+            int closeableBaseline = matManager.trackedCloseableCount();
 
             pipeline.predict(List.of(imagePath.toString()), Map.of("recognitionBatchSize", 2), matManager, ndManager);
 
             assertEquals(baseline, matManager.trackedMatCount());
+            assertEquals(closeableBaseline, matManager.trackedCloseableCount());
         }
     }
 

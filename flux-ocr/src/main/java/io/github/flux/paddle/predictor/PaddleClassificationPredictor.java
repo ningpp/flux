@@ -88,6 +88,7 @@ public class PaddleClassificationPredictor implements AutoCloseable {
     }
 
     public List<List<ClassificationResult>> doBatchPredict(List<PreProcessResult> pprs,
+                                                           MatManager matManager,
                                                            Map<String, Object> extraParameters) {
         try {
             List<List<ClassificationResult>> allResults = new ArrayList<>();
@@ -96,10 +97,11 @@ public class PaddleClassificationPredictor implements AutoCloseable {
                 k = 1;
             }
 
-            try (
-                    OnnxTensor onnxInput = toOnnxTensor(pprs);
-                    OrtSession.Result onnxResult = session.run(Map.of(inputName, onnxInput));
-            ) {
+            OnnxTensor onnxInput = null;
+            OrtSession.Result onnxResult = null;
+            try {
+                onnxInput = matManager.track(toOnnxTensor(pprs));
+                onnxResult = matManager.runSession(session, Map.of(inputName, onnxInput));
                 OnnxValue optinalResult = onnxResult.get(0);
                 float[][] preditResult = (float[][]) optinalResult.getValue();
                 for (int i = 0; i < pprs.size(); i++) {
@@ -115,6 +117,9 @@ public class PaddleClassificationPredictor implements AutoCloseable {
                     allResults.add(results);
                 }
                 return allResults;
+            } finally {
+                matManager.release(onnxResult);
+                matManager.release(onnxInput);
             }
         } catch (Exception e) {
             throw new FluxException(e);

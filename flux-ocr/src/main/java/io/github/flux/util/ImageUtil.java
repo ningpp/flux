@@ -359,32 +359,35 @@ public final class ImageUtil {
             srcPts[i] = new Point(points[i][0], points[i][1]);
         }
         MatOfPoint2f srcMat = new MatOfPoint2f(srcPts);
+        matManager.track((Mat) srcMat);
+        try {
+            // 3) Compute min-area rotated rect
+            RotatedRect rect = Imgproc.minAreaRect(srcMat);
 
-        // 3) Compute min-area rotated rect
-        RotatedRect rect = Imgproc.minAreaRect(srcMat);
-        IOUtil.close(srcMat);
+            // 4) Extract its 4 corner points
+            Point[] boxPts = new Point[4];
+            rect.points(boxPts);
 
-        // 4) Extract its 4 corner points
-        Point[] boxPts = new Point[4];
-        rect.points(boxPts);
+            // 5) Sort by x (ascending)
+            Arrays.sort(boxPts, Comparator.comparingDouble(p -> p.x));
 
-        // 5) Sort by x (ascending)
-        Arrays.sort(boxPts, Comparator.comparingDouble(p -> p.x));
+            // 6) Identify top‐&‐bottom among left and right pairs
+            Point left1 = boxPts[0], left2 = boxPts[1];
+            Point right1 = boxPts[2], right2 = boxPts[3];
 
-        // 6) Identify top‐&‐bottom among left and right pairs
-        Point left1 = boxPts[0], left2 = boxPts[1];
-        Point right1 = boxPts[2], right2 = boxPts[3];
+            Point tl = (left1.y < left2.y) ? left1 : left2;
+            Point bl = (left1.y < left2.y) ? left2 : left1;
+            Point tr = (right1.y < right2.y) ? right1 : right2;
+            Point br = (right1.y < right2.y) ? right2 : right1;
 
-        Point tl = (left1.y < left2.y) ? left1 : left2;
-        Point bl = (left1.y < left2.y) ? left2 : left1;
-        Point tr = (right1.y < right2.y) ? right1 : right2;
-        Point br = (right1.y < right2.y) ? right2 : right1;
+            // 7) Build the 4‐point box in order: [tl, tr, br, bl]
+            Point[] ordered = new Point[]{tl, tr, br, bl};
 
-        // 7) Build the 4‐point box in order: [tl, tr, br, bl]
-        Point[] ordered = new Point[]{tl, tr, br, bl};
-
-        // 8) Delegate to your rotate‐crop routine (keeping float precision, matching Python)
-        return getRotateCropImage(matManager, mat, ordered);
+            // 8) Delegate to your rotate‐crop routine (keeping float precision, matching Python)
+            return getRotateCropImage(matManager, mat, ordered);
+        } finally {
+            matManager.release((Mat) srcMat);
+        }
     }
 
     public static Mat getRotateCropImage(MatManager matManager, Mat mat, int[][] points) {
@@ -431,25 +434,30 @@ public final class ImageUtil {
                 new Point(cropW, cropH),
                 new Point(0, cropH)
         );
+        matManager.track((Mat) srcMat);
+        matManager.track((Mat) dstMat);
         Mat M = Imgproc.getPerspectiveTransform(srcMat, dstMat);
-        Mat warped = matManager.newMat();
-        Imgproc.warpPerspective(
-                mat, warped, M,
-                new Size(cropW, cropH),
-                Imgproc.INTER_CUBIC,
-                Core.BORDER_REPLICATE
-        );
+        matManager.track(M);
+        try {
+            Mat warped = matManager.newMat();
+            Imgproc.warpPerspective(
+                    mat, warped, M,
+                    new Size(cropW, cropH),
+                    Imgproc.INTER_CUBIC,
+                    Core.BORDER_REPLICATE
+            );
 
-        IOUtil.close(srcMat);
-        IOUtil.close(dstMat);
-        IOUtil.close(M);
+            // Rotate if tall (matching Python: np.rot90 when h/w >= 1.5)
+            if ((double) warped.rows() / warped.cols() >= 1.5) {
+                return rotate90Degree(matManager, warped);
+            }
 
-        // Rotate if tall (matching Python: np.rot90 when h/w >= 1.5)
-        if ((double) warped.rows() / warped.cols() >= 1.5) {
-            return rotate90Degree(matManager, warped);
+            return warped;
+        } finally {
+            matManager.release((Mat) srcMat);
+            matManager.release((Mat) dstMat);
+            matManager.release(M);
         }
-
-        return warped;
     }
 
     // Method using OpenCV
@@ -494,39 +502,41 @@ public final class ImageUtil {
         double scale = 1.0;
 
         // Get rotation matrix
-        Mat mat = Imgproc.getRotationMatrix2D(center, angle, scale);
+        Mat mat = matManager.track(Imgproc.getRotationMatrix2D(center, angle, scale));
+        try {
+            // Extract cos and sin values from rotation matrix
+            double cos = Math.abs(mat.get(0, 0)[0]);
+            double sin = Math.abs(mat.get(0, 1)[0]);
 
-        // Extract cos and sin values from rotation matrix
-        double cos = Math.abs(mat.get(0, 0)[0]);
-        double sin = Math.abs(mat.get(0, 1)[0]);
+            // Calculate new dimensions
+            int newW = (int) ((h * sin) + (w * cos));
+            int newH = (int) ((h * cos) + (w * sin));
 
-        // Calculate new dimensions
-        int newW = (int) ((h * sin) + (w * cos));
-        int newH = (int) ((h * cos) + (w * sin));
+            // Adjust translation components
+            double[] translation02 = mat.get(0, 2);
+            double[] translation12 = mat.get(1, 2);
+            translation02[0] += (newW - w) / 2.0;
+            translation12[0] += (newH - h) / 2.0;
+            mat.put(0, 2, translation02);
+            mat.put(1, 2, translation12);
 
-        // Adjust translation components
-        double[] translation02 = mat.get(0, 2);
-        double[] translation12 = mat.get(1, 2);
-        translation02[0] += (newW - w) / 2.0;
-        translation12[0] += (newH - h) / 2.0;
-        mat.put(0, 2, translation02);
-        mat.put(1, 2, translation12);
+            // Create destination size
+            Size dstSize = new Size(newW, newH);
 
-        // Create destination size
-        Size dstSize = new Size(newW, newH);
+            // Perform the rotation
+            Mat rotated = matManager.newMat();
+            Imgproc.warpAffine(
+                    image,
+                    rotated,
+                    mat,
+                    dstSize,
+                    Imgproc.INTER_CUBIC
+            );
 
-        // Perform the rotation
-        Mat rotated = matManager.newMat();
-        Imgproc.warpAffine(
-                image,
-                rotated,
-                mat,
-                dstSize,
-                Imgproc.INTER_CUBIC
-        );
-
-        IOUtil.close(mat);
-        return rotated;
+            return rotated;
+        } finally {
+            matManager.release(mat);
+        }
     }
 
     /**

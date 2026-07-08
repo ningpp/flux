@@ -138,10 +138,11 @@ public class PPDocLayoutV3Model extends BatchPredictor<ProcessedMat, List<Object
             }
 
             // ONNX inference
-            OnnxTensor onnxInput = ImageUtil.matToOnnxTensor(processed, env);
-            try (
-                    OrtSession.Result onnxResult = session.run(Map.of(inputName, onnxInput))
-            ) {
+            OnnxTensor onnxInput = null;
+            OrtSession.Result onnxResult = null;
+            try {
+                onnxInput = matManager.track(ImageUtil.matToOnnxTensor(processed, env));
+                onnxResult = matManager.runSession(session, Map.of(inputName, onnxInput));
                 Optional<OnnxValue> logitsResult = onnxResult.get("logits");
                 Optional<OnnxValue> predBoxesResult = onnxResult.get("pred_boxes");
                 Optional<OnnxValue> orderLogitsResult = onnxResult.get("order_logits");
@@ -165,9 +166,10 @@ public class PPDocLayoutV3Model extends BatchPredictor<ProcessedMat, List<Object
                     IOUtil.close(orderLogits);
                 }
             } finally {
-                // 释放 ONNX 输入张量与预处理产生的 Mat（ToCHW 输出，约 7.68MB/张），
+                // 释放 ONNX 输入/输出句柄与预处理产生的 Mat（ToCHW 输出，约 7.68MB/张），
                 // 避免长期存活的 MatManager 无界累积。
-                IOUtil.close(onnxInput);
+                matManager.release(onnxResult);
+                matManager.release(onnxInput);
                 for (Mat m : processed) {
                     matManager.release(m);
                 }
