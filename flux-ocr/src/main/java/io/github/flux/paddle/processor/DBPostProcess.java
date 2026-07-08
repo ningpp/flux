@@ -27,6 +27,7 @@ import clipper2.offset.ClipperOffset;
 import clipper2.offset.EndType;
 import clipper2.offset.JoinType;
 import io.github.flux.core.MatManager;
+import io.github.flux.util.IOUtil;
 import org.apache.commons.lang3.tuple.Pair;
 import org.opencv.core.CvType;
 import org.opencv.core.Mat;
@@ -336,7 +337,7 @@ public class DBPostProcess {
                     boxes.add(boxArrInt32);
                     scores.add(score);
                 } finally {
-                    unclippedMatOfPoint.release();
+                    IOUtil.close(unclippedMatOfPoint);
                 }
             }
             success = true;
@@ -471,12 +472,12 @@ public class DBPostProcess {
                         boxes.add(boxArr);
                         scores.add(score);
                     } finally {
-                        unclippedMatOfPoint.release();
+                        IOUtil.close(unclippedMatOfPoint);
                     }
                 } finally {
                     // 每个轮廓产生的原生 MatOfPoint2f 必须释放，否则随轮廓数累积泄露
-                    pts2f.release();
-                    approx2f.release();
+                    IOUtil.close(pts2f);
+                    IOUtil.close(approx2f);
                 }
             }
 
@@ -553,7 +554,7 @@ public class DBPostProcess {
         } finally {
             // 释放原生 Mat/MatOfPoint，避免逐候选框累积的原生内存泄露（boxScoreFast 每框调用一次）
             matManager.release(mask);
-            mop.release();
+            IOUtil.close(mop);
         }
     }
 
@@ -579,7 +580,7 @@ public class DBPostProcess {
 
     private void releaseContours(List<MatOfPoint> contours) {
         for (MatOfPoint contour : contours) {
-            contour.release();
+            IOUtil.close(contour);
         }
     }
 
@@ -663,7 +664,7 @@ public class DBPostProcess {
         // 7) compute the length of the shorter side of the rectangle
         float shortSide = (float) Math.min(minRect.size.width, minRect.size.height);
 
-        contour2f.release();
+        IOUtil.close(contour2f);
         return Pair.of(box, shortSide);
     }
 
@@ -713,8 +714,9 @@ public class DBPostProcess {
             }
             return expanded;
         } finally {
-            contour2f.release();
+            IOUtil.close(contour2f);
         }
     }
+
 
 }

@@ -97,7 +97,7 @@ Do not use in production.
 | PP-FormulaNet_plus-M |  ✅  |  ❌   |
 | [PP-FormulaNet_plus-L](https://huggingface.co/ningpp/PP-FormulaNet_plus-L-ONNX) |  ✅  |  ✅   |
 | TexTeller            |  ✅  |  ✅   |
-| unirec-0.1b          |  ✅  |  ✅   |
+| [unirec-0.1b](https://huggingface.co/topdu/unirec_0_1b_onnx)          |  ✅  |  ✅   |
 
 
 #### Table Recognition Model
@@ -106,7 +106,7 @@ Do not use in production.
 | Dolphin     |  ✅  |  ✅   |
 | Dolphin-1.5 |  ✅  |  ✅   |
 | Falcon-OCR  |  ✅  |  ✅   |
-| unirec-0.1b |  ✅  |  ✅   |
+| [unirec-0.1b](https://huggingface.co/topdu/unirec_0_1b_onnx) |  ✅  |  ✅   |
 
 
 #### Doc Orientation Model

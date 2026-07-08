@@ -362,7 +362,7 @@ public final class ImageUtil {
 
         // 3) Compute min-area rotated rect
         RotatedRect rect = Imgproc.minAreaRect(srcMat);
-        srcMat.release();
+        IOUtil.close(srcMat);
 
         // 4) Extract its 4 corner points
         Point[] boxPts = new Point[4];
@@ -440,9 +440,9 @@ public final class ImageUtil {
                 Core.BORDER_REPLICATE
         );
 
-        srcMat.release();
-        dstMat.release();
-        M.release();
+        IOUtil.close(srcMat);
+        IOUtil.close(dstMat);
+        IOUtil.close(M);
 
         // Rotate if tall (matching Python: np.rot90 when h/w >= 1.5)
         if ((double) warped.rows() / warped.cols() >= 1.5) {

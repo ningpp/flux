@@ -23,6 +23,7 @@ import ai.djl.ndarray.index.NDIndex;
 import ai.djl.ndarray.types.Shape;
 import io.github.flux.bytedeco.OpenCVImageFactory;
 import io.github.flux.core.MatManager;
+import io.github.flux.util.IOUtil;
 import io.github.flux.paddle.processor.ImageProcessor;
 import io.github.flux.util.ImageUtil;
 import org.opencv.core.Core;
@@ -76,7 +77,7 @@ public class LatexImageFormat implements ImageProcessor {
 
         // Release intermediate Mats to free memory
         matManager.release(paddedImg);
-        blob.release();
+        IOUtil.close(blob);
 
         return result;
     }

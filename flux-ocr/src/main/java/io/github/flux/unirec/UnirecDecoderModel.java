@@ -21,6 +21,7 @@ import ai.onnxruntime.OnnxTensor;
 import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtException;
 import ai.onnxruntime.OrtSession;
+import io.github.flux.util.OnnxSessionUtil;
 import ai.onnxruntime.OrtSession.Result;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -63,11 +64,7 @@ public class UnirecDecoderModel implements AutoCloseable {
                               final OrtEnvironment env) {
         try {
             this.env = env;
-            OrtSession.SessionOptions options = new OrtSession.SessionOptions();
-            if (gpuIndex > -1) {
-                options.addCUDA(gpuIndex);
-            }
-            this.session = env.createSession(modelFile, options);
+            this.session = OnnxSessionUtil.createSession(env, modelFile, gpuIndex);
 
             JsonElement jsonElement = JsonParser.parseString(Files.readString(Paths.get(tokenFile), StandardCharsets.UTF_8));
             JsonObject id_to_token_json_obj = jsonElement.getAsJsonObject().getAsJsonObject("id_to_token");

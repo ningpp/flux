@@ -23,6 +23,7 @@ import ai.onnxruntime.OnnxTensor;
 import ai.onnxruntime.OnnxValue;
 import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtSession;
+import io.github.flux.util.OnnxSessionUtil;
 import io.github.flux.core.BatchPredictor;
 import io.github.flux.core.MatManager;
 import io.github.flux.core.ObjectDetectionResult;
@@ -101,12 +102,8 @@ public class PPDocLayoutV3Model extends BatchPredictor<ProcessedMat, List<Object
                                final Map<String, Object> customParams) {
         try {
             this.env = env;
-            OrtSession.SessionOptions options = new OrtSession.SessionOptions();
-            if (gpuIndex > -1) {
-                options.addCUDA(gpuIndex);
-            }
             String modelFile = new File(modelDir + File.separator + modelName, "model.onnx").getAbsolutePath();
-            this.session = env.createSession(modelFile, options);
+            this.session = OnnxSessionUtil.createSession(env, modelFile, gpuIndex);
             this.inputName = List.copyOf(session.getInputNames()).getFirst();
         } catch (Exception e) {
             throw new FluxException(e);

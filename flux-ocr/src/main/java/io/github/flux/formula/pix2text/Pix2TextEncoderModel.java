@@ -24,6 +24,7 @@ import ai.onnxruntime.OnnxTensor;
 import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtException;
 import ai.onnxruntime.OrtSession;
+import io.github.flux.util.OnnxSessionUtil;
 import io.github.flux.exception.FluxException;
 import io.github.flux.util.IOUtil;
 import io.github.flux.util.OnnxUtil;
@@ -52,11 +53,7 @@ public class Pix2TextEncoderModel implements AutoCloseable {
         try {
             this.env = env;
             this.preProcessor = preProcessor;
-            OrtSession.SessionOptions options = new OrtSession.SessionOptions();
-            if (gpuIndex > -1) {
-                options.addCUDA(gpuIndex);
-            }
-            this.session = env.createSession(modelFile, options);
+            this.session = OnnxSessionUtil.createSession(env, modelFile, gpuIndex);
 
             this.inputNames = session.getInputNames();
         } catch (Exception e) {

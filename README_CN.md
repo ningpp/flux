@@ -95,7 +95,7 @@
 | PP-FormulaNet_plus-M |  ✅  |  ❌   |
 | [PP-FormulaNet_plus-L](https://huggingface.co/ningpp/PP-FormulaNet_plus-L-ONNX) |  ✅  |  ✅   |
 | TexTeller            |  ✅  |  ✅   |
-| unirec-0.1b          |  ✅  |  ✅   |
+| [unirec-0.1b](https://huggingface.co/topdu/unirec_0_1b_onnx)          |  ✅  |  ✅   |
 
 
 #### 表格识别模型
@@ -104,7 +104,7 @@
 | Dolphin     |  ✅  |  ✅   |
 | Dolphin-1.5 |  ✅  |  ✅   |
 | Falcon-OCR  |  ✅  |  ✅   |
-| unirec-0.1b |  ✅  |  ✅   |
+| [unirec-0.1b](https://huggingface.co/topdu/unirec_0_1b_onnx) |  ✅  |  ✅   |
 
 
 #### 文档方向分类模型

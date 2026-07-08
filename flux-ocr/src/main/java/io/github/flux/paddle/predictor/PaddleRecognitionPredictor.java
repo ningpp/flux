@@ -24,6 +24,7 @@ import ai.onnxruntime.OnnxValue;
 import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtException;
 import ai.onnxruntime.OrtSession;
+import io.github.flux.util.OnnxSessionUtil;
 import io.github.flux.core.MatManager;
 import io.github.flux.core.RecognitionResult;
 import io.github.flux.exception.FluxException;
@@ -52,12 +53,7 @@ public class PaddleRecognitionPredictor implements AutoCloseable {
         try {
             this.postProcessor = postProcessor;
             this.env = env;
-            OrtSession.SessionOptions options = new OrtSession.SessionOptions();
-            if (gpuIndex > -1) {
-                options.addCUDA(gpuIndex);
-            }
-
-            this.session = env.createSession(modelFile, options);
+            this.session = OnnxSessionUtil.createSession(env, modelFile, gpuIndex);
 
             this.inputName = List.copyOf(session.getInputNames()).getFirst();
 
