@@ -19,15 +19,14 @@ package io.github.flux.formula.pix2text;
 
 import ai.djl.huggingface.tokenizers.HuggingFaceTokenizer;
 import ai.onnxruntime.OnnxTensor;
-import ai.onnxruntime.OnnxValue;
 import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtException;
 import ai.onnxruntime.OrtSession;
 import io.github.flux.util.OnnxSessionUtil;
+import io.github.flux.core.MatManager;
 import io.github.flux.core.TextResult;
 import io.github.flux.exception.FluxException;
 import io.github.flux.util.ArrayUtil;
-import io.github.flux.util.IOUtil;
 
 import java.nio.FloatBuffer;
 import java.nio.LongBuffer;
@@ -71,7 +70,7 @@ public class Pix2TextDecoderModel implements AutoCloseable {
         }
     }
 
-    public List<TextResult> batchPredict(float[][][] encodeResultFloats) throws OrtException {
+    public List<TextResult> batchPredict(float[][][] encodeResultFloats, MatManager matManager) throws OrtException {
         int encB = encodeResultFloats.length;
         int encS = encodeResultFloats[0].length;
         int encH = encodeResultFloats[0][0].length;
@@ -87,7 +86,7 @@ public class Pix2TextDecoderModel implements AutoCloseable {
         }
         FloatBuffer dataBuffer = FloatBuffer.wrap(encFlat);
         long[] shape = new long[] {encB, encS, encH};
-        OnnxTensor encoderHiddenStates = OnnxTensor.createTensor(env, dataBuffer, shape);
+        OnnxTensor encoderHiddenStates = matManager.createOnnxTensor(env, dataBuffer, shape);
         try {
             int batchSize = encB;
 
@@ -109,8 +108,13 @@ public class Pix2TextDecoderModel implements AutoCloseable {
             boolean[] finished = new boolean[batchSize];
             for (int step = 0; step < maxLength; step++) {
                 LongBuffer buffer = LongBuffer.wrap(flatInput).position(0).limit((int) (batchSize * curLen));
-                try (OnnxTensor input_ids_tensor = OnnxTensor.createTensor(env, buffer, new long[] {batchSize, curLen});
-                     OrtSession.Result onnxResult = session.run(Map.of("input_ids", input_ids_tensor, "encoder_hidden_states", encoderHiddenStates))) {
+                OnnxTensor inputIdsTensor = null;
+                OrtSession.Result onnxResult = null;
+                try {
+                    inputIdsTensor = matManager.createOnnxTensor(env, buffer, new long[] {batchSize, curLen});
+                    onnxResult = matManager.runSession(session, Map.of(
+                            "input_ids", inputIdsTensor,
+                            "encoder_hidden_states", encoderHiddenStates));
                     // OnnxValue obtained from Result is owned by Result and will be closed when Result closes.
                     float[][][] decoderResultFloats = (float[][][]) onnxResult.get(0).getValue();
                     for (int j = 0; j < batchSize; j++) {
@@ -132,6 +136,9 @@ public class Pix2TextDecoderModel implements AutoCloseable {
                     if (ArrayUtil.allTrue(finished)) {
                         break;
                     }
+                } finally {
+                    matManager.release(onnxResult);
+                    matManager.release(inputIdsTensor);
                 }
             }
 
@@ -152,7 +159,7 @@ public class Pix2TextDecoderModel implements AutoCloseable {
             }
             return results;
         } finally {
-            IOUtil.close(encoderHiddenStates);
+            matManager.release(encoderHiddenStates);
         }
     }
 

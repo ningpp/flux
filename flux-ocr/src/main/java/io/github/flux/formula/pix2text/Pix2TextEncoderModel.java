@@ -25,9 +25,9 @@ import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtException;
 import ai.onnxruntime.OrtSession;
 import io.github.flux.util.OnnxSessionUtil;
+import io.github.flux.core.MatManager;
 import io.github.flux.exception.FluxException;
 import io.github.flux.util.IOUtil;
-import io.github.flux.util.OnnxUtil;
 
 import java.util.HashMap;
 import java.util.List;
@@ -61,7 +61,7 @@ public class Pix2TextEncoderModel implements AutoCloseable {
         }
     }
 
-    public float[][][] batchPredict(List<NDArray> inputNDArrays) throws OrtException {
+    public float[][][] batchPredict(List<NDArray> inputNDArrays, MatManager matManager) throws OrtException {
         NDList ndList = new NDList();
         NDArray inputNdArray = null;
         OnnxTensor onnxInput = null;
@@ -72,7 +72,7 @@ public class Pix2TextEncoderModel implements AutoCloseable {
             inputNDArrays.forEach(IOUtil::close);
             long[] shape = inputNdArray.getShape().getShape();
             var dataBuffer = inputNdArray.toByteBuffer().asFloatBuffer();
-            onnxInput = OnnxTensor.createTensor(env, dataBuffer, shape);
+            onnxInput = matManager.createOnnxTensor(env, dataBuffer, shape);
             IOUtil.close(inputNdArray);
             inputNdArray = null;
             IOUtil.close(ndList);
@@ -81,16 +81,16 @@ public class Pix2TextEncoderModel implements AutoCloseable {
             for (String inputName : inputNames) {
                 inputs.put(inputName, onnxInput);
             }
-            onnxInput = null; // ownership transferred to inputs map
-            onnxResult = session.run(inputs);
-            OnnxUtil.closeTensors(inputs);
+            onnxResult = matManager.runSession(session, inputs);
+            matManager.release(onnxInput);
+            onnxInput = null;
             float[][][] encodeResultFloats = (float[][][]) onnxResult.get(0).getValue();
-            IOUtil.close(onnxResult);
+            matManager.release(onnxResult);
             onnxResult = null;
             return encodeResultFloats;
         } finally {
-            IOUtil.close(onnxResult);
-            IOUtil.close(onnxInput);
+            matManager.release(onnxResult);
+            matManager.release(onnxInput);
             IOUtil.close(inputNdArray);
             IOUtil.close(ndList);
         }
