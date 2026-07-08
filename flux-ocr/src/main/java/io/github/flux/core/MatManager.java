@@ -1,5 +1,10 @@
 package io.github.flux.core;
 
+import ai.onnxruntime.OnnxTensor;
+import ai.onnxruntime.OrtEnvironment;
+import ai.onnxruntime.OrtException;
+import ai.onnxruntime.OrtSession;
+import io.github.flux.exception.FluxException;
 import io.github.flux.util.IOUtil;
 import org.opencv.core.Core;
 import org.opencv.core.Mat;
@@ -8,14 +13,19 @@ import org.opencv.core.Scalar;
 import org.opencv.core.Size;
 import org.opencv.imgcodecs.Imgcodecs;
 
+import java.nio.ByteBuffer;
+import java.nio.FloatBuffer;
+import java.nio.LongBuffer;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedDeque;
 
 public class MatManager implements AutoCloseable {
 
     private final Map<Long, Mat> resources = new ConcurrentHashMap<>();
+    private final ConcurrentLinkedDeque<AutoCloseable> closeables = new ConcurrentLinkedDeque<>();
 
     public Mat imread(String filename) {
         Mat mat = Imgcodecs.imread(filename);
@@ -74,11 +84,84 @@ public class MatManager implements AutoCloseable {
     }
 
     /**
+     * Track any AutoCloseable native resource (OnnxTensor, OrtSession.Result, etc.)
+     * as a safety net. The resource will be closed when {@link #close()} is called,
+     * even if the caller forgets to close it explicitly.
+     */
+    public <T extends AutoCloseable> T track(T closeable) {
+        if (closeable != null) {
+            closeables.push(closeable);
+        }
+        return closeable;
+    }
+
+    /**
+     * Release a tracked AutoCloseable early (idempotent).
+     */
+    public void release(AutoCloseable closeable) {
+        if (closeable != null && closeables.remove(closeable)) {
+            IOUtil.close(closeable);
+        }
+    }
+
+    /**
      * 当前被跟踪（尚未释放）的 Mat 数量。
      * 用于内存泄露验证：长期存活的 MatManager 在每轮推理后该值应回归到基线。
      */
     public int trackedMatCount() {
         return resources.size();
+    }
+
+    /**
+     * 当前被跟踪（尚未释放）的 AutoCloseable 数量（OnnxTensor、OrtSession.Result 等）。
+     * 用于内存泄露验证：每轮推理后该值应回归到 0。
+     */
+    public int trackedCloseableCount() {
+        return closeables.size();
+    }
+
+    /**
+     * Create an OnnxTensor from a FloatBuffer AND track it for automatic cleanup.
+     */
+    public OnnxTensor createOnnxTensor(OrtEnvironment env, FloatBuffer data, long[] shape) {
+        try {
+            return track(OnnxTensor.createTensor(env, data, shape));
+        } catch (OrtException e) {
+            throw new FluxException(e);
+        }
+    }
+
+    /**
+     * Create an OnnxTensor from a ByteBuffer AND track it for automatic cleanup.
+     */
+    public OnnxTensor createOnnxTensor(OrtEnvironment env, ByteBuffer data, long[] shape) {
+        try {
+            return track(OnnxTensor.createTensor(env, data, shape));
+        } catch (OrtException e) {
+            throw new FluxException(e);
+        }
+    }
+
+    /**
+     * Create an OnnxTensor from a LongBuffer AND track it for automatic cleanup.
+     */
+    public OnnxTensor createOnnxTensor(OrtEnvironment env, LongBuffer data, long[] shape) {
+        try {
+            return track(OnnxTensor.createTensor(env, data, shape));
+        } catch (OrtException e) {
+            throw new FluxException(e);
+        }
+    }
+
+    /**
+     * Run an ONNX session AND track the Result for automatic cleanup.
+     */
+    public OrtSession.Result runSession(OrtSession session, Map<String, OnnxTensor> inputs) {
+        try {
+            return track(session.run(inputs));
+        } catch (OrtException e) {
+            throw new FluxException(e);
+        }
     }
 
     public void release(Mat mat) {
@@ -105,6 +188,10 @@ public class MatManager implements AutoCloseable {
 
     @Override
     public void close() throws Exception {
+        AutoCloseable c;
+        while ((c = closeables.poll()) != null) {
+            IOUtil.close(c);
+        }
         resources.forEach((_, mat) -> IOUtil.close(mat));
         resources.clear();
     }

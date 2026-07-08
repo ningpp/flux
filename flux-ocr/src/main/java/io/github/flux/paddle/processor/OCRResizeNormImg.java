@@ -21,7 +21,6 @@ import io.github.flux.core.MatManager;
 import org.opencv.core.Core;
 import org.opencv.core.CvType;
 import org.opencv.core.Mat;
-import org.opencv.core.Rect;
 import org.opencv.core.Scalar;
 import org.opencv.core.Size;
 import org.opencv.imgproc.Imgproc;
@@ -81,42 +80,37 @@ public class OCRResizeNormImg implements ImageProcessor {
             Imgproc.resize(img, resizedImage, new Size(resizedW, imgH));
         }
 
-        // Normalization: (image / 255.0 - 0.5) / 0.5
-        // 直接以 1/255 缩放一次性将 uint8 转为 float32，去除冗余的第一次 convertTo。
-        resizedImage.convertTo(resizedImage, CvType.CV_32F, 1.0 / 255.0);
-        Core.subtract(resizedImage, new Scalar(0.5, 0.5, 0.5), resizedImage);
-        Core.divide(resizedImage, new Scalar(0.5, 0.5, 0.5), resizedImage);
-
-        // Create padding image - use MatManager to ensure proper tracking
-        Mat paddingIm = matManager.newMat(imgH, imgW, CvType.CV_32FC3);
-        paddingIm.setTo(new Scalar(0, 0, 0));
-        Mat roi = matManager.newMat(paddingIm, new Rect(0, 0, resizedW, imgH));
-        resizedImage.copyTo(roi);
-
-        // Transpose for the final CHW layout if needed by the model
-        // This creates a single Mat with data in CHW order.
         Mat finalImage = matManager.newMat(imgH, imgW, CvType.CV_32FC3);
-        float[] finalImageData = new float[imgC * imgH * imgW];
-        float[] paddingImData = new float[imgH * imgW * imgC];
-        paddingIm.get(0, 0, paddingImData);
-
-        int offset = 0;
-        for (int c = 0; c < imgC; c++) {
-            for (int h = 0; h < imgH; h++) {
-                for (int w = 0; w < imgW; w++) {
-                    finalImageData[offset++] = paddingImData[(h * imgW + w) * imgC + c];
-                }
-            }
-        }
+        float[] finalImageData = normalizeToChw(resizedImage, imgC, imgH, imgW, resizedW);
         finalImage.put(0, 0, finalImageData);
 
         matManager.release(resizedImage);
-        matManager.release(roi);
-        matManager.release(paddingIm);
         matManager.release(img);
 
         // Reshape to (C, H, W)
         return finalImage;
+    }
+
+    static float[] normalizeToChw(Mat resizedImage, int imgC, int imgH, int imgW, int resizedW) {
+        float[] finalImageData = new float[imgC * imgH * imgW];
+        byte[] resizedImageData = new byte[imgH * resizedW * imgC];
+        resizedImage.get(0, 0, resizedImageData);
+
+        float scale = 2.0f / 255.0f;
+        int channelSize = imgH * imgW;
+        for (int h = 0; h < imgH; h++) {
+            int srcRowOffset = h * resizedW * imgC;
+            int dstRowOffset = h * imgW;
+            for (int w = 0; w < resizedW; w++) {
+                int srcOffset = srcRowOffset + w * imgC;
+                int dstOffset = dstRowOffset + w;
+                for (int c = 0; c < imgC; c++) {
+                    int unsignedValue = resizedImageData[srcOffset + c] & 0xFF;
+                    finalImageData[c * channelSize + dstOffset] = unsignedValue * scale - 1.0f;
+                }
+            }
+        }
+        return finalImageData;
     }
 
     @Override

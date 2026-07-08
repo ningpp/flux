@@ -26,6 +26,7 @@ import io.github.flux.exception.FluxException;
 import org.yaml.snakeyaml.Yaml;
 
 import java.io.InputStream;
+import java.nio.FloatBuffer;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.ArrayList;
@@ -163,6 +164,84 @@ public class CTCLabelDecode {
         preds_idx.close();
         expandPreds.close();
         return decodeResults;
+    }
+
+    public List<RecognitionResult> process(float[][] preds) {
+        StringBuilder text = new StringBuilder();
+        int previousIndex = -1;
+        double scoreSum = 0.0d;
+        int scoreCount = 0;
+
+        for (float[] timestep : preds) {
+            if (timestep == null || timestep.length == 0) {
+                previousIndex = -1;
+                continue;
+            }
+
+            int maxIndex = 0;
+            float maxScore = timestep[0];
+            for (int i = 1; i < timestep.length; i++) {
+                if (timestep[i] > maxScore) {
+                    maxScore = timestep[i];
+                    maxIndex = i;
+                }
+            }
+
+            if (maxIndex != 0 && maxIndex != previousIndex) {
+                if (maxIndex < character.size()) {
+                    text.append(character.get(maxIndex));
+                }
+                scoreSum += maxScore;
+                scoreCount++;
+            }
+            previousIndex = maxIndex;
+        }
+
+        if (reverse) {
+            throw new FluxException("Not Supported Yet!!!");
+        }
+
+        double score = scoreCount == 0 ? 0.0d : scoreSum / scoreCount;
+        return List.of(new RecognitionResult(text.toString(), new double[]{score}));
+    }
+
+    public List<RecognitionResult> process(FloatBuffer preds,
+                                           int offset,
+                                           int sequenceLength,
+                                           int classCount) {
+        StringBuilder text = new StringBuilder();
+        int previousIndex = -1;
+        double scoreSum = 0.0d;
+        int scoreCount = 0;
+
+        for (int timestep = 0; timestep < sequenceLength; timestep++) {
+            int rowOffset = offset + timestep * classCount;
+            int maxIndex = 0;
+            float maxScore = preds.get(rowOffset);
+            for (int i = 1; i < classCount; i++) {
+                float score = preds.get(rowOffset + i);
+                if (score > maxScore) {
+                    maxScore = score;
+                    maxIndex = i;
+                }
+            }
+
+            if (maxIndex != 0 && maxIndex != previousIndex) {
+                if (maxIndex < character.size()) {
+                    text.append(character.get(maxIndex));
+                }
+                scoreSum += maxScore;
+                scoreCount++;
+            }
+            previousIndex = maxIndex;
+        }
+
+        if (reverse) {
+            throw new FluxException("Not Supported Yet!!!");
+        }
+
+        double score = scoreCount == 0 ? 0.0d : scoreSum / scoreCount;
+        return List.of(new RecognitionResult(text.toString(), new double[]{score}));
     }
 
 }

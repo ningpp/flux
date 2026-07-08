@@ -17,10 +17,8 @@
  */
 package io.github.flux.paddle.predictor;
 
-import ai.djl.ndarray.NDArray;
 import ai.djl.ndarray.NDManager;
 import ai.onnxruntime.OnnxTensor;
-import ai.onnxruntime.OnnxValue;
 import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtException;
 import ai.onnxruntime.OrtSession;
@@ -33,11 +31,25 @@ import io.github.flux.paddle.processor.ImageProcessor;
 import io.github.flux.util.ImageUtil;
 import org.opencv.core.Mat;
 
+import java.nio.FloatBuffer;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
 public class PaddleRecognitionPredictor implements AutoCloseable {
+
+    public record StageTimings(long padNanos,
+                               long preprocessNanos,
+                               long tensorCreateNanos,
+                               long inferenceNanos,
+                               long outputReadNanos,
+                               long postprocessNanos,
+                               long cleanupNanos,
+                               long totalNanos) {
+    }
+
+    public record TimedResult(List<List<RecognitionResult>> results, StageTimings timings) {
+    }
 
     private final OrtEnvironment env;
     private final OrtSession session;
@@ -78,24 +90,65 @@ public class PaddleRecognitionPredictor implements AutoCloseable {
 
     public List<List<RecognitionResult>> batchPredict(List<Mat> images,
                                                       MatManager matManager, NDManager manager) throws OrtException {
-        List<Mat> padedImages = ImageUtil.padImageToSame(matManager, images);
-        List<Mat> transformedResults = transform(padedImages, matManager, preProcessors);
-        try (
-                OnnxTensor onnxInput = ImageUtil.matToOnnxTensor(transformedResults, env);
-                OrtSession.Result onnxResult = session.run(Map.of(inputName, onnxInput))
-        ) {
-            OnnxValue optinalResult = onnxResult.get(0);
-            List<List<RecognitionResult>> allResults = new ArrayList<>();
-            float[][][] v = (float[][][]) optinalResult.getValue();
-            for (float[][] floats : v) {
-                NDArray preds = manager.create(floats);
+        return batchPredictWithTimings(images, matManager, manager).results();
+    }
 
-                List<RecognitionResult> recognitionResult = postProcessor.process(preds);
-                allResults.add(recognitionResult);
-                preds.close();
+    public TimedResult batchPredictWithTimings(List<Mat> images,
+                                               MatManager matManager,
+                                               NDManager manager) throws OrtException {
+        long totalStart = System.nanoTime();
+
+        long padStart = System.nanoTime();
+        List<Mat> padedImages = ImageUtil.padImageToSame(matManager, images);
+        long padNanos = System.nanoTime() - padStart;
+
+        long preprocessStart = System.nanoTime();
+        List<Mat> transformedResults = transform(padedImages, matManager, preProcessors);
+        long preprocessNanos = System.nanoTime() - preprocessStart;
+
+        OnnxTensor onnxInput = null;
+        OrtSession.Result onnxResult = null;
+        List<List<RecognitionResult>> allResults = new ArrayList<>();
+        long tensorCreateNanos = 0L;
+        long inferenceNanos = 0L;
+        long outputReadNanos = 0L;
+        long postprocessNanos = 0L;
+        long cleanupNanos;
+        try {
+            long tensorCreateStart = System.nanoTime();
+            onnxInput = matManager.track(ImageUtil.matToOnnxTensor(transformedResults, env));
+            tensorCreateNanos = System.nanoTime() - tensorCreateStart;
+
+            long inferenceStart = System.nanoTime();
+            onnxResult = matManager.runSession(session, Map.of(inputName, onnxInput));
+            inferenceNanos = System.nanoTime() - inferenceStart;
+
+            long outputReadStart = System.nanoTime();
+            OnnxTensor outputTensor = (OnnxTensor) onnxResult.get(0);
+            long[] outputShape = outputTensor.getInfo().getShape();
+            if (outputShape.length != 3) {
+                throw new FluxException("Unexpected recognition output shape length: " + outputShape.length);
             }
-            return allResults;
+            int batchSize = Math.toIntExact(outputShape[0]);
+            int sequenceLength = Math.toIntExact(outputShape[1]);
+            int classCount = Math.toIntExact(outputShape[2]);
+            FloatBuffer outputBuffer = outputTensor.getFloatBuffer();
+            outputReadNanos = System.nanoTime() - outputReadStart;
+
+            long postprocessStart = System.nanoTime();
+            int oneResultSize = sequenceLength * classCount;
+            for (int batch = 0; batch < batchSize; batch++) {
+                allResults.add(postProcessor.process(
+                        outputBuffer,
+                        batch * oneResultSize,
+                        sequenceLength,
+                        classCount));
+            }
+            postprocessNanos = System.nanoTime() - postprocessStart;
         } finally {
+            long cleanupStart = System.nanoTime();
+            matManager.release(onnxResult);
+            matManager.release(onnxInput);
             // Release padded and transformed Mats that are no longer needed after inference
             for (Mat padded : padedImages) {
                 matManager.release(padded);
@@ -103,7 +156,20 @@ public class PaddleRecognitionPredictor implements AutoCloseable {
             for (Mat transformed : transformedResults) {
                 matManager.release(transformed);
             }
+            cleanupNanos = System.nanoTime() - cleanupStart;
         }
+        long totalNanos = System.nanoTime() - totalStart;
+        return new TimedResult(
+                allResults,
+                new StageTimings(
+                        padNanos,
+                        preprocessNanos,
+                        tensorCreateNanos,
+                        inferenceNanos,
+                        outputReadNanos,
+                        postprocessNanos,
+                        cleanupNanos,
+                        totalNanos));
     }
 
 }
