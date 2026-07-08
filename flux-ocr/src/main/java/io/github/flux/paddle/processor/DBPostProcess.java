@@ -27,6 +27,7 @@ import clipper2.offset.ClipperOffset;
 import clipper2.offset.EndType;
 import clipper2.offset.JoinType;
 import io.github.flux.core.MatManager;
+import io.github.flux.core.TextDetectionResult;
 import io.github.flux.util.IOUtil;
 import org.apache.commons.lang3.tuple.Pair;
 import org.opencv.core.CvType;
@@ -290,7 +291,7 @@ public class DBPostProcess {
             int numContours = Math.min(contours.size(), maxCandidates);
             for (int idx = 0; idx < numContours; idx++) {
                 MatOfPoint contour = contours.get(idx);
-                Pair<Point[], Float> miniBoxPair = getMiniBoxes(contour);
+                Pair<Point[], Float> miniBoxPair = getMiniBoxes(contour, matManager);
                 Point[] points = miniBoxPair.getKey();
                 Float sside = miniBoxPair.getValue();
                 if (Float.compare(sside, minSize) < 0) {
@@ -316,7 +317,7 @@ public class DBPostProcess {
                 try {
                     fromArray(unclippedMatOfPoint, unclippedPts2f);
 
-                    miniBoxPair = getMiniBoxes(unclippedMatOfPoint);
+                    miniBoxPair = getMiniBoxes(unclippedMatOfPoint, matManager);
                     points = miniBoxPair.getKey();
                     sside = miniBoxPair.getValue();
                     if (Float.compare(sside, minSize + 2) < 0) {
@@ -347,6 +348,99 @@ public class DBPostProcess {
             if (!success) {
                 closeNdArrays(boxes);
             }
+        }
+    }
+
+    public TextDetectionResult boxesFromBitmap(
+            MatManager matManager,
+            final float[] predFlat,
+            final int height,
+            final int width,
+            final int destWidth,
+            final int destHeight,
+            final float thresh,
+            final float boxThresh,
+            final float unclipRatio
+    ) {
+        int expected = height * width;
+        if (predFlat.length != expected) {
+            throw new IllegalArgumentException(
+                    "predFlat length must be height * width, expected "
+                            + expected + " but got " + predFlat.length);
+        }
+
+        float widthScale = (float) destWidth / width;
+        float heightScale = (float) destHeight / height;
+        byte[] data = bitmapToUint8Bytes(predFlat, thresh);
+
+        Mat mat = matManager.newMat(height, width, CvType.CV_8UC1);
+        mat.put(0, 0, data);
+
+        List<MatOfPoint> contours = new ArrayList<>();
+        Mat hierarchy = matManager.newMat();
+        try {
+            Imgproc.findContours(mat, contours, hierarchy, Imgproc.RETR_LIST, Imgproc.CHAIN_APPROX_SIMPLE);
+        } finally {
+            matManager.release(mat);
+            matManager.release(hierarchy);
+        }
+
+        List<int[][]> boxes = new ArrayList<>();
+        List<Float> scores = new ArrayList<>();
+        try {
+            int numContours = Math.min(contours.size(), maxCandidates);
+            for (int idx = 0; idx < numContours; idx++) {
+                MatOfPoint contour = contours.get(idx);
+                Pair<Point[], Float> miniBoxPair = getMiniBoxes(contour, matManager);
+                Point[] points = miniBoxPair.getKey();
+                Float sside = miniBoxPair.getValue();
+                if (Float.compare(sside, minSize) < 0) {
+                    continue;
+                }
+
+                float score = boxScoreFast(matManager, predFlat, height, width, points);
+                if (score < boxThresh) {
+                    continue;
+                }
+
+                float[][] unclipped = unclip(points, unclipRatio);
+                if (unclipped == null || unclipped.length == 0) {
+                    continue;
+                }
+
+                Point[] unclippedPts2f = new Point[unclipped.length];
+                for (int i = 0; i < unclipped.length; i++) {
+                    unclippedPts2f[i] = new Point(unclipped[i][0], unclipped[i][1]);
+                }
+
+                MatOfPoint unclippedMatOfPoint = new MatOfPoint();
+                try {
+                    fromArray(unclippedMatOfPoint, unclippedPts2f);
+
+                    miniBoxPair = getMiniBoxes(unclippedMatOfPoint, matManager);
+                    points = miniBoxPair.getKey();
+                    sside = miniBoxPair.getValue();
+                    if (Float.compare(sside, minSize + 2) < 0) {
+                        continue;
+                    }
+
+                    int[][] scaled = new int[points.length][2];
+                    for (int i = 0; i < points.length; i++) {
+                        int x = Math.round(points[i].x * widthScale);
+                        int y = Math.round(points[i].y * heightScale);
+                        scaled[i][0] = Math.max(0, Math.min(x, destWidth));
+                        scaled[i][1] = Math.max(0, Math.min(y, destHeight));
+                    }
+
+                    boxes.add(scaled);
+                    scores.add(score);
+                } finally {
+                    IOUtil.close(unclippedMatOfPoint);
+                }
+            }
+            return new TextDetectionResult(boxes.toArray(new int[0][][]), scores);
+        } finally {
+            releaseContours(contours);
         }
     }
 
@@ -452,7 +546,7 @@ public class DBPostProcess {
                         fromArray(unclippedMatOfPoint, unclippedPts2f);
 
                         // 7. filter by min size
-                        Pair<Point[], Float> mini = getMiniBoxes(unclippedMatOfPoint);
+                        Pair<Point[], Float> mini = getMiniBoxes(unclippedMatOfPoint, matManager);
                         Point[] miniPoints = mini.getKey();
                         if (Float.compare(mini.getValue(), minSize + 2) < 0) {
                             continue;
@@ -524,6 +618,7 @@ public class DBPostProcess {
         final int maskW = xmax - xmin + 1;
         Mat mask = matManager.track(Mat.zeros(maskH, maskW, CvType.CV_8UC1));
         MatOfPoint mop = new MatOfPoint();
+        matManager.track((Mat) mop);
         try {
 
             // 4) shift polygon coords and fill
@@ -554,7 +649,7 @@ public class DBPostProcess {
         } finally {
             // 释放原生 Mat/MatOfPoint，避免逐候选框累积的原生内存泄露（boxScoreFast 每框调用一次）
             matManager.release(mask);
-            IOUtil.close(mop);
+            matManager.release((Mat) mop);
         }
     }
 
@@ -576,6 +671,14 @@ public class DBPostProcess {
                 mul.close();
             }
         }
+    }
+
+    private byte[] bitmapToUint8Bytes(float[] predFlat, float thresh) {
+        byte[] data = new byte[predFlat.length];
+        for (int i = 0; i < predFlat.length; i++) {
+            data[i] = predFlat[i] > thresh ? (byte) 255 : 0;
+        }
+        return data;
     }
 
     private void releaseContours(List<MatOfPoint> contours) {
@@ -620,52 +723,55 @@ public class DBPostProcess {
      * @param contour a MatOfPoint or MatOfPoint2f representing the polygon contour
      * @return Pair of (array of 4 ordered Points, length of the shorter side of the box)
      */
-    private Pair<Point[], Float> getMiniBoxes(final MatOfPoint contour) {
+    private Pair<Point[], Float> getMiniBoxes(final MatOfPoint contour, MatManager matManager) {
         // 1) convert to MatOfPoint2f if needed
         MatOfPoint2f contour2f = new MatOfPoint2f(contour.toArray());
+        matManager.track((Mat) contour2f);
+        try {
+            // 2) get the minimum-area rotated rectangle
+            RotatedRect minRect = Imgproc.minAreaRect(contour2f);
 
-        // 2) get the minimum-area rotated rectangle
-        RotatedRect minRect = Imgproc.minAreaRect(contour2f);
+            // 3) extract its 4 corner points
+            Point[] pts = new Point[4];
+            points(minRect, pts);  // fills pts[]
 
-        // 3) extract its 4 corner points
-        Point[] pts = new Point[4];
-        points(minRect, pts);  // fills pts[]
+            // 4) sort by x-coordinate
+            Arrays.sort(pts, Comparator.comparingDouble(p -> p.x));
 
-        // 4) sort by x-coordinate
-        Arrays.sort(pts, Comparator.comparingDouble(p -> p.x));
+            // 5) decide top/bottom ordering for left and right pairs
+            int idx1, idx4, idx2, idx3;
+            // leftmost two are pts[0], pts[1]
+            if (pts[1].y > pts[0].y) {
+                idx1 = 0;
+                idx4 = 1;
+            } else {
+                idx1 = 1;
+                idx4 = 0;
+            }
+            // rightmost two are pts[2], pts[3]
+            if (pts[3].y > pts[2].y) {
+                idx2 = 2;
+                idx3 = 3;
+            } else {
+                idx2 = 3;
+                idx3 = 2;
+            }
 
-        // 5) decide top/bottom ordering for left and right pairs
-        int idx1, idx4, idx2, idx3;
-        // leftmost two are pts[0], pts[1]
-        if (pts[1].y > pts[0].y) {
-            idx1 = 0;
-            idx4 = 1;
-        } else {
-            idx1 = 1;
-            idx4 = 0;
+            // 6) build the ordered box: [top-left, top-right, bottom-right, bottom-left]
+            Point[] box = new Point[]{
+                    pts[idx1],
+                    pts[idx2],
+                    pts[idx3],
+                    pts[idx4]
+            };
+
+            // 7) compute the length of the shorter side of the rectangle
+            float shortSide = (float) Math.min(minRect.size.width, minRect.size.height);
+
+            return Pair.of(box, shortSide);
+        } finally {
+            matManager.release((Mat) contour2f);
         }
-        // rightmost two are pts[2], pts[3]
-        if (pts[3].y > pts[2].y) {
-            idx2 = 2;
-            idx3 = 3;
-        } else {
-            idx2 = 3;
-            idx3 = 2;
-        }
-
-        // 6) build the ordered box: [top-left, top-right, bottom-right, bottom-left]
-        Point[] box = new Point[]{
-                pts[idx1],
-                pts[idx2],
-                pts[idx3],
-                pts[idx4]
-        };
-
-        // 7) compute the length of the shorter side of the rectangle
-        float shortSide = (float) Math.min(minRect.size.width, minRect.size.height);
-
-        IOUtil.close(contour2f);
-        return Pair.of(box, shortSide);
     }
 
 
