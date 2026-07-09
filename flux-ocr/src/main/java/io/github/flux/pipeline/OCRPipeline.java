@@ -30,6 +30,7 @@ import org.opencv.imgproc.Imgproc;
 import io.github.flux.util.IOUtil;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -112,9 +113,25 @@ public class OCRPipeline {
         NDManager ndManager = NDManager.newBaseManager();
         MatManager matManager = new MatManager();
     ) {
-      return predict(images, extraParameters, matManager, ndManager);
+      Map<String, Object> localParams = extraParameters != null
+          ? new HashMap<>(extraParameters) : new HashMap<>();
+      augmentMemoryObserver(localParams, matManager);
+      return predict(images, localParams, matManager, ndManager);
     } catch (Exception e) {
       throw new RuntimeException(e);
+    }
+  }
+
+  @SuppressWarnings("unchecked")
+  private void augmentMemoryObserver(Map<String, Object> params, MatManager matManager) {
+    Object observer = params.get("memoryObserver");
+    if (observer instanceof Consumer<?>) {
+      Consumer<String> original = (Consumer<String>) observer;
+      params.put("memoryObserver", (Consumer<String>) stage -> {
+        original.accept(stage);
+        System.out.printf("  MAT-TRACK %-30s mats=%d closeables=%d%n",
+            stage, matManager.trackedMatCount(), matManager.trackedCloseableCount());
+      });
     }
   }
 
@@ -256,6 +273,10 @@ public class OCRPipeline {
     Object observer = extraParameters.get("memoryObserver");
     if (observer instanceof Consumer<?>) {
       ((Consumer<String>) observer).accept(stage);
+    }
+    if (Boolean.TRUE.equals(extraParameters.get("forceGcBetweenStages"))) {
+      System.gc();
+      System.runFinalization();
     }
   }
 
