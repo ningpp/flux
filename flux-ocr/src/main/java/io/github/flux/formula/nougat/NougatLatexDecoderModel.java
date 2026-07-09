@@ -32,6 +32,7 @@ import io.github.flux.core.TextResult;
 import io.github.flux.exception.FluxException;
 import io.github.flux.util.ArrayUtil;
 import io.github.flux.util.IOUtil;
+import io.github.flux.util.OnnxSessionUtil;
 import io.github.flux.util.OnnxUtil;
 
 import java.nio.FloatBuffer;
@@ -74,11 +75,7 @@ public class NougatLatexDecoderModel implements AutoCloseable {
         this.tokenizer = tokenizer;
         try {
             this.env = env;
-            OrtSession.SessionOptions options = new OrtSession.SessionOptions();
-            if (gpuIndex > -1) {
-                options.addCUDA(gpuIndex);
-            }
-            this.session = env.createSession(modelFile, options);
+            this.session = OnnxSessionUtil.createSession(env, modelFile, gpuIndex);
 
             this.outputNames = session.getOutputNames();
         } catch (Exception e) {

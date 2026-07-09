@@ -14,6 +14,7 @@ import io.github.flux.model.FormulaRecognitionModel;
 import io.github.flux.util.ArrayUtil;
 import io.github.flux.util.IOUtil;
 import io.github.flux.util.ImageUtil;
+import io.github.flux.util.OnnxSessionUtil;
 import org.opencv.core.Core;
 import org.opencv.core.CvType;
 import org.opencv.core.Mat;
@@ -59,14 +60,10 @@ public class PaddleFormulaModel extends BatchPredictor<PreProcessResult, TextRes
       String modelDir = modelRootDir + File.separator + modelName;
       this.tokenizer = HuggingFaceTokenizer.newInstance(Paths.get(modelDir));
       this.env = env;
-      OrtSession.SessionOptions options = new OrtSession.SessionOptions();
-      if (gpuIndex > -1) {
-        options.addCUDA(gpuIndex);
-      }
-      this.encoderSession = env.createSession(
-          new File(modelDir, "encoder.onnx").getAbsolutePath(), options);
-      this.decoderSession = env.createSession(
-          new File(modelDir, "decoder_model_merged.onnx").getAbsolutePath(), options);
+      this.encoderSession = OnnxSessionUtil.createSession(
+          env, new File(modelDir, "encoder.onnx").getAbsolutePath(), gpuIndex);
+      this.decoderSession = OnnxSessionUtil.createSession(
+          env, new File(modelDir, "decoder_model_merged.onnx").getAbsolutePath(), gpuIndex);
     } catch (Exception e) {
       throw new RuntimeException(e);
     }

@@ -37,6 +37,7 @@ import io.github.flux.paddle.processor.ToCHWImage;
 import io.github.flux.util.ArrayUtil;
 import io.github.flux.util.ImageUtil;
 import io.github.flux.util.IOUtil;
+import io.github.flux.util.OnnxSessionUtil;
 import io.github.flux.util.ParameterUtil;
 import org.opencv.core.Mat;
 import org.opencv.imgproc.Imgproc;
@@ -78,12 +79,8 @@ public class DoclingLayoutModel extends BatchPredictor<ProcessedMat, List<Object
                               final Map<String, Object> customParams) {
         try {
             this.env = env;
-            OrtSession.SessionOptions options = new OrtSession.SessionOptions();
-            if (gpuIndex > -1) {
-                options.addCUDA(gpuIndex);
-            }
             String modelFile = new File(modelDir + File.separator + modelName, "model.onnx").getAbsolutePath();
-            this.session = env.createSession(modelFile, options);
+            this.session = OnnxSessionUtil.createSession(env, modelFile, gpuIndex);
 
             this.inputName = List.copyOf(session.getInputNames()).getFirst();
         } catch (Exception e) {

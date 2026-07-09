@@ -33,6 +33,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Consumer;
 
 import static io.github.flux.util.ArrayUtil.splitIntoBatches;
 
@@ -119,15 +120,19 @@ public class OCRPipeline {
 
   List<List<OCRPipelineResult>> predict(List<String> images, Map<String, Object> extraParameters,
                                         MatManager matManager, NDManager ndManager) {
-      Integer recognitionBatchSize = ParameterUtil.getInteger(extraParameters, "recognitionBatchSize");
-      if (recognitionBatchSize == null || recognitionBatchSize < 1) {
-        recognitionBatchSize = 1;
+      if (images == null || images.isEmpty()) {
+        return List.of();
       }
+      if (extraParameters == null) {
+        extraParameters = Map.of();
+      }
+      markMemoryStage(extraParameters, "predict:start");
 
-      Integer formulaBatchSize = ParameterUtil.getInteger(extraParameters, "formulaBatchSize");
-      if (formulaBatchSize == null || formulaBatchSize < 1) {
-        formulaBatchSize = 1;
-      }
+      int recognitionBatchSize = resolveBatchSize(extraParameters, "recognitionBatchSize", 1);
+      int detectionBatchSize = resolveBatchSize(extraParameters, "detectionBatchSize", 1);
+      int layoutBatchSize = resolveBatchSize(extraParameters, "layoutBatchSize", 1);
+      int formulaBatchSize = resolveBatchSize(extraParameters, "formulaBatchSize", 1);
+      int tableBatchSize = resolveBatchSize(extraParameters, "tableBatchSize", 1);
 
       List<Mat> bgrImages = new ArrayList<>();
       List<Mat> rgbImages = new ArrayList<>();
@@ -141,6 +146,7 @@ public class OCRPipeline {
           bgrImages.add(bgrImage);
           rgbImages.add(rgbImg);
         }
+        markMemoryStage(extraParameters, "images:loaded");
 
         // Batch doc orientation classification (optional)
         List<String> oriLabels = new ArrayList<>();
@@ -169,6 +175,7 @@ public class OCRPipeline {
             oriScores.add(0f);
           }
         }
+        markMemoryStage(extraParameters, "doc-orientation:done");
         // Release rgbImages - no longer needed after orientation classification
         for (Mat rgbImg : rgbImages) {
           matManager.release(rgbImg);
@@ -194,54 +201,42 @@ public class OCRPipeline {
           srcImages.add(srcImage);
         }
 
-        // Batch layout analysis (optional)
-        List<List<ObjectDetectionResult>> allLayoutRegions = new ArrayList<>();
-        if (layoutModel != null) {
-          List<ProcessedMat> layoutInputs = new ArrayList<>();
-          List<Mat> srcRgbs = new ArrayList<>();
-        try {
-          for (Mat srcImage : srcImages) {
-            Mat srcRgb = matManager.newMat();
-            Imgproc.cvtColor(srcImage, srcRgb, Imgproc.COLOR_BGR2RGB);
-            srcRgbs.add(srcRgb);
-            layoutInputs.add(layoutModel.processRgb(matManager, srcRgb, ndManager));
-          }
-          List<List<ObjectDetectionResult>> layoutResults = layoutModel.batchPredict(
-              layoutInputs, layoutInputs.size(), matManager, ndManager, extraParameters);
-          for (int i = 0; i < layoutResults.size(); i++) {
-            allLayoutRegions.add(layoutResults.get(i));
-          }
-        } finally {
-          for (ProcessedMat layoutInput : layoutInputs) {
-            layoutInput.release(matManager);
-          }
-          for (Mat srcRgb : srcRgbs) {
-            matManager.release(srcRgb);
-          }
-        }
-        }
-
-        // Process each image
-        List<List<OCRPipelineResult>> allResults = new ArrayList<>();
+        List<PageContext> pages = new ArrayList<>(images.size());
         for (int i = 0; i < images.size(); i++) {
-          Mat srcImage = srcImages.get(i);
-          String oriLabel = oriLabels.get(i);
-          float oriScore = oriScores.get(i);
-
-          List<OCRPipelineResult> imageResults;
-          if (layoutModel != null) {
-            List<ObjectDetectionResult> regions = allLayoutRegions.get(i);
-            imageResults = processLayoutRegions(matManager, ndManager, srcImage, regions,
-                oriLabel, oriScore, recognitionBatchSize, formulaBatchSize, extraParameters);
-          } else {
-            imageResults = recognizeText(matManager, ndManager, srcImage, null,
-                oriLabel, oriScore, recognitionBatchSize, extraParameters);
-          }
-          allResults.add(imageResults);
-          matManager.release(srcImage);
+          pages.add(new PageContext(srcImages.get(i), oriLabels.get(i), oriScores.get(i)));
         }
 
-        return allResults;
+        if (layoutModel != null) {
+          List<List<ObjectDetectionResult>> allLayoutRegions =
+              predictLayoutRegions(pages, layoutBatchSize, matManager, ndManager, extraParameters);
+          markMemoryStage(extraParameters, "layout:done");
+          List<TextTask> textTasks = new ArrayList<>();
+          List<FormulaTask> formulaTasks = new ArrayList<>();
+          List<TableTask> tableTasks = new ArrayList<>();
+          collectLayoutTasks(pages, allLayoutRegions, textTasks, formulaTasks, tableTasks, matManager);
+          processFormulaTasks(formulaTasks, formulaBatchSize, matManager, ndManager, extraParameters);
+          markMemoryStage(extraParameters, "formula:done");
+          processTableTasks(tableTasks, tableBatchSize, matManager, ndManager, extraParameters);
+          markMemoryStage(extraParameters, "table:done");
+          processTextTasks(textTasks, detectionBatchSize, recognitionBatchSize,
+              matManager, ndManager, extraParameters);
+          markMemoryStage(extraParameters, "text:done");
+
+          return pages.stream()
+              .map(page -> List.of(new OCRPipelineResult(
+                  null, null, page.docOrientationLabel, page.docOrientationScore,
+                  null, 0f, page.layoutRegionResults)))
+              .toList();
+        }
+
+        List<TextTask> textTasks = new ArrayList<>();
+        for (PageContext page : pages) {
+          textTasks.add(new TextTask(page, null, -1, cropRegion(matManager, page.srcImage, null)));
+        }
+        processTextTasks(textTasks, detectionBatchSize, recognitionBatchSize,
+            matManager, ndManager, extraParameters);
+        markMemoryStage(extraParameters, "text:done");
+        return pages.stream().map(page -> page.textResults).toList();
       } finally {
         for (Mat srcImage : srcImages) {
           matManager.release(srcImage);
@@ -252,117 +247,130 @@ public class OCRPipeline {
         for (Mat bgrImage : bgrImages) {
           matManager.release(bgrImage);
         }
+        markMemoryStage(extraParameters, "predict:released");
       }
   }
 
-  /**
-   * Process layout regions for a single image.
-   */
-  private List<OCRPipelineResult> processLayoutRegions(MatManager matManager, NDManager ndManager,
-                                                        Mat srcImage, List<ObjectDetectionResult> regions,
-                                                        String oriLabel, float oriScore,
-                                                        int recognitionBatchSize, int formulaBatchSize,
-                                                        Map<String, Object> extraParameters) {
-    List<LayoutRegionResult> layoutRegionResults = new ArrayList<>();
+  @SuppressWarnings("unchecked")
+  private void markMemoryStage(Map<String, Object> extraParameters, String stage) {
+    Object observer = extraParameters.get("memoryObserver");
+    if (observer instanceof Consumer<?>) {
+      ((Consumer<String>) observer).accept(stage);
+    }
+  }
 
-    // Collect formula regions for batch processing
-    List<Integer> formulaRegionIndices = new ArrayList<>();
-    List<ObjectDetectionResult> formulaRegions = new ArrayList<>();
-      List<PreProcessResult> formulaInputs = new ArrayList<>();
-      List<Mat> formulaRgbs = new ArrayList<>();
+  private int resolveBatchSize(Map<String, Object> extraParameters, String key, int defaultValue) {
+    Integer batchSize = ParameterUtil.getInteger(extraParameters, key);
+    if (batchSize == null || batchSize < 1) {
+      return Math.max(defaultValue, 1);
+    }
+    return batchSize;
+  }
 
+  private List<List<ObjectDetectionResult>> predictLayoutRegions(List<PageContext> pages,
+                                                                 int layoutBatchSize,
+                                                                 MatManager matManager,
+                                                                 NDManager ndManager,
+                                                                 Map<String, Object> extraParameters) {
+    List<List<ObjectDetectionResult>> results = new ArrayList<>(pages.size());
+    for (List<PageContext> batch : splitIntoBatches(pages, layoutBatchSize)) {
+      results.addAll(predictLayoutRegionsWithRetry(batch, matManager, ndManager, extraParameters));
+    }
+    return results;
+  }
+
+  private List<List<ObjectDetectionResult>> predictLayoutRegionsWithRetry(List<PageContext> pages,
+                                                                          MatManager matManager,
+                                                                          NDManager ndManager,
+                                                                          Map<String, Object> extraParameters) {
     try {
-      for (int i = 0; i < regions.size(); i++) {
-        ObjectDetectionResult region = regions.get(i);
+      return predictLayoutRegionsOnce(pages, matManager, ndManager, extraParameters);
+    } catch (RuntimeException e) {
+      if (pages.size() <= 1) {
+        throw e;
+      }
+      int mid = pages.size() / 2;
+      List<List<ObjectDetectionResult>> results = new ArrayList<>(pages.size());
+      results.addAll(predictLayoutRegionsWithRetry(
+          pages.subList(0, mid), matManager, ndManager, extraParameters));
+      results.addAll(predictLayoutRegionsWithRetry(
+          pages.subList(mid, pages.size()), matManager, ndManager, extraParameters));
+      return results;
+    }
+  }
+
+  private List<List<ObjectDetectionResult>> predictLayoutRegionsOnce(List<PageContext> pages,
+                                                                     MatManager matManager,
+                                                                     NDManager ndManager,
+                                                                     Map<String, Object> extraParameters) {
+    List<ProcessedMat> layoutInputs = new ArrayList<>();
+    List<Mat> srcRgbs = new ArrayList<>();
+    try {
+      for (PageContext page : pages) {
+        Mat srcRgb = matManager.newMat();
+        Imgproc.cvtColor(page.srcImage, srcRgb, Imgproc.COLOR_BGR2RGB);
+        srcRgbs.add(srcRgb);
+        layoutInputs.add(layoutModel.processRgb(matManager, srcRgb, ndManager));
+      }
+      return layoutModel.batchPredict(layoutInputs, layoutInputs.size(),
+          matManager, ndManager, extraParameters);
+    } finally {
+      for (ProcessedMat layoutInput : layoutInputs) {
+        layoutInput.release(matManager);
+      }
+      for (Mat srcRgb : srcRgbs) {
+        matManager.release(srcRgb);
+      }
+    }
+  }
+
+  private void collectLayoutTasks(List<PageContext> pages,
+                                  List<List<ObjectDetectionResult>> allLayoutRegions,
+                                  List<TextTask> textTasks,
+                                  List<FormulaTask> formulaTasks,
+                                  List<TableTask> tableTasks,
+                                  MatManager matManager) {
+    for (int pageIndex = 0; pageIndex < pages.size(); pageIndex++) {
+      PageContext page = pages.get(pageIndex);
+      page.layoutRegionResults = new ArrayList<>();
+      List<ObjectDetectionResult> regions = pageIndex < allLayoutRegions.size()
+          ? allLayoutRegions.get(pageIndex)
+          : List.of();
+      for (ObjectDetectionResult region : regions) {
         String regionType = classifyLabel(region.label());
 
         switch (regionType) {
-          case "image" -> {
-            layoutRegionResults.add(LayoutRegionResult.image(region));
-          }
+          case "image" -> page.layoutRegionResults.add(LayoutRegionResult.image(region));
           case "formula" -> {
             if (formulaRecognitionModel != null) {
-              Mat croppedBgr = cropRegion(matManager, srcImage, region.coordinate());
-              Mat croppedRgb = matManager.newMat();
-              Imgproc.cvtColor(croppedBgr, croppedRgb, Imgproc.COLOR_BGR2RGB);
-              matManager.release(croppedBgr); // Release BGR after RGB conversion
-              formulaRgbs.add(croppedRgb);
-              PreProcessResult formulaInput = formulaRecognitionModel.processRgb(matManager, croppedRgb, ndManager);
-              formulaInputs.add(formulaInput);
-              formulaRegions.add(region);
-              formulaRegionIndices.add(layoutRegionResults.size());
-              layoutRegionResults.add(null); // placeholder
+              int layoutIndex = page.layoutRegionResults.size();
+              page.layoutRegionResults.add(null);
+              formulaTasks.add(new FormulaTask(page, region, layoutIndex));
             } else {
-              List<OCRPipelineResult> textResults = recognizeText(
-                  matManager, ndManager, srcImage, region.coordinate(),
-                  oriLabel, oriScore, recognitionBatchSize, extraParameters);
-              layoutRegionResults.add(LayoutRegionResult.text(region, textResults));
+              addTextTask(page, region, textTasks, matManager);
             }
           }
           case "table" -> {
             if (tableModel != null) {
-              Mat croppedBgr = cropRegion(matManager, srcImage, region.coordinate());
-              Mat croppedRgb = matManager.newMat();
-              Imgproc.cvtColor(croppedBgr, croppedRgb, Imgproc.COLOR_BGR2RGB);
-              matManager.release(croppedBgr); // Release BGR after RGB conversion
-              PreProcessResult tableInput = null;
-              try {
-                tableInput = tableModel.processRgb(matManager, croppedRgb, ndManager);
-                List<TableResult> tableResults = tableModel.batchPredict(
-                    List.of(tableInput), 1, matManager, ndManager, extraParameters);
-                TableResult tableResult = tableResults.isEmpty() ? null : tableResults.get(0);
-                layoutRegionResults.add(LayoutRegionResult.table(region, tableResult));
-              } finally {
-                releasePreProcessResult(matManager, tableInput);
-                matManager.release(croppedRgb);
-              }
+              int layoutIndex = page.layoutRegionResults.size();
+              page.layoutRegionResults.add(null);
+              tableTasks.add(new TableTask(page, region, layoutIndex));
             } else {
-              List<OCRPipelineResult> textResults = recognizeText(
-                  matManager, ndManager, srcImage, region.coordinate(),
-                  oriLabel, oriScore, recognitionBatchSize, extraParameters);
-              layoutRegionResults.add(LayoutRegionResult.text(region, textResults));
+              addTextTask(page, region, textTasks, matManager);
             }
           }
-          default -> {
-            List<OCRPipelineResult> textResults = recognizeText(
-                matManager, ndManager, srcImage, region.coordinate(),
-                oriLabel, oriScore, recognitionBatchSize, extraParameters);
-            layoutRegionResults.add(LayoutRegionResult.text(region, textResults));
-          }
+          default -> addTextTask(page, region, textTasks, matManager);
         }
-      }
-
-      // Batch process formula regions
-      if (!formulaInputs.isEmpty()) {
-        List<List<PreProcessResult>> batched = splitIntoBatches(formulaInputs, formulaBatchSize);
-        List<TextResult> allFormulaResults = new ArrayList<>();
-        for (List<PreProcessResult> batch : batched) {
-          List<TextResult> batchResults = formulaRecognitionModel.batchPredict(
-              batch, batch.size(), matManager, ndManager, extraParameters);
-          allFormulaResults.addAll(batchResults);
-          for (PreProcessResult input : batch) {
-            releasePreProcessResult(matManager, input);
-          }
-        }
-        // Fill placeholders with formula results
-        for (int i = 0; i < formulaRegionIndices.size(); i++) {
-          int layoutIndex = formulaRegionIndices.get(i);
-          ObjectDetectionResult region = formulaRegions.get(i);
-          TextResult formulaResult = (i < allFormulaResults.size()) ? allFormulaResults.get(i) : null;
-          layoutRegionResults.set(layoutIndex, LayoutRegionResult.formula(region, formulaResult));
-        }
-      }
-    } finally {
-      for (PreProcessResult input : formulaInputs) {
-        releasePreProcessResult(matManager, input);
-      }
-      for (Mat rgb : formulaRgbs) {
-        matManager.release(rgb);
       }
     }
+  }
 
-    return List.of(new OCRPipelineResult(
-        null, null, oriLabel, oriScore, null, 0f, layoutRegionResults));
+  private void addTextTask(PageContext page, ObjectDetectionResult region,
+                           List<TextTask> textTasks, MatManager matManager) {
+    int layoutIndex = page.layoutRegionResults.size();
+    page.layoutRegionResults.add(null);
+    textTasks.add(new TextTask(
+        page, region, layoutIndex, cropRegion(matManager, page.srcImage, region.coordinate())));
   }
 
   /**
@@ -400,123 +408,405 @@ public class OCRPipeline {
     return matManager.newMat(srcImage, rect);
   }
 
-  /**
-   * Run text detection + recognition on an image (full or cropped region).
-   *
-   * @param coordinate optional [x1, y1, x2, y2] to crop a region; null for full image
-   * @param docOriLabel document orientation label (passed through to results)
-   * @param docOriScore document orientation score (passed through to results)
-   */
-  private List<OCRPipelineResult> recognizeText(MatManager matManager, NDManager ndManager,
-                                                 Mat srcImage, float[] coordinate,
-                                                 String docOriLabel, float docOriScore,
-                                                 int recognitionBatchSize,
-                                                 Map<String, Object> extraParameters) {
-    List<OCRPipelineResult> results = new ArrayList<>();
-    Mat workImage = cropRegion(matManager, srcImage, coordinate);
+  private void processFormulaTasks(List<FormulaTask> tasks, int formulaBatchSize,
+                                   MatManager matManager, NDManager ndManager,
+                                   Map<String, Object> extraParameters) {
+    if (tasks.isEmpty()) {
+      return;
+    }
+    for (List<FormulaTask> batch : splitIntoBatches(tasks, formulaBatchSize)) {
+      processFormulaBatchWithRetry(batch, formulaBatchSize, matManager, ndManager, extraParameters);
+    }
+  }
 
-    Mat detectionInput = null;
-    TextDetectionResult detectionResult;
+  private void processFormulaBatchWithRetry(List<FormulaTask> batch,
+                                            int formulaBatchSize,
+                                            MatManager matManager,
+                                            NDManager ndManager,
+                                            Map<String, Object> extraParameters) {
     try {
-      detectionInput = matManager.cloneMat(workImage);
-      detectionResult = textDetectionModel.batchPredict(
-          List.of(new PreProcessResult(detectionInput, null)), 1,
-          matManager, ndManager, extraParameters).get(0);
+      processFormulaBatchOnce(batch, formulaBatchSize, matManager, ndManager, extraParameters);
+    } catch (RuntimeException e) {
+      if (batch.size() <= 1) {
+        throw e;
+      }
+      int mid = batch.size() / 2;
+      processFormulaBatchWithRetry(batch.subList(0, mid), formulaBatchSize,
+          matManager, ndManager, extraParameters);
+      processFormulaBatchWithRetry(batch.subList(mid, batch.size()), formulaBatchSize,
+          matManager, ndManager, extraParameters);
+    }
+  }
+
+  private void processFormulaBatchOnce(List<FormulaTask> batch,
+                                       int formulaBatchSize,
+                                       MatManager matManager,
+                                       NDManager ndManager,
+                                       Map<String, Object> extraParameters) {
+    List<PreProcessResult> inputs = new ArrayList<>();
+    List<Mat> rgbs = new ArrayList<>();
+    try {
+      for (FormulaTask task : batch) {
+        Mat croppedBgr = cropRegion(matManager, task.page.srcImage, task.region.coordinate());
+        Mat croppedRgb = matManager.newMat();
+        Imgproc.cvtColor(croppedBgr, croppedRgb, Imgproc.COLOR_BGR2RGB);
+        matManager.release(croppedBgr);
+        rgbs.add(croppedRgb);
+        inputs.add(formulaRecognitionModel.processRgb(matManager, croppedRgb, ndManager));
+      }
+      List<TextResult> results = formulaRecognitionModel.batchPredict(
+          inputs, formulaBatchSize, matManager, ndManager, extraParameters);
+      for (int i = 0; i < batch.size(); i++) {
+        FormulaTask task = batch.get(i);
+        TextResult result = i < results.size() ? results.get(i) : null;
+        task.page.layoutRegionResults.set(
+            task.layoutIndex, LayoutRegionResult.formula(task.region, result));
+      }
     } finally {
-      matManager.release(detectionInput);
+      for (PreProcessResult input : inputs) {
+        releasePreProcessResult(matManager, input);
+      }
+      for (Mat rgb : rgbs) {
+        matManager.release(rgb);
+      }
+    }
+  }
+
+  private void processTableTasks(List<TableTask> tasks, int tableBatchSize,
+                                 MatManager matManager, NDManager ndManager,
+                                 Map<String, Object> extraParameters) {
+    if (tasks.isEmpty()) {
+      return;
+    }
+    for (List<TableTask> batch : splitIntoBatches(tasks, tableBatchSize)) {
+      processTableBatchWithRetry(batch, tableBatchSize, matManager, ndManager, extraParameters);
+    }
+  }
+
+  private void processTableBatchWithRetry(List<TableTask> batch,
+                                          int tableBatchSize,
+                                          MatManager matManager,
+                                          NDManager ndManager,
+                                          Map<String, Object> extraParameters) {
+    try {
+      processTableBatchOnce(batch, tableBatchSize, matManager, ndManager, extraParameters);
+    } catch (RuntimeException e) {
+      if (batch.size() <= 1) {
+        throw e;
+      }
+      int mid = batch.size() / 2;
+      processTableBatchWithRetry(batch.subList(0, mid), tableBatchSize,
+          matManager, ndManager, extraParameters);
+      processTableBatchWithRetry(batch.subList(mid, batch.size()), tableBatchSize,
+          matManager, ndManager, extraParameters);
+    }
+  }
+
+  private void processTableBatchOnce(List<TableTask> batch,
+                                     int tableBatchSize,
+                                     MatManager matManager,
+                                     NDManager ndManager,
+                                     Map<String, Object> extraParameters) {
+    List<PreProcessResult> inputs = new ArrayList<>();
+    List<Mat> rgbs = new ArrayList<>();
+    try {
+      for (TableTask task : batch) {
+        Mat croppedBgr = cropRegion(matManager, task.page.srcImage, task.region.coordinate());
+        Mat croppedRgb = matManager.newMat();
+        Imgproc.cvtColor(croppedBgr, croppedRgb, Imgproc.COLOR_BGR2RGB);
+        matManager.release(croppedBgr);
+        rgbs.add(croppedRgb);
+        inputs.add(tableModel.processRgb(matManager, croppedRgb, ndManager));
+      }
+      List<TableResult> results = tableModel.batchPredict(
+          inputs, tableBatchSize, matManager, ndManager, extraParameters);
+      for (int i = 0; i < batch.size(); i++) {
+        TableTask task = batch.get(i);
+        TableResult result = i < results.size() ? results.get(i) : null;
+        task.page.layoutRegionResults.set(
+            task.layoutIndex, LayoutRegionResult.table(task.region, result));
+      }
+    } finally {
+      for (PreProcessResult input : inputs) {
+        releasePreProcessResult(matManager, input);
+      }
+      for (Mat rgb : rgbs) {
+        matManager.release(rgb);
+      }
+    }
+  }
+
+  private void processTextTasks(List<TextTask> tasks,
+                                int detectionBatchSize,
+                                int recognitionBatchSize,
+                                MatManager matManager,
+                                NDManager ndManager,
+                                Map<String, Object> extraParameters) {
+    if (tasks.isEmpty()) {
+      return;
+    }
+    try {
+      for (List<TextTask> batch : splitIntoBatches(tasks, detectionBatchSize)) {
+        List<TextLineTask> lineTasks = new ArrayList<>();
+        try {
+          lineTasks = detectTextLinesWithRetry(batch, detectionBatchSize, matManager, ndManager, extraParameters);
+          markMemoryStage(extraParameters, "text-detection:done");
+          for (TextTask task : batch) {
+            matManager.release(task.workImage);
+            task.workImage = null;
+          }
+
+          processTextLines(lineTasks, recognitionBatchSize, matManager, ndManager, extraParameters);
+          for (TextTask task : batch) {
+            finishTextTask(task);
+          }
+        } finally {
+          for (TextLineTask lineTask : lineTasks) {
+            matManager.release(lineTask.image);
+            lineTask.image = null;
+          }
+        }
+      }
+    } finally {
+      for (TextTask task : tasks) {
+        matManager.release(task.workImage);
+        task.workImage = null;
+      }
+    }
+  }
+
+  private List<TextLineTask> detectTextLinesWithRetry(List<TextTask> batch,
+                                                      int detectionBatchSize,
+                                                      MatManager matManager,
+                                                      NDManager ndManager,
+                                                      Map<String, Object> extraParameters) {
+    try {
+      return detectTextLinesOnce(batch, detectionBatchSize, matManager, ndManager, extraParameters);
+    } catch (RuntimeException e) {
+      if (batch.size() <= 1) {
+        throw e;
+      }
+      int mid = batch.size() / 2;
+      List<TextLineTask> lineTasks = new ArrayList<>();
+      lineTasks.addAll(detectTextLinesWithRetry(
+          batch.subList(0, mid), detectionBatchSize, matManager, ndManager, extraParameters));
+      lineTasks.addAll(detectTextLinesWithRetry(
+          batch.subList(mid, batch.size()), detectionBatchSize, matManager, ndManager, extraParameters));
+      return lineTasks;
+    }
+  }
+
+  private List<TextLineTask> detectTextLinesOnce(List<TextTask> batch,
+                                                int detectionBatchSize,
+                                                MatManager matManager,
+                                                NDManager ndManager,
+                                                Map<String, Object> extraParameters) {
+    List<Mat> detectionMats = new ArrayList<>();
+    List<PreProcessResult> detectionInputs = new ArrayList<>();
+    List<TextLineTask> lineTasks = new ArrayList<>();
+    try {
+      for (TextTask task : batch) {
+        Mat detectionMat = matManager.cloneMat(task.workImage);
+        detectionMats.add(detectionMat);
+        detectionInputs.add(new PreProcessResult(detectionMat, null));
+      }
+      List<TextDetectionResult> detectionResults = textDetectionModel.batchPredict(
+          detectionInputs, detectionBatchSize, matManager, ndManager, extraParameters);
+      for (int i = 0; i < batch.size(); i++) {
+        TextDetectionResult detectionResult = i < detectionResults.size() ? detectionResults.get(i) : null;
+        collectTextLineTasks(batch.get(i), detectionResult, lineTasks, matManager, ndManager);
+      }
+      return lineTasks;
+    } finally {
+      for (Mat detectionMat : detectionMats) {
+        matManager.release(detectionMat);
+      }
+    }
+  }
+
+  private void collectTextLineTasks(TextTask task,
+                                    TextDetectionResult detectionResult,
+                                    List<TextLineTask> lineTasks,
+                                    MatManager matManager,
+                                    NDManager ndManager) {
+    if (detectionResult == null || detectionResult.polys() == null || detectionResult.polys().length == 0) {
+      return;
     }
 
     int[][][] polys = detectionResult.polys();
-    if (polys == null || polys.length == 0) {
-      matManager.release(workImage);
-      return results;
-    }
-
     NDArray polysNDArray = null;
     NDArray sortedPolysArray = null;
-    List<Mat> cropedImages = new ArrayList<>();
     try {
       polysNDArray = ArrayUtil.int3dToNDArray(ndManager, polys);
       sortedPolysArray = new SortQuadBoxes().sort(ndManager, polysNDArray);
       int[][][] sortedPolys = ArrayUtil.toInt3d(sortedPolysArray);
 
-      for (int[][] poly : sortedPolys) {
-        cropedImages.add(ImageUtil.getMinAreaRectCrop(matManager, ndManager, workImage, poly));
-      }
-      matManager.release(workImage); // workImage no longer needed after cropping
-      workImage = null;
-
-      // Text line orientation classification: if 180_degree, rotate the cropped image
-      List<String> textLineOriLabels = new ArrayList<>();
-      List<Float> textLineOriScores = new ArrayList<>();
-      if (textLineOrientationModel != null) {
-        List<PreProcessResult> textLineInputs = new ArrayList<>();
-        List<Mat> rgbCrops = new ArrayList<>();
-        try {
-          for (Mat cropedImg : cropedImages) {
-            Mat rgbCrop = matManager.newMat();
-            Imgproc.cvtColor(cropedImg, rgbCrop, Imgproc.COLOR_BGR2RGB);
-            rgbCrops.add(rgbCrop);
-            textLineInputs.add(textLineOrientationModel.processRgb(matManager, rgbCrop, ndManager));
-          }
-          List<ClassificationResult> textLineOriResults = textLineOrientationModel.batchPredict(
-              textLineInputs, textLineInputs.size(), matManager, ndManager, extraParameters);
-          for (int i = 0; i < textLineOriResults.size(); i++) {
-            ClassificationResult oriResult = textLineOriResults.get(i);
-            textLineOriLabels.add(oriResult.label());
-            textLineOriScores.add(oriResult.score());
-            if ("180_degree".equals(oriResult.label())) {
-              Mat oldImg = cropedImages.get(i);
-              Mat rotated = ImageUtil.rotateImage(matManager, oldImg, 180.0);
-              cropedImages.set(i, rotated);
-              matManager.release(oldImg); // Release old image before replacing
-            }
-          }
-        } finally {
-          for (PreProcessResult textLineInput : textLineInputs) {
-            releasePreProcessResult(matManager, textLineInput);
-          }
-          for (Mat rgbCrop : rgbCrops) {
-            matManager.release(rgbCrop);
-          }
-        }
-      }
-
-      int index = 0;
-      List<List<Mat>> batched = splitIntoBatches(cropedImages, recognitionBatchSize);
-      for (List<Mat> iter : batched) {
-        try {
-          List<List<RecognitionResult>> batchResults = textRecognitionModel.batchPredict(
-              iter.stream().map(mat -> new PreProcessResult(mat, null)).toList(),
-              recognitionBatchSize, matManager, ndManager, Map.of());
-          for (List<RecognitionResult> recResults : batchResults) {
-            String textLineOriLabel = (index < textLineOriLabels.size()) ? textLineOriLabels.get(index) : null;
-            float textLineOriScore = (index < textLineOriScores.size()) ? textLineOriScores.get(index) : 0f;
-            results.add(new OCRPipelineResult(
-                polys[index],
-                recResults,
-                docOriLabel,
-                docOriScore,
-                textLineOriLabel,
-                textLineOriScore
-            ));
-            index++;
-          }
-        } finally {
-          for (Mat mat : iter) {
-            matManager.release(mat);
-          }
-        }
+      for (int i = 0; i < sortedPolys.length; i++) {
+        Mat lineImage = ImageUtil.getMinAreaRectCrop(matManager, ndManager, task.workImage, sortedPolys[i]);
+        int[][] resultPoly = i < polys.length ? polys[i] : sortedPolys[i];
+        lineTasks.add(new TextLineTask(task, resultPoly, lineImage));
       }
     } finally {
-      matManager.release(workImage);
-      for (Mat mat : cropedImages) {
-        matManager.release(mat);
-      }
       IOUtil.close(polysNDArray);
       IOUtil.close(sortedPolysArray);
     }
-    return results;
+  }
+
+  private void processTextLineOrientations(List<TextLineTask> lineTasks,
+                                           int batchSize,
+                                           MatManager matManager,
+                                           NDManager ndManager,
+                                           Map<String, Object> extraParameters) {
+    if (lineTasks.isEmpty() || textLineOrientationModel == null) {
+      return;
+    }
+
+    for (List<TextLineTask> batch : splitIntoBatches(lineTasks, batchSize)) {
+      List<PreProcessResult> inputs = new ArrayList<>();
+      List<Mat> rgbCrops = new ArrayList<>();
+      try {
+        for (TextLineTask lineTask : batch) {
+          Mat rgbCrop = matManager.newMat();
+          Imgproc.cvtColor(lineTask.image, rgbCrop, Imgproc.COLOR_BGR2RGB);
+          rgbCrops.add(rgbCrop);
+          inputs.add(textLineOrientationModel.processRgb(matManager, rgbCrop, ndManager));
+        }
+
+        List<ClassificationResult> orientationResults = textLineOrientationModel.batchPredict(
+            inputs, batchSize, matManager, ndManager, extraParameters);
+        for (int i = 0; i < batch.size(); i++) {
+          if (i >= orientationResults.size()) {
+            continue;
+          }
+          TextLineTask lineTask = batch.get(i);
+          ClassificationResult orientationResult = orientationResults.get(i);
+          lineTask.textLineOrientationLabel = orientationResult.label();
+          lineTask.textLineOrientationScore = orientationResult.score();
+          if ("180_degree".equals(orientationResult.label())) {
+            Mat oldImage = lineTask.image;
+            lineTask.image = ImageUtil.rotateImage(matManager, oldImage, 180.0);
+            matManager.release(oldImage);
+          }
+        }
+      } finally {
+        for (PreProcessResult input : inputs) {
+          releasePreProcessResult(matManager, input);
+        }
+        for (Mat rgbCrop : rgbCrops) {
+          matManager.release(rgbCrop);
+        }
+      }
+    }
+  }
+
+  private void processTextLines(List<TextLineTask> lineTasks,
+                                int batchSize,
+                                MatManager matManager,
+                                NDManager ndManager,
+                                Map<String, Object> extraParameters) {
+    for (List<TextLineTask> batch : splitIntoBatches(lineTasks, batchSize)) {
+      try {
+        processTextLineOrientations(batch, batchSize, matManager, ndManager, extraParameters);
+        markMemoryStage(extraParameters, "textline-orientation:done");
+        processTextRecognitions(batch, batchSize, matManager, ndManager);
+        markMemoryStage(extraParameters, "text-recognition:batch-done");
+      } finally {
+        releaseTextLineImages(batch, matManager);
+      }
+    }
+    markMemoryStage(extraParameters, "text-recognition:done");
+  }
+
+  private void processTextRecognitions(List<TextLineTask> lineTasks,
+                                       int recognitionBatchSize,
+                                       MatManager matManager,
+                                       NDManager ndManager) {
+    if (lineTasks.isEmpty()) {
+      return;
+    }
+    List<PreProcessResult> recognitionInputs = lineTasks.stream()
+        .map(lineTask -> new PreProcessResult(lineTask.image, null))
+        .toList();
+    List<List<RecognitionResult>> recognitionResults = textRecognitionModel.batchPredict(
+        recognitionInputs, recognitionBatchSize, matManager, ndManager, Map.of());
+    for (int i = 0; i < lineTasks.size(); i++) {
+      TextLineTask lineTask = lineTasks.get(i);
+      List<RecognitionResult> recResults = i < recognitionResults.size()
+          ? recognitionResults.get(i)
+          : List.of();
+      lineTask.textTask.results.add(new OCRPipelineResult(
+          lineTask.detPolys,
+          recResults,
+          lineTask.textTask.page.docOrientationLabel,
+          lineTask.textTask.page.docOrientationScore,
+          lineTask.textLineOrientationLabel,
+          lineTask.textLineOrientationScore));
+    }
+  }
+
+  private void releaseTextLineImages(List<TextLineTask> lineTasks, MatManager matManager) {
+    for (TextLineTask lineTask : lineTasks) {
+      matManager.release(lineTask.image);
+      lineTask.image = null;
+    }
+  }
+
+  private void finishTextTask(TextTask task) {
+    if (task.layoutIndex >= 0) {
+      task.page.layoutRegionResults.set(
+          task.layoutIndex, LayoutRegionResult.text(task.region, task.results));
+    } else {
+      task.page.textResults = task.results;
+    }
+  }
+
+  private static final class PageContext {
+    private final Mat srcImage;
+    private final String docOrientationLabel;
+    private final float docOrientationScore;
+    private List<LayoutRegionResult> layoutRegionResults;
+    private List<OCRPipelineResult> textResults = List.of();
+
+    private PageContext(Mat srcImage, String docOrientationLabel, float docOrientationScore) {
+      this.srcImage = srcImage;
+      this.docOrientationLabel = docOrientationLabel;
+      this.docOrientationScore = docOrientationScore;
+    }
+  }
+
+  private static final class TextTask {
+    private final PageContext page;
+    private final ObjectDetectionResult region;
+    private final int layoutIndex;
+    private final List<OCRPipelineResult> results = new ArrayList<>();
+    private Mat workImage;
+
+    private TextTask(PageContext page, ObjectDetectionResult region, int layoutIndex, Mat workImage) {
+      this.page = page;
+      this.region = region;
+      this.layoutIndex = layoutIndex;
+      this.workImage = workImage;
+    }
+  }
+
+  private static final class TextLineTask {
+    private final TextTask textTask;
+    private final int[][] detPolys;
+    private Mat image;
+    private String textLineOrientationLabel;
+    private float textLineOrientationScore;
+
+    private TextLineTask(TextTask textTask, int[][] detPolys, Mat image) {
+      this.textTask = textTask;
+      this.detPolys = detPolys;
+      this.image = image;
+    }
+  }
+
+  private record FormulaTask(PageContext page, ObjectDetectionResult region, int layoutIndex) {
+  }
+
+  private record TableTask(PageContext page, ObjectDetectionResult region, int layoutIndex) {
   }
 
   private void releasePreProcessResult(MatManager matManager, PreProcessResult ppr) {

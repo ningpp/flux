@@ -32,6 +32,7 @@ import io.github.flux.core.PreProcessResult;
 import io.github.flux.exception.FluxException;
 import io.github.flux.util.IOUtil;
 import io.github.flux.util.ImageUtil;
+import io.github.flux.util.OnnxSessionUtil;
 import org.opencv.core.Mat;
 import org.opencv.core.Size;
 import org.slf4j.Logger;
@@ -85,11 +86,11 @@ public class PaddleFormulaRecognitionPredictor extends BatchPredictor<PreProcess
         String modelDir = modelRootDir + File.separator + modelName;
         this.env = env;
         try {
-            OrtSession.SessionOptions options = new OrtSession.SessionOptions();
             if (gpuIndex > -1) {
                 LOGGER.warn("paddle formula model does not support cuda now!");
             }
-            this.session = env.createSession(new File(modelDir, "model.onnx").getAbsolutePath(), options);
+            this.session = OnnxSessionUtil.createSession(
+                    env, new File(modelDir, "model.onnx").getAbsolutePath(), -1);
         } catch (Exception e) {
             throw new FluxException(e);
         }

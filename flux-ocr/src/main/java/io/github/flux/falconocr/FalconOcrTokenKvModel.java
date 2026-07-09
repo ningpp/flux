@@ -10,6 +10,7 @@ import ai.onnxruntime.OrtSession.SessionOptions.OptLevel;
 import io.github.flux.exception.FluxException;
 import io.github.flux.util.ArrayUtil;
 import io.github.flux.util.IOUtil;
+import io.github.flux.util.OnnxSessionUtil;
 import io.github.flux.util.OnnxUtil;
 
 import java.nio.FloatBuffer;
@@ -44,13 +45,10 @@ final class FalconOcrTokenKvModel implements AutoCloseable {
         this.requestedMaxNewTokens = requestedMaxNewTokens;
         this.maxSeqLen = maxSeqLen;
         try {
-            OrtSession.SessionOptions options = new OrtSession.SessionOptions();
-            if (gpuIndex > -1) {
-                options.addCUDA(gpuIndex);
-            }
-            options.setOptimizationLevel(OptLevel.ALL_OPT);
-            options.setSessionLogLevel(OrtLoggingLevel.ORT_LOGGING_LEVEL_ERROR);
-            this.session = env.createSession(modelFile, options);
+            this.session = OnnxSessionUtil.createSession(env, modelFile, gpuIndex, options -> {
+                options.setOptimizationLevel(OptLevel.ALL_OPT);
+                options.setSessionLogLevel(OrtLoggingLevel.ORT_LOGGING_LEVEL_ERROR);
+            });
             Set<String> modelOutputNames = session.getOutputNames();
             if (!modelOutputNames.contains("next_token")) {
                 throw new FluxException("Falcon-OCR requires token-only ONNX output `next_token`: " + modelFile);

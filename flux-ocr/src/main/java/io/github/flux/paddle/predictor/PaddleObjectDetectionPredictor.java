@@ -35,6 +35,7 @@ import io.github.flux.paddle.processor.ObjectDetectionResize;
 import io.github.flux.util.ArrayUtil;
 import io.github.flux.util.IOUtil;
 import io.github.flux.util.ImageUtil;
+import io.github.flux.util.OnnxSessionUtil;
 import io.github.flux.util.OnnxUtil;
 import org.opencv.core.Mat;
 
@@ -71,14 +72,10 @@ public class PaddleObjectDetectionPredictor extends BatchPredictor<ProcessedMat,
             this.postProcessor = detPostProcessor;
             this.detResize = detResize;
             this.env = env;
-            OrtSession.SessionOptions options = new OrtSession.SessionOptions();
-            if (gpuIndex > -1) {
-                options.addCUDA(gpuIndex);
-            }
             this.modelName = modelName;
             String modelDir = modelRootDir + File.separator + modelName;
             String modelFile = new File(modelDir, "model.onnx").getAbsolutePath();
-            this.session = env.createSession(modelFile, options);
+            this.session = OnnxSessionUtil.createSession(env, modelFile, gpuIndex);
 
             this.inputNames = session.getInputNames();
             this.outputNames = session.getOutputNames();

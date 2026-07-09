@@ -6,6 +6,7 @@ import ai.onnxruntime.OrtException;
 import ai.onnxruntime.OrtSession;
 import ai.onnxruntime.OrtSession.Result;
 import io.github.flux.exception.FluxException;
+import io.github.flux.util.OnnxSessionUtil;
 
 import java.nio.FloatBuffer;
 import java.nio.LongBuffer;
@@ -34,11 +35,7 @@ public class Qwen3VlEncoderModel implements AutoCloseable {
                                final OrtEnvironment env) {
         try {
             this.env = env;
-            OrtSession.SessionOptions options = new OrtSession.SessionOptions();
-            if (gpuIndex > -1) {
-                options.addCUDA(gpuIndex);
-            }
-            this.session = env.createSession(modelFile, options);
+            this.session = OnnxSessionUtil.createSession(env, modelFile, gpuIndex);
             // Detect deepstack count from ONNX model outputs: total outputs - 1 (image_features)
             this.numDeepstack = (int) (session.getNumOutputs() - 1);
         } catch (Exception e) {

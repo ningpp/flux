@@ -7,6 +7,7 @@ import ai.onnxruntime.OrtException;
 import ai.onnxruntime.OrtSession;
 import ai.onnxruntime.OrtSession.Result;
 import io.github.flux.exception.FluxException;
+import io.github.flux.util.OnnxSessionUtil;
 
 import java.nio.FloatBuffer;
 import java.util.List;
@@ -27,11 +28,7 @@ public class GotOcr2EncoderModel implements AutoCloseable {
                                final OrtEnvironment env) {
         try {
             this.env = env;
-            OrtSession.SessionOptions options = new OrtSession.SessionOptions();
-            if (gpuIndex > -1) {
-                options.addCUDA(gpuIndex);
-            }
-            this.session = env.createSession(modelFile, options);
+            this.session = OnnxSessionUtil.createSession(env, modelFile, gpuIndex);
         } catch (Exception e) {
             throw new FluxException(e);
         }

@@ -6,6 +6,7 @@ import ai.onnxruntime.OrtException;
 import ai.onnxruntime.OrtSession;
 import io.github.flux.exception.FluxException;
 import io.github.flux.util.ArrayUtil;
+import io.github.flux.util.OnnxSessionUtil;
 import io.github.flux.util.OnnxUtil;
 
 import java.nio.FloatBuffer;
@@ -65,11 +66,7 @@ public class Qwen3VlDecoderModel implements AutoCloseable {
         this.numDeepstack = numDeepstack;
         try {
             this.env = env;
-            OrtSession.SessionOptions options = new OrtSession.SessionOptions();
-            if (gpuIndex > -1) {
-                options.addCUDA(gpuIndex);
-            }
-            this.session = env.createSession(modelFile, options);
+            this.session = OnnxSessionUtil.createSession(env, modelFile, gpuIndex);
             this.outputNames = session.getOutputNames();
         } catch (Exception e) {
             throw new FluxException(e);

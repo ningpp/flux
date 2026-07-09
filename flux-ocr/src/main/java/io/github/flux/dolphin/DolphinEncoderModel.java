@@ -23,6 +23,7 @@ import ai.onnxruntime.OrtException;
 import ai.onnxruntime.OrtSession;
 import io.github.flux.exception.FluxException;
 import io.github.flux.util.ImageUtil;
+import io.github.flux.util.OnnxSessionUtil;
 import org.opencv.core.Mat;
 
 import java.util.List;
@@ -44,11 +45,7 @@ public class DolphinEncoderModel implements AutoCloseable {
                                final OrtEnvironment env) {
         try {
             this.env = env;
-            OrtSession.SessionOptions options = new OrtSession.SessionOptions();
-            if (gpuIndex > -1) {
-                options.addCUDA(gpuIndex);
-            }
-            this.session = env.createSession(modelFile, options);
+            this.session = OnnxSessionUtil.createSession(env, modelFile, gpuIndex);
 
             this.inputName = List.copyOf(session.getInputNames()).getFirst();
         } catch (Exception e) {

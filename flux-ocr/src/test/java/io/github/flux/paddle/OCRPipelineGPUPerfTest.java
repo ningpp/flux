@@ -22,6 +22,7 @@ import org.opencv.core.Mat;
 
 import java.awt.image.BufferedImage;
 import java.io.File;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -67,9 +68,12 @@ public class OCRPipelineGPUPerfTest {
     public static void main(String[] args) throws Exception {
         org.bytedeco.javacpp.Loader.load(org.bytedeco.opencv.opencv_java.class);
 
-        int iterations = 15;
-        int recognitionBatchSize = 4;
-        int formulaBatchSize = 1;
+        int iterations = 1;
+        int pipelinePageBatchSize = 4;
+        int layoutBatchSize = 1;
+        int detectionBatchSize = 1;
+        int recognitionBatchSize = 8;
+        int formulaBatchSize = 4;
         // Verify PDF files exist
         for (String pdfFile : PDF_FILES) {
             File f = new File(pdfFile);
@@ -96,19 +100,29 @@ public class OCRPipelineGPUPerfTest {
                     detModel, recModel,
                     docOriModel, textLineOriModel,
                     layoutModel, formulaModel, tableModel);
+            logMemory("after-model-load");
 
             Map<String, Object> params = new HashMap<>();
+            params.put("layoutBatchSize", layoutBatchSize);
+            params.put("detectionBatchSize", detectionBatchSize);
             params.put("recognitionBatchSize", recognitionBatchSize);
             params.put("formulaBatchSize", formulaBatchSize);
+            params.put("tableBatchSize", 1);
 
             // Warm up with first page of first PDF
             System.out.println("========== Warm Up ==========");
             warmUp(pipeline, params);
+            logMemory("after-warmup");
 
             // Run benchmark
             System.out.println("\n========== GPU Performance Benchmark ==========");
             System.out.println("DPI: " + DPI);
             System.out.println("GPU Index: " + GPU_INDEX);
+            System.out.println("Pipeline page batch size: " + pipelinePageBatchSize);
+            System.out.println("Layout batch size: " + layoutBatchSize);
+            System.out.println("Detection batch size: " + detectionBatchSize);
+            System.out.println("Recognition batch size: " + recognitionBatchSize);
+            System.out.println("Formula batch size: " + formulaBatchSize);
             System.out.println("Table decoder GPU Index: " + TABLE_DECODER_GPU_INDEX);
             System.out.println("Table max tokens: " + TABLE_MAX_TOKENS);
             System.out.println();
@@ -144,41 +158,55 @@ public class OCRPipelineGPUPerfTest {
                         long fileOcrNanosSum = 0;
                         int successCount = 0;
 
-                        // Process pages one by one for accurate per-page timing
-                        for (int i = 0; i < imagePaths.size(); i++) {
-                            String imagePath = imagePaths.get(i);
+                        // Process pages in batches so the pipeline benchmark exercises cross-page batching.
+                        for (int batchStart = 0; batchStart < imagePaths.size(); batchStart += pipelinePageBatchSize) {
+                            int batchEnd = Math.min(batchStart + pipelinePageBatchSize, imagePaths.size());
+                            List<String> pageBatch = imagePaths.subList(batchStart, batchEnd);
                             try {
-                                LocalDateTime pageStart = LocalDateTime.now();
-                                List<List<OCRPipelineResult>> results = pipeline.predict(List.of(imagePath), params);
-                                LocalDateTime pageEnd = LocalDateTime.now();
+                                LocalDateTime batchOcrStart = LocalDateTime.now();
+                                List<List<OCRPipelineResult>> results = pipeline.predict(pageBatch, params);
+                                LocalDateTime batchOcrEnd = LocalDateTime.now();
 
-                                long pageNanos = Duration.between(pageStart, pageEnd).toNanos();
-                                fileOcrNanosSum += pageNanos;
-                                successCount++;
+                                long batchNanos = Duration.between(batchOcrStart, batchOcrEnd).toNanos();
+                                if (results.size() != pageBatch.size()) {
+                                    throw new IllegalStateException("Expected " + pageBatch.size()
+                                            + " page results but got " + results.size());
+                                }
+                                fileOcrNanosSum += batchNanos;
+                                successCount += results.size();
+                                double batchAvgMs = batchNanos / 1000_000d / (double) pageBatch.size();
+
+                                System.out.printf("  Batch pages %2d-%2d: OCR %8.2f ms, avg %7.2f ms/page%n",
+                                        batchStart + 1, batchEnd, batchNanos / 1000_000d, batchAvgMs);
+                                logMemory("after-batch-" + fileName + "-" + (batchStart + 1) + "-" + batchEnd);
 
                                 // Print brief result summary
-                                List<OCRPipelineResult> pageResults = results.get(0);
-                                int regionCount = 0;
-                                int textLineCount = 0;
-                                int formulaCount = 0;
-                                int tableCount = 0;
-                                for (OCRPipelineResult r : pageResults) {
-                                    if (r.layoutRegions() != null) {
-                                        for (LayoutRegionResult region : r.layoutRegions()) {
-                                            regionCount++;
-                                            switch (region.regionType()) {
-                                                case "text" ->
-                                                    textLineCount += region.textResults() != null ? region.textResults().size() : 0;
-                                                case "formula" -> formulaCount++;
-                                                case "table" -> tableCount++;
+                                for (int i = 0; i < results.size(); i++) {
+                                    List<OCRPipelineResult> pageResults = results.get(i);
+                                    int regionCount = 0;
+                                    int textLineCount = 0;
+                                    int formulaCount = 0;
+                                    int tableCount = 0;
+                                    for (OCRPipelineResult r : pageResults) {
+                                        if (r.layoutRegions() != null) {
+                                            for (LayoutRegionResult region : r.layoutRegions()) {
+                                                regionCount++;
+                                                switch (region.regionType()) {
+                                                    case "text" ->
+                                                        textLineCount += region.textResults() != null ? region.textResults().size() : 0;
+                                                    case "formula" -> formulaCount++;
+                                                    case "table" -> tableCount++;
+                                                }
                                             }
                                         }
                                     }
+                                    System.out.printf("    Page %2d: %d regions (text:%d, formula:%d, table:%d)%n",
+                                            batchStart + i + 1, regionCount, textLineCount, formulaCount, tableCount);
                                 }
-                                System.out.printf("  Page %2d: OCR %7.2f ms, %d regions (text:%d, formula:%d, table:%d)%n",
-                                    i + 1, pageNanos / 1000_000d, regionCount, textLineCount, formulaCount, tableCount);
                             } catch (Exception e) {
-                                System.out.printf("  Page %2d: FAILED - %s%n", i + 1, e.getMessage());
+                                System.out.printf("  Batch pages %2d-%2d: FAILED - %s%n",
+                                        batchStart + 1, batchEnd, e.getMessage());
+                                throw e;
                             }
                         }
 
@@ -199,6 +227,7 @@ public class OCRPipelineGPUPerfTest {
                         System.out.printf("  OCR total: %.2f ms%n", fileOcrNanosSum / 1000_000d);
                         System.out.printf("  E2E avg per page (PDF+OCR): %.2f ms%n", fileAvgE2EMs);
                         System.out.printf("  OCR avg per page (exclude PDF): %.2f ms%n", fileAvgOcrMs);
+                        logMemory("after-file-" + fileName);
                     } finally {
                         // Clean up temp images even if OCR fails mid-file
                         for (String imagePath : imagePaths) {
@@ -215,6 +244,8 @@ public class OCRPipelineGPUPerfTest {
             System.out.printf("Total pages: %d (success: %d)%n", totalPages, totalSuccessPages);
             System.out.printf("E2E avg per page (PDF+OCR): %.2f ms%n", overallAvgE2EMs);
             System.out.printf("OCR avg per page (exclude PDF): %.2f ms%n", overallAvgOcrMs);
+            System.out.printf("Peak working set/private: %.2f GB / %.2f GB%n",
+                    peakWorkingSetGb, peakPrivateGb);
             System.out.println();
             System.out.println("Per-file details:");
             System.out.printf("  %-30s %6s %8s %8s %8s%n", "File", "Pages", "E2E(ms)", "OCR(ms)", "PDF(ms)");
@@ -277,5 +308,47 @@ public class OCRPipelineGPUPerfTest {
             }
         }
         return imagePaths;
+    }
+
+    private static double peakWorkingSetGb = 0d;
+    private static double peakPrivateGb = 0d;
+
+    private static void logMemory(String label) {
+        Runtime runtime = Runtime.getRuntime();
+        double heapUsedGb = (runtime.totalMemory() - runtime.freeMemory()) / 1024d / 1024d / 1024d;
+        ProcessMemorySnapshot snapshot = windowsProcessMemory();
+        peakWorkingSetGb = Math.max(peakWorkingSetGb, snapshot.workingSetGb());
+        peakPrivateGb = Math.max(peakPrivateGb, snapshot.privateGb());
+        System.out.printf("  MEMORY %-36s heapUsedGB=%.2f, workingSetGB=%.2f, privateGB=%.2f%n",
+                label, heapUsedGb, snapshot.workingSetGb(), snapshot.privateGb());
+    }
+
+    private static ProcessMemorySnapshot windowsProcessMemory() {
+        long pid = ProcessHandle.current().pid();
+        String command = "$p=Get-Process -Id " + pid
+                + "; [string]::Format([Globalization.CultureInfo]::InvariantCulture,"
+                + " '{0:F6} {1:F6}', $p.WorkingSet64/1GB, $p.PrivateMemorySize64/1GB)";
+        try {
+            Process process = new ProcessBuilder(
+                    "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", command)
+                    .redirectErrorStream(true)
+                    .start();
+            String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
+            int exit = process.waitFor();
+            if (exit == 0 && !output.isBlank()) {
+                String[] parts = output.split("\\s+");
+                if (parts.length >= 2) {
+                    return new ProcessMemorySnapshot(
+                            Double.parseDouble(parts[0]),
+                            Double.parseDouble(parts[1]));
+                }
+            }
+        } catch (Exception ignored) {
+            // Keep benchmark running even if memory sampling is unavailable.
+        }
+        return new ProcessMemorySnapshot(0d, 0d);
+    }
+
+    private record ProcessMemorySnapshot(double workingSetGb, double privateGb) {
     }
 }

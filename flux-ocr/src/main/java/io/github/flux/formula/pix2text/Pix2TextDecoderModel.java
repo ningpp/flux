@@ -90,24 +90,15 @@ public class Pix2TextDecoderModel implements AutoCloseable {
         try {
             int batchSize = encB;
 
-            // Performance: avoid reallocating inputIds (ArrayUtil.concat) and re-flattening
-            // (ArrayUtil.flat) on every autoregressive step. Use a single preallocated flat
-            // buffer of size [batch * (maxLength + 1)] laid out row-major as [batch, seqLen]:
-            //   input_ids[j][pos] == flatInput[pos * batchSize + j]
-            // This makes each decoding step allocation-free (only a reused LongBuffer view).
-            long[] flatInput = new long[batchSize * (maxLength + 1)];
+            long[][] inputIds = new long[batchSize][maxLength + 1];
             for (int j = 0; j < batchSize; j++) {
-                flatInput[j] = decoderStartTokenId; // column 0
+                inputIds[j][0] = decoderStartTokenId;
             }
 
-            long[][] generated_tokens = new long[batchSize][];
-            for (int j = 0; j < batchSize; j++) {
-                generated_tokens[j] = new long[0];
-            }
             long curLen = 1;
             boolean[] finished = new boolean[batchSize];
             for (int step = 0; step < maxLength; step++) {
-                LongBuffer buffer = LongBuffer.wrap(flatInput).position(0).limit((int) (batchSize * curLen));
+                LongBuffer buffer = LongBuffer.wrap(flattenInputIds(inputIds, (int) curLen));
                 OnnxTensor inputIdsTensor = null;
                 OrtSession.Result onnxResult = null;
                 try {
@@ -115,21 +106,29 @@ public class Pix2TextDecoderModel implements AutoCloseable {
                     onnxResult = matManager.runSession(session, Map.of(
                             "input_ids", inputIdsTensor,
                             "encoder_hidden_states", encoderHiddenStates));
-                    // OnnxValue obtained from Result is owned by Result and will be closed when Result closes.
-                    float[][][] decoderResultFloats = (float[][][]) onnxResult.get(0).getValue();
+                    OnnxTensor outputTensor = (OnnxTensor) onnxResult.get(0);
+                    long[] outputShape = outputTensor.getInfo().getShape();
+                    if (outputShape.length != 3) {
+                        throw new FluxException("Unexpected Pix2Text decoder output shape length: " + outputShape.length);
+                    }
+                    int outputBatchSize = Math.toIntExact(outputShape[0]);
+                    int outputSequenceLength = Math.toIntExact(outputShape[1]);
+                    int vocabSize = Math.toIntExact(outputShape[2]);
+                    if (outputBatchSize != batchSize) {
+                        throw new FluxException("Unexpected Pix2Text decoder output batch size: " + outputBatchSize);
+                    }
+                    FloatBuffer logitsBuffer = outputTensor.getFloatBuffer();
                     for (int j = 0; j < batchSize; j++) {
                         long nextToken;
                         if (finished[j]) {
                             nextToken = padTokenId;
                         } else {
-                            float[] lastLogit = decoderResultFloats[j][(int) (curLen - 1)];
-                            nextToken = ArrayUtil.argmax(lastLogit);
+                            nextToken = argmaxLastLogits(logitsBuffer, j, outputSequenceLength, vocabSize);
                             if (nextToken == eosTokenId) {
                                 finished[j] = true;
                             }
                         }
-                        // write the next token at column `curLen`
-                        flatInput[(int) (curLen * batchSize + j)] = nextToken;
+                        inputIds[j][(int) curLen] = nextToken;
                     }
                     curLen++;
 
@@ -144,11 +143,10 @@ public class Pix2TextDecoderModel implements AutoCloseable {
 
             // Reconstruct generated tokens (everything except the start token, columns 1..curLen-1)
             int outLen = (int) (curLen - 1);
+            long[][] generated_tokens = new long[batchSize][];
             for (int j = 0; j < batchSize; j++) {
                 long[] tokens = new long[outLen];
-                for (int k = 1; k <= outLen; k++) {
-                    tokens[k - 1] = flatInput[k * batchSize + j];
-                }
+                System.arraycopy(inputIds[j], 1, tokens, 0, outLen);
                 generated_tokens[j] = tokens;
             }
 
@@ -161,6 +159,32 @@ public class Pix2TextDecoderModel implements AutoCloseable {
         } finally {
             matManager.release(encoderHiddenStates);
         }
+    }
+
+    static long[] flattenInputIds(long[][] inputIds, int cols) {
+        int rows = inputIds.length;
+        long[] flat = new long[rows * cols];
+        for (int row = 0; row < rows; row++) {
+            System.arraycopy(inputIds[row], 0, flat, row * cols, cols);
+        }
+        return flat;
+    }
+
+    static long argmaxLastLogits(FloatBuffer logitsBuffer, int batchIndex, int sequenceLength, int vocabSize) {
+        int offset = ((batchIndex * sequenceLength) + (sequenceLength - 1)) * vocabSize;
+        FloatBuffer row = logitsBuffer.duplicate();
+        row.position(offset);
+
+        int bestToken = 0;
+        float bestScore = row.get();
+        for (int token = 1; token < vocabSize; token++) {
+            float score = row.get();
+            if (score > bestScore) {
+                bestScore = score;
+                bestToken = token;
+            }
+        }
+        return bestToken;
     }
 
 }

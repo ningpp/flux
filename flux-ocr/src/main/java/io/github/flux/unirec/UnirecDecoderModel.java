@@ -33,6 +33,7 @@ import io.github.flux.util.ArrayUtil;
 import io.github.flux.util.IOUtil;
 import org.apache.commons.lang3.tuple.Pair;
 
+import java.nio.FloatBuffer;
 import java.nio.LongBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -143,9 +144,7 @@ public class UnirecDecoderModel implements AutoCloseable {
                 }
                 dsr = next;
                 past_key_values = dsr.past_key_values();
-                float[][][] logits = dsr.logits();
-                // Get next token
-                long next_token_id = getNextTokenId(logits);
+                long next_token_id = dsr.nextTokenId();
                 generated_ids[i+1] = next_token_id;
 
                 // Check for EOS
@@ -211,22 +210,6 @@ public class UnirecDecoderModel implements AutoCloseable {
         }
     }
 
-    private int getNextTokenId(float[][][] logits) {
-        float[] lastLogits = logits[0][logits[0].length - 1];
-        int maxIndex = 0;
-        float max = lastLogits[0];
-
-        // 手动展开循环或使用向量化操作
-        for (int i = 1; i < lastLogits.length; i++) {
-            float val = lastLogits[i];
-            if (val > max) {
-                max = val;
-                maxIndex = i;
-            }
-        }
-        return maxIndex;
-    }
-
     // Unified decoder step with or without cache.
     private DecodeStepResult decode_step(long input_id,
                                          int pastLength,
@@ -264,7 +247,18 @@ public class UnirecDecoderModel implements AutoCloseable {
         // previous step's Result and are released when that Result is closed by the caller.
         matManager.release(inputIdsTensor);
         matManager.release(positionIdsTensor);
-        float[][][] logits = (float[][][]) result.get(0).getValue();
+        OnnxTensor logitsTensor = (OnnxTensor) result.get(0);
+        long[] logitsShape = logitsTensor.getInfo().getShape();
+        if (logitsShape.length != 3) {
+            throw new FluxException("Unexpected Unirec decoder logits shape length: " + logitsShape.length);
+        }
+        int outputBatchSize = Math.toIntExact(logitsShape[0]);
+        int outputSequenceLength = Math.toIntExact(logitsShape[1]);
+        int vocabSize = Math.toIntExact(logitsShape[2]);
+        if (outputBatchSize != 1) {
+            throw new FluxException("Unexpected Unirec decoder output batch size: " + outputBatchSize);
+        }
+        long nextTokenId = argmaxLastLogits(logitsTensor.getFloatBuffer(), 0, outputSequenceLength, vocabSize);
         List<Pair<OnnxTensor, OnnxTensor>> present_key_values = new ArrayList<>();
         // Extract present_key_values
         for (int i = 0; i < num_decoder_layers; i++) {
@@ -274,10 +268,27 @@ public class UnirecDecoderModel implements AutoCloseable {
         }
         // The Result is returned to the caller and closed later (once its present_key_values
         // outputs are no longer referenced), so its native handle is not leaked.
-        return new DecodeStepResult(logits, present_key_values, result);
+        return new DecodeStepResult(nextTokenId, present_key_values, result);
     }
 
-    private record DecodeStepResult(float[][][] logits,
+    static long argmaxLastLogits(FloatBuffer logitsBuffer, int batchIndex, int sequenceLength, int vocabSize) {
+        int offset = ((batchIndex * sequenceLength) + (sequenceLength - 1)) * vocabSize;
+        FloatBuffer row = logitsBuffer.duplicate();
+        row.position(offset);
+
+        int bestToken = 0;
+        float bestScore = row.get();
+        for (int token = 1; token < vocabSize; token++) {
+            float score = row.get();
+            if (score > bestScore) {
+                bestScore = score;
+                bestToken = token;
+            }
+        }
+        return bestToken;
+    }
+
+    private record DecodeStepResult(long nextTokenId,
                                     List<Pair<OnnxTensor, OnnxTensor>> past_key_values,
                                     OrtSession.Result result) {
 

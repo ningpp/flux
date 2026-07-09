@@ -29,6 +29,7 @@ import ai.onnxruntime.OrtSession;
 import io.github.flux.core.MatManager;
 import io.github.flux.util.IOUtil;
 import io.github.flux.util.ImageUtil;
+import io.github.flux.util.OnnxSessionUtil;
 import org.opencv.core.Mat;
 
 import java.nio.FloatBuffer;
@@ -49,11 +50,7 @@ public class TexTellerEncoderModel implements AutoCloseable {
                                  final int gpuIndex,
                                  final OrtEnvironment env) throws OrtException {
         this.env = env;
-        OrtSession.SessionOptions options = new OrtSession.SessionOptions();
-        if (gpuIndex > -1) {
-            options.addCUDA(gpuIndex);
-        }
-        this.session = env.createSession(modelFile, options);
+        this.session = OnnxSessionUtil.createSession(env, modelFile, gpuIndex);
     }
 
     public float[][][] batchPredict(List<Mat> inputMats, MatManager matManager, NDManager manager) throws OrtException {

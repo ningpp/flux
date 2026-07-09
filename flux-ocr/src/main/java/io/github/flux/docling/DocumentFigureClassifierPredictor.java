@@ -42,6 +42,7 @@ import io.github.flux.paddle.processor.TopkProcessor;
 import io.github.flux.util.ArrayUtil;
 import io.github.flux.util.IOUtil;
 import io.github.flux.util.ImageUtil;
+import io.github.flux.util.OnnxSessionUtil;
 import io.github.flux.util.ParameterUtil;
 import org.apache.commons.lang3.tuple.Pair;
 import org.opencv.core.Mat;
@@ -69,12 +70,8 @@ public class DocumentFigureClassifierPredictor extends BatchPredictor<PreProcess
                                              final OrtEnvironment env) {
         try {
             this.env = env;
-            OrtSession.SessionOptions options = new OrtSession.SessionOptions();
-            if (gpuIndex > -1) {
-                options.addCUDA(gpuIndex);
-            }
-
-            this.session = env.createSession(new File(modelDir, "model.onnx").getAbsolutePath(), options);
+            this.session = OnnxSessionUtil.createSession(
+                    env, new File(modelDir, "model.onnx").getAbsolutePath(), gpuIndex);
             this.inputName = List.copyOf(session.getInputNames()).getFirst();
 
             Set<Entry<String, JsonElement>> id2labelEntries = JsonParser.parseString(Files.readString(

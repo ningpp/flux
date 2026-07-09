@@ -25,6 +25,7 @@ import ai.onnxruntime.OrtSession.SessionOptions.OptLevel;
 import io.github.flux.exception.FluxException;
 import io.github.flux.util.ArrayUtil;
 import io.github.flux.util.IOUtil;
+import io.github.flux.util.OnnxSessionUtil;
 import io.github.flux.util.OnnxUtil;
 
 import java.nio.FloatBuffer;
@@ -77,16 +78,22 @@ public class GlmOcrDecoderModel implements GlmOcrDecoder {
         this.maxLength = maxLength;
         try {
             this.env = env;
-            OrtSession.SessionOptions options = new OrtSession.SessionOptions();
-            if (gpuIndex > -1) {
-                options.addCUDA(gpuIndex);
-                // Single thread for GPU - let runtime handle parallelism
-                options.setIntraOpNumThreads(1);
-                options.setInterOpNumThreads(1);
-            }
-            options.setOptimizationLevel(OptLevel.ALL_OPT);
-            this.prefillSession = env.createSession(prefillModelFile, options);
-            this.decodeSession = env.createSession(decodeModelFile, options);
+            this.prefillSession = OnnxSessionUtil.createSession(env, prefillModelFile, gpuIndex, options -> {
+                if (gpuIndex > -1) {
+                    // Single thread for GPU - let runtime handle parallelism
+                    options.setIntraOpNumThreads(1);
+                    options.setInterOpNumThreads(1);
+                }
+                options.setOptimizationLevel(OptLevel.ALL_OPT);
+            });
+            this.decodeSession = OnnxSessionUtil.createSession(env, decodeModelFile, gpuIndex, options -> {
+                if (gpuIndex > -1) {
+                    // Single thread for GPU - let runtime handle parallelism
+                    options.setIntraOpNumThreads(1);
+                    options.setInterOpNumThreads(1);
+                }
+                options.setOptimizationLevel(OptLevel.ALL_OPT);
+            });
         } catch (Exception e) {
             throw new FluxException(e);
         }
