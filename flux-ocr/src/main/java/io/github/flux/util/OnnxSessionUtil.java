@@ -10,30 +10,24 @@ import java.util.Objects;
 /**
  * 统一的 ONNX 会话创建工具。
  *
- * <p>集中处理几个系统性 GPU 内存问题（OCRPipelineGPUPerfTest 观测到的严重显存增长根因）：
- * <ol>
- *   <li>CUDA 会话默认开启 {@code memoryPatternOptimization}，会对<b>每种不同输入 shape</b>
- *       缓存一份内存分配方案，且该缓存在会话生命周期内不回收。OCR 每页 pad 后尺寸不同，
- *       导致 GPU 显存随页面尺寸种类无界累积。这里显式关闭它。</li>
- *   <li>CUDA EP 的 arena allocator 默认使用 {@code kNextPowerOfTwo} 策略，每次扩展时
- *       翻倍分配。OCR 输入尺寸多样（不同页面、不同裁剪区域），导致 arena 无界增长。
- *       这里改用 {@code kSameAsRequested}，按实际请求大小扩展。</li>
- *   <li>同一 OCRPipeline 会同时常驻 det/rec/layout/formula/table 等多个 CUDA session。
- *       默认无限制的 per-session CUDA arena 会让 native private bytes 接近多个单模型
- *       高水位的叠加。这里默认给每个 CUDA session 设置 4GiB arena 上限，可通过系统属性覆盖。</li>
- *   <li>OCR 输入和中间输出包含大量不同 shape 的 CPU tensor/native buffer。ORT CPU arena
- *       会在 session 生命周期内保留高水位，线上共享 Pipeline 不能靠关闭模型释放这些内存。
- *       这里默认关闭 CPU arena allocator，使请求内临时内存更及时归还给系统。</li>
- *   <li>{@link OrtSession.SessionOptions} 实现了 {@link AutoCloseable}，创建后必须
- *       {@code close()} 以释放原生 {@code OrtSessionOptions} 结构体，否则造成原生内存泄露。
- *       这里在 {@code createSession} 之后立即关闭。</li>
- * </ol>
+ * <p>默认使用 ONNX Runtime 的原生 CUDA 配置（不修改 arena 策略、不限制显存上限、
+ * 不调整 CPU arena）。在与参考 Python 实现 {@code infer_onnx.py} 的对比中发现：
+ * 同一 UniRec 模型 / 图片 / 2048 token 的推理，Python 默认配置 GPU 显存峰值仅约 730 MiB；
+ * 而之前 Java 中自定义的 {@code arena_extend_strategy=kSameAsRequested} 与 CPU arena 调整
+ * 反而在 8 GB GPU 上触发了 Concat 节点的显存分配失败。因此这里恢复为 ORT 默认行为，
+ * 让运行时按物理 GPU 显存动态分配。</p>
+ *
+ * <p>如仍有特殊场景需要限制 per-session CUDA 显存，可通过系统属性
+ * {@code flux.ocr.onnx.cudaGpuMemLimitBytes} 手动设置；默认值为 0，表示不限制。</p>
+ *
+ * <p>{@link OrtSession.SessionOptions} 实现了 {@link AutoCloseable}，创建后必须
+ * {@code close()} 以释放原生 {@code OrtSessionOptions} 结构体，否则造成原生内存泄露。
+ * 这里在 {@code createSession} 之后立即关闭。</p>
  */
 public final class OnnxSessionUtil {
 
     static final String CUDA_GPU_MEM_LIMIT_BYTES_PROPERTY = "flux.ocr.onnx.cudaGpuMemLimitBytes";
-    static final String CPU_ARENA_ALLOCATOR_ENABLED_PROPERTY = "flux.ocr.onnx.cpuArenaAllocatorEnabled";
-    private static final long DEFAULT_CUDA_GPU_MEM_LIMIT_BYTES = 4L * 1024L * 1024L * 1024L;
+    private static final long DEFAULT_CUDA_GPU_MEM_LIMIT_BYTES = 0L;
 
     private OnnxSessionUtil() {
     }
@@ -52,18 +46,14 @@ public final class OnnxSessionUtil {
         try {
             if (gpuIndex > -1) {
                 cudaOpts = new OrtCUDAProviderOptions(gpuIndex);
-                // Arena 按实际请求大小扩展，而非翻倍，防止 GPU 显存随输入尺寸种类无界增长。
-                cudaOpts.add("arena_extend_strategy", "kSameAsRequested");
+                // Use ORT defaults. Custom arena strategies have caused GPU OOM on
+                // consumer GPUs with this model family.
                 long gpuMemLimitBytes = resolveCudaGpuMemLimitBytes();
                 if (gpuMemLimitBytes > 0) {
                     cudaOpts.add("gpu_mem_limit", Long.toString(gpuMemLimitBytes));
                 }
                 options.addCUDA(cudaOpts);
             }
-            // 关闭内存模式优化，避免按输入 shape 缓存分配方案导致 GPU 显存无界增长。
-            options.setMemoryPatternOptimization(false);
-            // 默认关闭 CPU arena，避免共享 session 在请求后长期保留 OCR 大 shape 的 CPU 高水位。
-            options.setCPUArenaAllocator(resolveCpuArenaAllocatorEnabled());
             Objects.requireNonNull(configureOptions, "configureOptions").configure(options);
             return env.createSession(modelFile, options);
         } finally {
@@ -84,13 +74,9 @@ public final class OnnxSessionUtil {
                 return parsed;
             }
         } catch (NumberFormatException ignored) {
-            // Fall back to the conservative default for malformed configuration.
+            // Fall back to the default (unlimited) for malformed configuration.
         }
         return DEFAULT_CUDA_GPU_MEM_LIMIT_BYTES;
-    }
-
-    static boolean resolveCpuArenaAllocatorEnabled() {
-        return Boolean.parseBoolean(System.getProperty(CPU_ARENA_ALLOCATOR_ENABLED_PROPERTY, "false"));
     }
 
     @FunctionalInterface

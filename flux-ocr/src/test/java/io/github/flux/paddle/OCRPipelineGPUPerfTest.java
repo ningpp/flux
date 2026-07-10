@@ -65,8 +65,6 @@ public class OCRPipelineGPUPerfTest {
     private static final String FORMULA_MODEL_DIR = "D:\\models\\formula";
     private static final int DPI = 300;
     private static final int GPU_INDEX = 0;
-    private static final int TABLE_DECODER_GPU_INDEX = -1;
-    private static final int TABLE_MAX_TOKENS = 768;
 
     private static final String[] PDF_FILES = {
         // https://hjfy.top/arxiv/2606.13108
@@ -81,11 +79,14 @@ public class OCRPipelineGPUPerfTest {
         org.bytedeco.javacpp.Loader.load(org.bytedeco.opencv.opencv_java.class);
 
         int iterations = 1;
-        int pipelinePageBatchSize = 4;
+        int pipelinePageBatchSize = 1;
         int layoutBatchSize = 1;
+        int docOrientationBatchSize = 1;
+        int textLineOrientationBatchSize = 1;
         int detectionBatchSize = 1;
-        int recognitionBatchSize = 8;
-        int formulaBatchSize = 4;
+        int recognitionBatchSize = 1;
+        int formulaBatchSize = 1;
+        int tableBatchSize = 1;
         // Verify PDF files exist
         for (String pdfFile : PDF_FILES) {
             File f = new File(pdfFile);
@@ -102,11 +103,7 @@ public class OCRPipelineGPUPerfTest {
              TextLineOrientationModel textLineOriModel = new TextLineOrientationModel(OCR_MODEL_DIR, "PP-LCNet_x1_0_textline_ori", env, GPU_INDEX);
              LayoutModel layoutModel = new LayoutModel(LAYOUT_MODEL_DIR, "PP-DocLayoutV3", GPU_INDEX, env);
              FormulaRecognitionModel formulaModel = new FormulaRecognitionModel(FORMULA_MODEL_DIR, "pix2text-mfr-1.5", GPU_INDEX, env);
-             TableModel tableModel = new TableModel(FORMULA_MODEL_DIR, "unirec-0.1b", GPU_INDEX, env,
-                     Map.of(
-                             "unirec.decoderGpuIndex", TABLE_DECODER_GPU_INDEX,
-                             "unirec.maxTokens", TABLE_MAX_TOKENS
-                     ))) {
+             TableModel tableModel = new TableModel(FORMULA_MODEL_DIR, "unirec-0.1b", GPU_INDEX, env, Map.of())) {
 
             // ===== Phase 1: Convert all PDFs to images ONCE =====
             System.out.println("========== PDF-to-Image Conversion (once) ==========");
@@ -135,16 +132,18 @@ public class OCRPipelineGPUPerfTest {
 
             Map<String, Object> params = new HashMap<>();
             params.put("layoutBatchSize", layoutBatchSize);
+            params.put("docOrientationBatchSize", docOrientationBatchSize);
+            params.put("textLineOrientationBatchSize", textLineOrientationBatchSize);
             params.put("detectionBatchSize", detectionBatchSize);
             params.put("recognitionBatchSize", recognitionBatchSize);
             params.put("formulaBatchSize", formulaBatchSize);
-            params.put("tableBatchSize", 1);
+            params.put("tableBatchSize", tableBatchSize);
 
             // Warm up with first page of first PDF
             System.out.println("\n========== Warm Up ==========");
             List<String> warmUpImages = pdfImagePaths.get(PDF_FILES[0]);
             if (warmUpImages != null && !warmUpImages.isEmpty()) {
-                pipeline.predict(warmUpImages.subList(0, 1), params);
+                pipeline.predictV2(warmUpImages.subList(0, 1), params);
                 System.out.println("Warm up completed.");
             }
             logMemory("after-warmup");
@@ -155,11 +154,12 @@ public class OCRPipelineGPUPerfTest {
             System.out.println("GPU Index: " + GPU_INDEX);
             System.out.println("Pipeline page batch size: " + pipelinePageBatchSize);
             System.out.println("Layout batch size: " + layoutBatchSize);
+            System.out.println("Doc orientation batch size: " + docOrientationBatchSize);
+            System.out.println("Text line orientation batch size: " + textLineOrientationBatchSize);
             System.out.println("Detection batch size: " + detectionBatchSize);
             System.out.println("Recognition batch size: " + recognitionBatchSize);
             System.out.println("Formula batch size: " + formulaBatchSize);
-            System.out.println("Table decoder GPU Index: " + TABLE_DECODER_GPU_INDEX);
-            System.out.println("Table max tokens: " + TABLE_MAX_TOKENS);
+            System.out.println("Table batch size: " + tableBatchSize);
             System.out.println();
 
             long totalOcrOnlyNanos = 0;
@@ -197,7 +197,7 @@ public class OCRPipelineGPUPerfTest {
                         List<String> pageBatch = imagePaths.subList(batchStart, batchEnd);
                         try {
                             LocalDateTime batchOcrStart = LocalDateTime.now();
-                            List<List<OCRPipelineResult>> results = pipeline.predict(pageBatch, params);
+                            List<List<OCRPipelineResult>> results = pipeline.predictV2(pageBatch, params);
                             LocalDateTime batchOcrEnd = LocalDateTime.now();
 
                             long batchNanos = Duration.between(batchOcrStart, batchOcrEnd).toNanos();
@@ -797,8 +797,8 @@ public class OCRPipelineGPUPerfTest {
                     System.out.println("  ROOT CAUSE: Formula auto-regressive decoder (Pix2Text) holds encoderHiddenStates tensor across all decode steps. " +
                             "The ORT CUDA arena retains GPU memory for the peak allocation. Consider reducing formulaBatchSize or processing formulas sequentially.");
                 case "table" ->
-                    System.out.println("  ROOT CAUSE: Table auto-regressive decoder (Unirec) accumulates KV cache across decode steps (maxTokens=" + TABLE_MAX_TOKENS + "). " +
-                            "The ORT CUDA arena retains GPU memory for the peak allocation. Consider reducing maxTokens or processing tables sequentially.");
+                    System.out.println("  ROOT CAUSE: Table auto-regressive decoder (Unirec) accumulates KV cache across decode steps. " +
+                            "The ORT CUDA arena retains GPU memory for the peak allocation. Consider increasing GPU memory limit or processing tables sequentially.");
                 case "text-detection" ->
                     System.out.println("  ROOT CAUSE: Text detection model creates padded batch images that vary in size per page, " +
                             "causing ORT CUDA arena to retain memory for the largest shape. Consider sorting pages by size before batching.");
@@ -917,7 +917,6 @@ public class OCRPipelineGPUPerfTest {
 
     private static void forceGc() {
         System.gc();
-        System.runFinalization();
         try {
             Thread.sleep(1500L);
         } catch (InterruptedException e) {

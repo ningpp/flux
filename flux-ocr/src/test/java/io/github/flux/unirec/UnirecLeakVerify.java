@@ -7,9 +7,14 @@ import io.github.flux.core.TextResult;
 import io.github.flux.model.FormulaRecognitionModel;
 import org.junit.jupiter.api.Test;
 
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.lang.management.ManagementFactory;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Verification for the Unirec formula pipeline memory-leak fixes and performance.
@@ -26,11 +31,51 @@ public class UnirecLeakVerify {
 
     static final String ROOT = "D:\\models\\formula";
     static final String MODEL = "unirec-0.1b";
-    static final String IMAGE = "D:\\tmp\\formula-2026-01-18-152316.png";
+    static final String IMAGE = "E:\\flux-data\\formula-20260710204807.png";
+    // "E:\\flux-data\\table-20260710203613.png";
+    // "D:\\tmp\\formula-2026-01-18-152316.png";
 
     public static void main(String[] args) throws Exception {
-        run("CPU", -1, 100);
-        run("GPU", 0, 100);
+        //run("CPU", -1, 100);
+        run("GPU", 0, 1);
+    }
+
+    static void startGpuMonitor(AtomicBoolean stop, AtomicInteger peakGpuMb) {
+        Thread t = new Thread(() -> {
+            while (!stop.get()) {
+                int gpuMb = queryGpuMemoryMb();
+                int current;
+                do {
+                    current = peakGpuMb.get();
+                } while (gpuMb > current && !peakGpuMb.compareAndSet(current, gpuMb));
+                try {
+                    Thread.sleep(500);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+        });
+        t.setDaemon(true);
+        t.start();
+    }
+
+    static int queryGpuMemoryMb() {
+        try {
+            Process p = new ProcessBuilder(
+                    "nvidia-smi", "--query-gpu=memory.used",
+                    "--format=csv,noheader,nounits"
+            ).redirectErrorStream(true).start();
+            try (BufferedReader br = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
+                String line = br.readLine();
+                if (line != null) {
+                    return Integer.parseInt(line.trim());
+                }
+            }
+            p.waitFor();
+        } catch (Exception ignored) {
+        }
+        return 0;
     }
 
     @Test
@@ -44,7 +89,10 @@ public class UnirecLeakVerify {
         OrtEnvironment env = OrtEnvironment.getEnvironment();
         String firstText;
         long startMem = usedMb();
+        AtomicInteger peakGpuMb = new AtomicInteger();
+        AtomicBoolean stopMonitor = new AtomicBoolean();
         try (var model = new FormulaRecognitionModel(ROOT, MODEL, gpuIndex, env)) {
+            startGpuMonitor(stopMonitor, peakGpuMb);
             // Warmup
             for (int i = 0; i < 3; i++) {
                 try (MatManager mm = new MatManager(); NDManager nm = NDManager.newBaseManager()) {
@@ -98,6 +146,13 @@ public class UnirecLeakVerify {
         } catch (Exception e) {
             System.out.println("SKIP/FAILED " + label + ": " + e);
             e.printStackTrace();
+        } finally {
+            stopMonitor.set(true);
+            try {
+                Thread.sleep(600);
+            } catch (InterruptedException ignored) {
+            }
+            System.out.println("Monitor peak GPU used: " + peakGpuMb.get() + " MiB");
         }
     }
 

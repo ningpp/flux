@@ -10,12 +10,11 @@ class OnnxSessionUtilTest {
     @AfterEach
     void clearGpuMemLimitProperty() {
         System.clearProperty(OnnxSessionUtil.CUDA_GPU_MEM_LIMIT_BYTES_PROPERTY);
-        System.clearProperty(OnnxSessionUtil.CPU_ARENA_ALLOCATOR_ENABLED_PROPERTY);
     }
 
     @Test
-    void resolveCudaGpuMemLimitUsesFourGiBByDefault() {
-        assertEquals(4L * 1024L * 1024L * 1024L, OnnxSessionUtil.resolveCudaGpuMemLimitBytes());
+    void resolveCudaGpuMemLimitIsUnlimitedByDefault() {
+        assertEquals(0L, OnnxSessionUtil.resolveCudaGpuMemLimitBytes());
     }
 
     @Test
@@ -30,17 +29,5 @@ class OnnxSessionUtilTest {
         System.setProperty(OnnxSessionUtil.CUDA_GPU_MEM_LIMIT_BYTES_PROPERTY, "0");
 
         assertEquals(0L, OnnxSessionUtil.resolveCudaGpuMemLimitBytes());
-    }
-
-    @Test
-    void resolveCpuArenaAllocatorIsDisabledByDefault() {
-        assertEquals(false, OnnxSessionUtil.resolveCpuArenaAllocatorEnabled());
-    }
-
-    @Test
-    void resolveCpuArenaAllocatorCanBeEnabledBySystemProperty() {
-        System.setProperty(OnnxSessionUtil.CPU_ARENA_ALLOCATOR_ENABLED_PROPERTY, "true");
-
-        assertEquals(true, OnnxSessionUtil.resolveCpuArenaAllocatorEnabled());
     }
 }
