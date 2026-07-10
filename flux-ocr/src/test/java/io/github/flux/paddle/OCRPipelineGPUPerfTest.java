@@ -273,7 +273,8 @@ public class OCRPipelineGPUPerfTest {
             // ===== Phase 4: Per-model isolation benchmark =====
             System.out.println("\n========== Per-Model Isolation Benchmark ==========");
             List<ModelMemoryAttribution> modelAttributions = runPerModelIsolationBenchmark(
-                    pdfImagePaths, detModel, recModel, layoutModel, formulaModel, tableModel,
+                    pdfImagePaths, detModel, recModel, docOriModel, textLineOriModel,
+                    layoutModel, formulaModel, tableModel,
                     layoutBatchSize, detectionBatchSize, recognitionBatchSize, formulaBatchSize);
             printModelMemoryAttribution(modelAttributions);
 
@@ -296,6 +297,8 @@ public class OCRPipelineGPUPerfTest {
             Map<String, List<String>> pdfImagePaths,
             TextDetectionModel detModel,
             TextRecognitionModel recModel,
+            DocOrientationClassifyModel docOriModel,
+            TextLineOrientationModel textLineOriModel,
             LayoutModel layoutModel,
             FormulaRecognitionModel formulaModel,
             TableModel tableModel,
@@ -397,6 +400,55 @@ public class OCRPipelineGPUPerfTest {
                     matsPeak,
                     textCropPaths.size() + formulaCropPaths.size() + tableCropPaths.size(),
                     textCropPaths.size(), formulaCropPaths.size(), tableCropPaths.size());
+        }
+
+        // --- Doc Orientation isolation ---
+        System.out.println("\n--- Doc Orientation Model Isolation ---");
+        {
+            MemoryPoint before = MemoryPoint.capture("doc_ori:before", null);
+            int matsPeak = 0;
+            int closeablesPeak = 0;
+            try (MatManager matManager = new MatManager();
+                 NDManager ndManager = NDManager.newBaseManager()) {
+                for (int batchStart = 0; batchStart < allPagePaths.size(); batchStart += layoutBatchSize) {
+                    int batchEnd = Math.min(batchStart + layoutBatchSize, allPagePaths.size());
+                    List<String> batch = allPagePaths.subList(batchStart, batchEnd);
+                    List<PreProcessResult> docOriInputs = new ArrayList<>();
+                    List<Mat> docOriRgbs = new ArrayList<>();
+                    try {
+                        for (String imgPath : batch) {
+                            Mat bgr = matManager.imread(imgPath, Imgcodecs.IMREAD_COLOR_BGR);
+                            Mat rgb = matManager.newMat();
+                            Imgproc.cvtColor(bgr, rgb, Imgproc.COLOR_BGR2RGB);
+                            matManager.release(bgr);
+                            docOriRgbs.add(rgb);
+                            docOriInputs.add(docOriModel.processRgb(matManager, rgb, ndManager));
+                        }
+                        docOriModel.batchPredict(docOriInputs, layoutBatchSize, matManager, ndManager, Map.of());
+                    } finally {
+                        for (PreProcessResult input : docOriInputs) {
+                            matManager.release(input.mat());
+                            IOUtil.close(input.ndArray());
+                        }
+                        for (Mat rgb : docOriRgbs) {
+                            matManager.release(rgb);
+                        }
+                    }
+                    matsPeak = Math.max(matsPeak, matManager.trackedMatCount());
+                    closeablesPeak = Math.max(closeablesPeak, matManager.trackedCloseableCount());
+                }
+            }
+            forceGc();
+            MemoryPoint after = MemoryPoint.capture("doc_ori:after", null);
+            attributions.add(new ModelMemoryAttribution("doc-orientation",
+                    after.privateGb() - before.privateGb(),
+                    after.heapGb() - before.heapGb(),
+                    after.workingSetGb() - before.workingSetGb(),
+                    matsPeak, closeablesPeak));
+            System.out.printf(Locale.ROOT, "  doc-orientation: privDelta=%+.3fGB, heapDelta=%+.3fGB, matsPeak=%d, closeablesPeak=%d%n",
+                    after.privateGb() - before.privateGb(),
+                    after.heapGb() - before.heapGb(),
+                    matsPeak, closeablesPeak);
         }
 
         // --- Text Detection isolation ---
@@ -507,6 +559,55 @@ public class OCRPipelineGPUPerfTest {
                     after.privateGb() - before.privateGb(),
                     after.heapGb() - before.heapGb(),
                     matsPeak);
+        }
+
+        // --- Text Line Orientation isolation ---
+        System.out.println("\n--- Text Line Orientation Model Isolation ---");
+        if (!textLineCropPaths.isEmpty()) {
+            MemoryPoint before = MemoryPoint.capture("textline_ori:before", null);
+            int matsPeak = 0;
+            int closeablesPeak = 0;
+            try (MatManager matManager = new MatManager();
+                 NDManager ndManager = NDManager.newBaseManager()) {
+                for (int batchStart = 0; batchStart < textLineCropPaths.size(); batchStart += recognitionBatchSize) {
+                    int batchEnd = Math.min(batchStart + recognitionBatchSize, textLineCropPaths.size());
+                    List<String> batch = textLineCropPaths.subList(batchStart, batchEnd);
+                    List<PreProcessResult> lineOriInputs = new ArrayList<>();
+                    List<Mat> lineOriRgbs = new ArrayList<>();
+                    try {
+                        for (String cropPath : batch) {
+                            Mat bgr = matManager.imread(cropPath, Imgcodecs.IMREAD_COLOR_BGR);
+                            Mat rgb = matManager.newMat();
+                            Imgproc.cvtColor(bgr, rgb, Imgproc.COLOR_BGR2RGB);
+                            matManager.release(bgr);
+                            lineOriRgbs.add(rgb);
+                            lineOriInputs.add(textLineOriModel.processRgb(matManager, rgb, ndManager));
+                        }
+                        textLineOriModel.batchPredict(lineOriInputs, recognitionBatchSize, matManager, ndManager, Map.of());
+                    } finally {
+                        for (PreProcessResult input : lineOriInputs) {
+                            matManager.release(input.mat());
+                            IOUtil.close(input.ndArray());
+                        }
+                        for (Mat rgb : lineOriRgbs) {
+                            matManager.release(rgb);
+                        }
+                    }
+                    matsPeak = Math.max(matsPeak, matManager.trackedMatCount());
+                    closeablesPeak = Math.max(closeablesPeak, matManager.trackedCloseableCount());
+                }
+            }
+            forceGc();
+            MemoryPoint after = MemoryPoint.capture("textline_ori:after", null);
+            attributions.add(new ModelMemoryAttribution("textline-orientation",
+                    after.privateGb() - before.privateGb(),
+                    after.heapGb() - before.heapGb(),
+                    after.workingSetGb() - before.workingSetGb(),
+                    matsPeak, closeablesPeak));
+            System.out.printf(Locale.ROOT, "  textline-orientation: privDelta=%+.3fGB, heapDelta=%+.3fGB, matsPeak=%d, closeablesPeak=%d%n",
+                    after.privateGb() - before.privateGb(),
+                    after.heapGb() - before.heapGb(),
+                    matsPeak, closeablesPeak);
         }
 
         // --- Formula Recognition isolation ---
@@ -704,6 +805,12 @@ public class OCRPipelineGPUPerfTest {
                 case "layout" ->
                     System.out.println("  ROOT CAUSE: Layout model (PP-DocLayoutV3) materializes order_logits float[batch][300][300] array on CPU heap. " +
                             "Consider reading OnnxTensor buffer directly instead of getValue().");
+                case "doc-orientation" ->
+                    System.out.println("  ROOT CAUSE: Doc orientation classifier (PP-LCNet_x1_0_doc_ori) is a lightweight CNN; " +
+                            "private growth should be small. Verify it does not retain OnnxTensors/ORT Results across pages (closeablesPeak).");
+                case "textline-orientation" ->
+                    System.out.println("  ROOT CAUSE: Text-line orientation classifier (PP-LCNet_x1_0_textline_ori) is a lightweight CNN; " +
+                            "private growth should be small. Verify it does not retain OnnxTensors/ORT Results across lines (closeablesPeak).");
                 default ->
                     System.out.println("  ROOT CAUSE: Unknown. Check ORT CUDA arena configuration and per-session GPU memory limits.");
             }
