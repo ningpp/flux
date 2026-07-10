@@ -739,4 +739,184 @@ class OCRPipelineMemoryTest {
         }
     }
 
+    private static class MixedRegionsLayoutModel extends FakeLayoutModel {
+        @Override
+        public List<List<ObjectDetectionResult>> doBatchPredict(List<ProcessedMat> mats, MatManager matManager,
+                                                                NDManager ndManager, Map<String, Object> extraParameters) {
+            callCount++;
+            maxBatchSize = Math.max(maxBatchSize, mats.size());
+            return mats.stream()
+                    .map(_ -> List.of(
+                            new ObjectDetectionResult(0, "text", 0.9f, new float[]{0, 0, 100, 30}),
+                            new ObjectDetectionResult(1, "display_formula", 0.9f, new float[]{0, 30, 100, 60}),
+                            new ObjectDetectionResult(2, "table", 0.9f, new float[]{0, 60, 100, 90})))
+                    .toList();
+        }
+    }
+
+    @Test
+    void predictV2BatchesRecognitionAcrossImagesAndDetectionBatches() throws Exception {
+        Path firstImage = tempDir.resolve("v2-multi-line-page-1.png");
+        Path secondImage = tempDir.resolve("v2-multi-line-page-2.png");
+        writeImage(firstImage);
+        writeImage(secondImage);
+
+        FakeRecognitionModel recognitionModel = new FakeRecognitionModel();
+        OCRPipeline pipeline = new OCRPipeline(
+                new MultiLineTextDetectionModel(),
+                recognitionModel,
+                null,
+                null,
+                null,
+                null,
+                null);
+
+        try (MatManager matManager = new MatManager();
+             NDManager ndManager = NDManager.newBaseManager()) {
+            int baseline = matManager.trackedMatCount();
+            int closeableBaseline = matManager.trackedCloseableCount();
+
+            List<List<OCRPipelineResult>> results = pipeline.predictV2(
+                    List.of(firstImage.toString(), secondImage.toString()),
+                    Map.of("detectionBatchSize", 1, "recognitionBatchSize", 3),
+                    matManager,
+                    ndManager);
+
+            assertEquals(2, results.size());
+            // 2 pages × 4 lines/page = 8 lines, batch 3 → 3 batches (3+3+2)
+            assertEquals(3, recognitionModel.callCount);
+            assertEquals(3, recognitionModel.maxBatchSize);
+            assertEquals(baseline, matManager.trackedMatCount());
+            assertEquals(closeableBaseline, matManager.trackedCloseableCount());
+        }
+    }
+
+    @Test
+    void predictV2ReleasesAllTrackedMats() throws Exception {
+        Path firstImage = tempDir.resolve("v2-mixed-page-1.png");
+        Path secondImage = tempDir.resolve("v2-mixed-page-2.png");
+        writeImage(firstImage);
+        writeImage(secondImage);
+
+        OCRPipeline pipeline = new OCRPipeline(
+                new FakeTextDetectionModel(),
+                new FakeRecognitionModel(),
+                new FakeClassificationModel("0"),
+                new FakeClassificationModel("0_degree"),
+                new MixedRegionsLayoutModel(),
+                new FakeFormulaModel(),
+                new FakeTableModel());
+
+        try (MatManager matManager = new MatManager();
+             NDManager ndManager = NDManager.newBaseManager()) {
+            int baseline = matManager.trackedMatCount();
+            int closeableBaseline = matManager.trackedCloseableCount();
+
+            List<List<OCRPipelineResult>> results = pipeline.predictV2(
+                    List.of(firstImage.toString(), secondImage.toString()),
+                    Map.of(
+                            "layoutBatchSize", 2,
+                            "detectionBatchSize", 2,
+                            "recognitionBatchSize", 4,
+                            "formulaBatchSize", 2,
+                            "tableBatchSize", 2),
+                    matManager,
+                    ndManager);
+
+            assertEquals(2, results.size());
+            assertEquals(baseline, matManager.trackedMatCount());
+            assertEquals(closeableBaseline, matManager.trackedCloseableCount());
+        }
+    }
+
+    @Test
+    void predictV2IndependentBatchSizesForAllModels() throws Exception {
+        Path firstImage = tempDir.resolve("v2-batch-page-1.png");
+        Path secondImage = tempDir.resolve("v2-batch-page-2.png");
+        writeImage(firstImage);
+        writeImage(secondImage);
+
+        FakeClassificationModel docOrientationModel = new FakeClassificationModel("0");
+        MixedRegionsLayoutModel layoutModel = new MixedRegionsLayoutModel();
+        FakeTextDetectionModel textDetectionModel = new FakeTextDetectionModel();
+        FakeClassificationModel textLineOrientationModel = new FakeClassificationModel("0_degree");
+        FakeRecognitionModel recognitionModel = new FakeRecognitionModel();
+        FakeFormulaModel formulaModel = new FakeFormulaModel();
+        FakeTableModel tableModel = new FakeTableModel();
+
+        OCRPipeline pipeline = new OCRPipeline(
+                textDetectionModel,
+                recognitionModel,
+                docOrientationModel,
+                textLineOrientationModel,
+                layoutModel,
+                formulaModel,
+                tableModel);
+
+        try (MatManager matManager = new MatManager();
+             NDManager ndManager = NDManager.newBaseManager()) {
+            pipeline.predictV2(
+                    List.of(firstImage.toString(), secondImage.toString()),
+                    Map.of(
+                            "layoutBatchSize", 2,
+                            "docOrientationBatchSize", 1,
+                            "textLineOrientationBatchSize", 1,
+                            "detectionBatchSize", 1,
+                            "recognitionBatchSize", 2,
+                            "formulaBatchSize", 1,
+                            "tableBatchSize", 2),
+                    matManager,
+                    ndManager);
+
+            assertEquals(2, layoutModel.maxBatchSize);
+            assertEquals(1, docOrientationModel.maxBatchSize);
+            assertEquals(1, textLineOrientationModel.maxBatchSize);
+            assertEquals(1, textDetectionModel.maxBatchSize);
+            assertEquals(2, recognitionModel.maxBatchSize);
+            assertEquals(1, formulaModel.maxBatchSize);
+            assertEquals(2, tableModel.maxBatchSize);
+        }
+    }
+
+    @Test
+    void predictV2EmitsExpectedStageOrder() throws Exception {
+        Path imagePath = tempDir.resolve("v2-observed-page.png");
+        writeImage(imagePath);
+
+        List<String> stages = new ArrayList<>();
+        OCRPipeline pipeline = new OCRPipeline(
+                new FakeTextDetectionModel(),
+                new FakeRecognitionModel(),
+                new FakeClassificationModel("0"),
+                new FakeClassificationModel("0_degree"),
+                new MixedRegionsLayoutModel(),
+                new FakeFormulaModel(),
+                new FakeTableModel());
+
+        try (MatManager matManager = new MatManager();
+             NDManager ndManager = NDManager.newBaseManager()) {
+            pipeline.predictV2(
+                    List.of(imagePath.toString()),
+                    Map.of(
+                            "recognitionBatchSize", 2,
+                            "tableBatchSize", 1,
+                            "memoryObserver", (java.util.function.Consumer<String>) stages::add),
+                    matManager,
+                    ndManager);
+
+            assertStageOrder(stages,
+                    "predictV2:start",
+                    "images:loaded",
+                    "doc-orientation:done",
+                    "layout:done",
+                    "formula:done",
+                    "table:done",
+                    "text-detection:done",
+                    "textline-orientation:done",
+                    "text-recognition:done",
+                    "text:done",
+                    "predictV2:released");
+        }
+    }
+
 }
