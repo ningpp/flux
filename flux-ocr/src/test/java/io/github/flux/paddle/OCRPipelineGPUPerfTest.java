@@ -92,6 +92,17 @@ public class OCRPipelineGPUPerfTest {
         int tableBatchSize = Integer.parseInt(System.getProperty("tableBatchSize", "1"));
         boolean skipWarmup = Boolean.parseBoolean(System.getProperty("skipWarmup", "false"));
 
+        int detGpuIndex = Integer.parseInt(System.getProperty("detGpuIndex", String.valueOf(GPU_INDEX)));
+        int recGpuIndex = Integer.parseInt(System.getProperty("recGpuIndex", String.valueOf(GPU_INDEX)));
+        int docOriGpuIndex = Integer.parseInt(System.getProperty("docOriGpuIndex", String.valueOf(GPU_INDEX)));
+        int textLineOriGpuIndex = Integer.parseInt(System.getProperty("textLineOriGpuIndex", String.valueOf(GPU_INDEX)));
+        int layoutGpuIndex = Integer.parseInt(System.getProperty("layoutGpuIndex", String.valueOf(GPU_INDEX)));
+        int formulaGpuIndex = Integer.parseInt(System.getProperty("formulaGpuIndex", String.valueOf(GPU_INDEX)));
+        int tableGpuIndex = Integer.parseInt(System.getProperty("tableGpuIndex", String.valueOf(GPU_INDEX)));
+
+        int pageStart = Integer.parseInt(System.getProperty("pageStart", "1"));
+        int pageEnd = Integer.parseInt(System.getProperty("pageEnd", "0"));
+
         // Build and optionally filter PDF file list
         List<File> pdfFiles = new ArrayList<>();
         for (String pdfFile : PDF_FILES) {
@@ -113,13 +124,13 @@ public class OCRPipelineGPUPerfTest {
         }
 
         try (OrtEnvironment env = OrtEnvironment.getEnvironment();
-             TextDetectionModel detModel = new TextDetectionModel(OCR_MODEL_DIR, "PP-OCRv6_medium_det", env, GPU_INDEX);
-             TextRecognitionModel recModel = new TextRecognitionModel(OCR_MODEL_DIR, "PP-OCRv6_medium_rec", env, GPU_INDEX);
-             DocOrientationClassifyModel docOriModel = new DocOrientationClassifyModel(OCR_MODEL_DIR, "PP-LCNet_x1_0_doc_ori", env, GPU_INDEX);
-             TextLineOrientationModel textLineOriModel = new TextLineOrientationModel(OCR_MODEL_DIR, "PP-LCNet_x1_0_textline_ori", env, GPU_INDEX);
-             LayoutModel layoutModel = new LayoutModel(LAYOUT_MODEL_DIR, "PP-DocLayoutV3", GPU_INDEX, env);
-             FormulaRecognitionModel formulaModel = new FormulaRecognitionModel(FORMULA_MODEL_DIR, "pix2text-mfr-1.5", GPU_INDEX, env);
-             TableModel tableModel = new TableModel(FORMULA_MODEL_DIR, "unirec-0.1b", GPU_INDEX, env, Map.of())) {
+             TextDetectionModel detModel = new TextDetectionModel(OCR_MODEL_DIR, "PP-OCRv6_medium_det", env, detGpuIndex);
+             TextRecognitionModel recModel = new TextRecognitionModel(OCR_MODEL_DIR, "PP-OCRv6_medium_rec", env, recGpuIndex);
+             DocOrientationClassifyModel docOriModel = new DocOrientationClassifyModel(OCR_MODEL_DIR, "PP-LCNet_x1_0_doc_ori", env, docOriGpuIndex);
+             TextLineOrientationModel textLineOriModel = new TextLineOrientationModel(OCR_MODEL_DIR, "PP-LCNet_x1_0_textline_ori", env, textLineOriGpuIndex);
+             LayoutModel layoutModel = new LayoutModel(LAYOUT_MODEL_DIR, "PP-DocLayoutV3", layoutGpuIndex, env);
+             FormulaRecognitionModel formulaModel = new FormulaRecognitionModel(FORMULA_MODEL_DIR, "pix2text-mfr-1.5", formulaGpuIndex, env);
+             TableModel tableModel = new TableModel(FORMULA_MODEL_DIR, "unirec-0.1b", tableGpuIndex, env, Map.of())) {
 
             // ===== Phase 1: Convert all PDFs to images ONCE =====
             System.out.println("========== PDF-to-Image Conversion (once) ==========");
@@ -173,7 +184,14 @@ public class OCRPipelineGPUPerfTest {
             // ===== Phase 2: Main benchmark with per-stage memory tracking =====
             System.out.println("\n========== GPU Performance Benchmark ==========");
             System.out.println("DPI: " + DPI);
-            System.out.println("GPU Index: " + GPU_INDEX);
+            System.out.println("Default GPU Index: " + GPU_INDEX + " (CPU=-1)");
+            System.out.println("Layout GPU index: " + layoutGpuIndex);
+            System.out.println("Doc orientation GPU index: " + docOriGpuIndex);
+            System.out.println("Text line orientation GPU index: " + textLineOriGpuIndex);
+            System.out.println("Detection GPU index: " + detGpuIndex);
+            System.out.println("Recognition GPU index: " + recGpuIndex);
+            System.out.println("Formula GPU index: " + formulaGpuIndex);
+            System.out.println("Table GPU index: " + tableGpuIndex);
             System.out.println("Pipeline page batch size: " + pipelinePageBatchSize);
             System.out.println("Layout batch size: " + layoutBatchSize);
             System.out.println("Doc orientation batch size: " + docOrientationBatchSize);
@@ -217,10 +235,13 @@ public class OCRPipelineGPUPerfTest {
                 for (File pdfFile : pdfFiles) {
                     String pdfPath = pdfFile.getAbsolutePath();
                     String fileName = pdfFile.getName();
-                    List<String> imagePaths = pdfImagePaths.get(pdfPath);
+                    List<String> allImagePaths = pdfImagePaths.get(pdfPath);
+                    int effectiveStart = Math.max(0, pageStart - 1);
+                    int effectiveEnd = pageEnd <= 0 ? allImagePaths.size() : Math.min(pageEnd, allImagePaths.size());
+                    List<String> imagePaths = allImagePaths.subList(effectiveStart, effectiveEnd);
                     int pageCount = imagePaths.size();
                     System.out.println("--- Processing: " + fileName + " (iter " + (iter + 1) + ") ---");
-                    System.out.println("  Pages: " + pageCount);
+                    System.out.println("  Pages: " + pageCount + " (original " + allImagePaths.size() + ", range " + (effectiveStart + 1) + "-" + effectiveEnd + ")");
 
                     long fileOcrNanosSum = 0;
                     int successCount = 0;
