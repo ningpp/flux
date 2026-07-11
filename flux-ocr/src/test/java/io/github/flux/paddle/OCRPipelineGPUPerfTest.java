@@ -41,6 +41,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
 /**
  * OCRPipeline GPU Performance Benchmark with per-stage memory attribution
@@ -67,31 +68,46 @@ public class OCRPipelineGPUPerfTest {
     private static final int GPU_INDEX = 0;
 
     private static final String[] PDF_FILES = {
+        /*
         // https://hjfy.top/arxiv/2606.13108
         "E:\\flux-data\\2606.13108_zh_CN.pdf",
         "E:\\flux-data\\2606.13108.pdf",
         // https://hjfy.top/arxiv/2606.13392
         "E:\\flux-data\\2606.13392_zh_CN.pdf",
+        */
         "E:\\flux-data\\2606.13392.pdf"
     };
 
     public static void main(String[] args) throws Exception {
         org.bytedeco.javacpp.Loader.load(org.bytedeco.opencv.opencv_java.class);
 
-        int iterations = 1;
-        int pipelinePageBatchSize = 1;
-        int layoutBatchSize = 1;
-        int docOrientationBatchSize = 1;
-        int textLineOrientationBatchSize = 1;
-        int detectionBatchSize = 1;
-        int recognitionBatchSize = 1;
-        int formulaBatchSize = 1;
-        int tableBatchSize = 1;
-        // Verify PDF files exist
+        int iterations = Integer.parseInt(System.getProperty("iterations", "1"));
+        int pipelinePageBatchSize = Integer.parseInt(System.getProperty("pipelinePageBatchSize", "1"));
+        int layoutBatchSize = Integer.parseInt(System.getProperty("layoutBatchSize", "1"));
+        int docOrientationBatchSize = Integer.parseInt(System.getProperty("docOrientationBatchSize", "1"));
+        int textLineOrientationBatchSize = Integer.parseInt(System.getProperty("textLineOrientationBatchSize", "8"));
+        int detectionBatchSize = Integer.parseInt(System.getProperty("detectionBatchSize", "1"));
+        int recognitionBatchSize = Integer.parseInt(System.getProperty("recognitionBatchSize", "8"));
+        int formulaBatchSize = Integer.parseInt(System.getProperty("formulaBatchSize", "1"));
+        int tableBatchSize = Integer.parseInt(System.getProperty("tableBatchSize", "1"));
+        boolean skipWarmup = Boolean.parseBoolean(System.getProperty("skipWarmup", "false"));
+
+        // Build and optionally filter PDF file list
+        List<File> pdfFiles = new ArrayList<>();
         for (String pdfFile : PDF_FILES) {
-            File f = new File(pdfFile);
-            if (!f.exists()) {
-                System.err.println("PDF file not found: " + pdfFile);
+            pdfFiles.add(new File(pdfFile));
+        }
+        String pdfFilter = System.getProperty("pdfFilter", "");
+        if (!pdfFilter.isEmpty()) {
+            pdfFiles = pdfFiles.stream()
+                    .filter(f -> f.getName().contains(pdfFilter))
+                    .collect(Collectors.toList());
+        }
+
+        // Verify PDF files exist
+        for (File pdfFile : pdfFiles) {
+            if (!pdfFile.exists()) {
+                System.err.println("PDF file not found: " + pdfFile.getAbsolutePath());
                 return;
             }
         }
@@ -109,14 +125,15 @@ public class OCRPipelineGPUPerfTest {
             System.out.println("========== PDF-to-Image Conversion (once) ==========");
             Map<String, List<String>> pdfImagePaths = new LinkedHashMap<>();
             Map<String, Long> pdfConvertNanosMap = new LinkedHashMap<>();
-            for (String pdfFile : PDF_FILES) {
-                String fileName = new File(pdfFile).getName();
+            for (File pdfFile : pdfFiles) {
+                String pdfPath = pdfFile.getAbsolutePath();
+                String fileName = pdfFile.getName();
                 LocalDateTime pdfConvertStart = LocalDateTime.now();
-                List<String> imagePaths = convertPdfToImages(pdfFile);
+                List<String> imagePaths = convertPdfToImages(pdfPath);
                 LocalDateTime pdfConvertEnd = LocalDateTime.now();
                 long pdfConvertNanos = Duration.between(pdfConvertStart, pdfConvertEnd).toNanos();
-                pdfImagePaths.put(pdfFile, imagePaths);
-                pdfConvertNanosMap.put(pdfFile, pdfConvertNanos);
+                pdfImagePaths.put(pdfPath, imagePaths);
+                pdfConvertNanosMap.put(pdfPath, pdfConvertNanos);
                 System.out.printf("  %s: %d pages, %.2f ms, avg %.2f ms/page%n",
                         fileName, imagePaths.size(),
                         pdfConvertNanos / 1000_000d,
@@ -140,11 +157,16 @@ public class OCRPipelineGPUPerfTest {
             params.put("tableBatchSize", tableBatchSize);
 
             // Warm up with first page of first PDF
-            System.out.println("\n========== Warm Up ==========");
-            List<String> warmUpImages = pdfImagePaths.get(PDF_FILES[0]);
-            if (warmUpImages != null && !warmUpImages.isEmpty()) {
-                pipeline.predictV2(warmUpImages.subList(0, 1), params);
-                System.out.println("Warm up completed.");
+            if (skipWarmup) {
+                System.out.println("\n========== Warm Up ==========");
+                System.out.println("Skipped (skipWarmup=true).");
+            } else {
+                System.out.println("\n========== Warm Up ==========");
+                List<String> warmUpImages = pdfImagePaths.get(pdfFiles.get(0).getAbsolutePath());
+                if (warmUpImages != null && !warmUpImages.isEmpty()) {
+                    pipeline.predictV2(warmUpImages.subList(0, 1), params);
+                    System.out.println("Warm up completed.");
+                }
             }
             logMemory("after-warmup");
 
@@ -171,20 +193,31 @@ public class OCRPipelineGPUPerfTest {
             Map<String, Integer> fileSuccessPages = new LinkedHashMap<>();
 
             List<MemoryPoint> allStageMemoryPoints = new ArrayList<>();
+            long[] stageTimingStart = {0L};
 
             // Wire memoryObserver for per-stage tracking
             params.put("memoryObserver", (Consumer<String>) stage -> {
+                long now = System.nanoTime();
                 MemoryPoint point = MemoryPoint.capture("stage:" + stage, null);
                 allStageMemoryPoints.add(point);
-                System.out.printf(Locale.ROOT,
-                        "  STAGE %-42s heapGB=%.2f workGB=%.2f privGB=%.2f%n",
-                        stage, point.heapGb(), point.workingSetGb(), point.privateGb());
+                if (stageTimingStart[0] != 0L) {
+                    System.out.printf(Locale.ROOT,
+                            "  STAGE %-42s heapGB=%.2f workGB=%.2f privGB=%.2f timeMs=%7.2f%n",
+                            stage, point.heapGb(), point.workingSetGb(), point.privateGb(),
+                            (now - stageTimingStart[0]) / 1_000_000d);
+                } else {
+                    System.out.printf(Locale.ROOT,
+                            "  STAGE %-42s heapGB=%.2f workGB=%.2f privGB=%.2f%n",
+                            stage, point.heapGb(), point.workingSetGb(), point.privateGb());
+                }
+                stageTimingStart[0] = now;
             });
 
             for (int iter = 0; iter < iterations; iter++) {
-                for (String pdfFile : PDF_FILES) {
-                    String fileName = new File(pdfFile).getName();
-                    List<String> imagePaths = pdfImagePaths.get(pdfFile);
+                for (File pdfFile : pdfFiles) {
+                    String pdfPath = pdfFile.getAbsolutePath();
+                    String fileName = pdfFile.getName();
+                    List<String> imagePaths = pdfImagePaths.get(pdfPath);
                     int pageCount = imagePaths.size();
                     System.out.println("--- Processing: " + fileName + " (iter " + (iter + 1) + ") ---");
                     System.out.println("  Pages: " + pageCount);
@@ -257,9 +290,9 @@ public class OCRPipelineGPUPerfTest {
                 long ocr = fileOcrNanos.get(fileName);
                 // Find the PDF path that matches this fileName
                 long pdfNanos = 0;
-                for (int fi = 0; fi < PDF_FILES.length; fi++) {
-                    if (new File(PDF_FILES[fi]).getName().equals(fileName)) {
-                        pdfNanos = pdfConvertNanosMap.getOrDefault(PDF_FILES[fi], 0L);
+                for (File pdfFile : pdfFiles) {
+                    if (pdfFile.getName().equals(fileName)) {
+                        pdfNanos = pdfConvertNanosMap.getOrDefault(pdfFile.getAbsolutePath(), 0L);
                         break;
                     }
                 }
