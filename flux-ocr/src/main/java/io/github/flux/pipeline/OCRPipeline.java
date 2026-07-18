@@ -24,6 +24,7 @@ import io.github.flux.util.ImageUtil;
 import io.github.flux.util.ParameterUtil;
 import org.opencv.core.Mat;
 import org.opencv.core.Rect;
+import org.opencv.core.Scalar;
 import org.opencv.imgcodecs.Imgcodecs;
 import org.opencv.imgproc.Imgproc;
 
@@ -54,6 +55,10 @@ public class OCRPipeline {
           "display_formula", "inline_formula",
           // Docling labels
           "Formula"
+  );
+
+  private static final Set<String> INLINE_FORMULA_LABELS = Set.of(
+          "inline_formula"
   );
 
   private static final Set<String> TABLE_LABELS = Set.of(
@@ -353,24 +358,46 @@ public class OCRPipeline {
                                   List<FormulaTask> formulaTasks,
                                   List<TableTask> tableTasks,
                                   MatManager matManager) {
+    // First pass: collect table and inline formula regions per page
+    Map<PageContext, List<float[]>> pageTableBoxes = new HashMap<>();
+    Map<PageContext, List<float[]>> pageInlineFormulaBoxes = new HashMap<>();
+    for (int pageIndex = 0; pageIndex < pages.size(); pageIndex++) {
+      PageContext page = pages.get(pageIndex);
+      List<ObjectDetectionResult> regions = pageIndex < allLayoutRegions.size()
+          ? allLayoutRegions.get(pageIndex)
+          : List.of();
+      for (ObjectDetectionResult region : regions) {
+        if (TABLE_LABELS.contains(region.label())) {
+          pageTableBoxes.computeIfAbsent(page, k -> new ArrayList<>()).add(region.coordinate());
+        }
+        if (INLINE_FORMULA_LABELS.contains(region.label())) {
+          pageInlineFormulaBoxes.computeIfAbsent(page, k -> new ArrayList<>()).add(region.coordinate());
+        }
+      }
+    }
+
+    // Second pass: classify regions and create tasks
     for (int pageIndex = 0; pageIndex < pages.size(); pageIndex++) {
       PageContext page = pages.get(pageIndex);
       page.layoutRegionResults = new ArrayList<>();
       List<ObjectDetectionResult> regions = pageIndex < allLayoutRegions.size()
           ? allLayoutRegions.get(pageIndex)
           : List.of();
+      List<float[]> inlineFormulaBoxes = pageInlineFormulaBoxes.getOrDefault(page, List.of());
       for (ObjectDetectionResult region : regions) {
         String regionType = classifyLabel(region.label());
 
         switch (regionType) {
           case "image" -> page.layoutRegionResults.add(LayoutRegionResult.image(region));
           case "formula" -> {
-            if (formulaRecognitionModel != null) {
+            // Formula: send to formula model (if available), but skip if inside a table region
+            if (formulaRecognitionModel != null
+                && !isInsideAnyTable(region.coordinate(), pageTableBoxes.get(page))) {
               int layoutIndex = page.layoutRegionResults.size();
               page.layoutRegionResults.add(null);
               formulaTasks.add(new FormulaTask(page, region, layoutIndex));
             } else {
-              addTextTask(page, region, textTasks, matManager);
+              addTextTask(page, region, textTasks, matManager, inlineFormulaBoxes);
             }
           }
           case "table" -> {
@@ -379,21 +406,88 @@ public class OCRPipeline {
               page.layoutRegionResults.add(null);
               tableTasks.add(new TableTask(page, region, layoutIndex));
             } else {
-              addTextTask(page, region, textTasks, matManager);
+              addTextTask(page, region, textTasks, matManager, inlineFormulaBoxes);
             }
           }
-          default -> addTextTask(page, region, textTasks, matManager);
+          default -> addTextTask(page, region, textTasks, matManager, inlineFormulaBoxes);
+        }
+      }
+    }
+  }
+
+  /**
+   * Check if a bounding box is entirely inside any of the given table bounding boxes.
+   * Used to skip formula recognition for formulas that are inside table regions
+   * (the table model will handle them).
+   *
+   * @param formulaBox [x1, y1, x2, y2] coordinate of formula region
+   * @param tableBoxes list of [x1, y1, x2, y2] table coordinates (may be null)
+   * @return true if formulaBox is fully contained in any table box
+   */
+  private boolean isInsideAnyTable(float[] formulaBox, List<float[]> tableBoxes) {
+    if (formulaBox == null || tableBoxes == null || tableBoxes.isEmpty()) {
+      return false;
+    }
+    for (float[] tableBox : tableBoxes) {
+      if (isBoxInside(formulaBox, tableBox)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Check if inner box is entirely inside outer box.
+   */
+  private boolean isBoxInside(float[] inner, float[] outer) {
+    return inner[0] >= outer[0] && inner[1] >= outer[1]
+        && inner[2] <= outer[2] && inner[3] <= outer[3];
+  }
+
+  /**
+   * Mask inline formula areas in a text region image with white fill.
+   * Prevents text recognition from producing garbled output on formula content.
+   *
+   * @param image the cropped text region image (modified in place)
+   * @param regionCoord [x1, y1, x2, y2] of the text region in page coordinates
+   * @param inlineFormulaBoxes list of [x1, y1, x2, y2] inline formula coordinates in page space
+   */
+  private void maskInlineFormulas(Mat image, float[] regionCoord, List<float[]> inlineFormulaBoxes) {
+    if (regionCoord == null || inlineFormulaBoxes == null || inlineFormulaBoxes.isEmpty()) {
+      return;
+    }
+    float rx1 = regionCoord[0], ry1 = regionCoord[1], rx2 = regionCoord[2], ry2 = regionCoord[3];
+    for (float[] fb : inlineFormulaBoxes) {
+      // Check if formula overlaps with this text region
+      float overlapX1 = Math.max(fb[0], rx1);
+      float overlapY1 = Math.max(fb[1], ry1);
+      float overlapX2 = Math.min(fb[2], rx2);
+      float overlapY2 = Math.min(fb[3], ry2);
+      if (overlapX1 < overlapX2 && overlapY1 < overlapY2) {
+        // Convert to local coordinates relative to the text region
+        int lx1 = Math.max(0, Math.round(overlapX1 - rx1));
+        int ly1 = Math.max(0, Math.round(overlapY1 - ry1));
+        int lx2 = Math.min(image.cols(), Math.round(overlapX2 - rx1));
+        int ly2 = Math.min(image.rows(), Math.round(overlapY2 - ry1));
+        if (lx2 > lx1 && ly2 > ly1) {
+          Imgproc.rectangle(image, new Rect(lx1, ly1, lx2 - lx1, ly2 - ly1),
+              new Scalar(255, 255, 255), -1);
         }
       }
     }
   }
 
   private void addTextTask(PageContext page, ObjectDetectionResult region,
-                           List<TextTask> textTasks, MatManager matManager) {
+                           List<TextTask> textTasks, MatManager matManager,
+                           List<float[]> inlineFormulaBoxes) {
     int layoutIndex = page.layoutRegionResults.size();
     page.layoutRegionResults.add(null);
-    textTasks.add(new TextTask(
-        page, region, layoutIndex, cropRegion(matManager, page.srcImage, region.coordinate())));
+    Mat cropped = cropRegion(matManager, page.srcImage, region.coordinate());
+    // Mask inline formula areas to prevent garbled text recognition
+    if (!FORMULA_LABELS.contains(region.label())) {
+      maskInlineFormulas(cropped, region.coordinate(), inlineFormulaBoxes);
+    }
+    textTasks.add(new TextTask(page, region, layoutIndex, cropped));
   }
 
   /**
@@ -1020,18 +1114,32 @@ public class OCRPipeline {
           List<ObjectDetectionResult> regions = allRegions.get(i);
           if (layoutModel != null) {
             page.layoutRegionResults = new ArrayList<>();
+            // First pass: collect table and inline formula regions for overlap checking
+            List<float[]> tableBoxes = new ArrayList<>();
+            List<float[]> inlineFormulaBoxes = new ArrayList<>();
+            for (ObjectDetectionResult region : regions) {
+              if (TABLE_LABELS.contains(region.label())) {
+                tableBoxes.add(region.coordinate());
+              }
+              if (INLINE_FORMULA_LABELS.contains(region.label())) {
+                inlineFormulaBoxes.add(region.coordinate());
+              }
+            }
+            // Second pass: classify and create tasks
             for (ObjectDetectionResult region : regions) {
               String type = classifyLabel(region.label());
               switch (type) {
                 case "image" -> page.layoutRegionResults.add(LayoutRegionResult.image(region));
                 case "formula" -> {
-                  if (formulaRecognitionModel != null) {
+                  // Formula: send to formula model (if available), but skip if inside a table region
+                  if (formulaRecognitionModel != null
+                      && !isInsideAnyTable(region.coordinate(), tableBoxes)) {
                     int layoutIndex = page.layoutRegionResults.size();
                     page.layoutRegionResults.add(null);
                     page.formulaTasks.add(new RegionTaskV2(page, region, layoutIndex,
                         cloneCropV2(matManager, src, region.coordinate())));
                   } else {
-                    addTextRegionTaskV2(page, region, src, matManager);
+                    addTextRegionTaskV2(page, region, src, matManager, inlineFormulaBoxes);
                   }
                 }
                 case "table" -> {
@@ -1041,10 +1149,10 @@ public class OCRPipeline {
                     page.tableTasks.add(new RegionTaskV2(page, region, layoutIndex,
                         cloneCropV2(matManager, src, region.coordinate())));
                   } else {
-                    addTextRegionTaskV2(page, region, src, matManager);
+                    addTextRegionTaskV2(page, region, src, matManager, inlineFormulaBoxes);
                   }
                 }
-                default -> addTextRegionTaskV2(page, region, src, matManager);
+                default -> addTextRegionTaskV2(page, region, src, matManager, inlineFormulaBoxes);
               }
             }
           } else {
@@ -1060,11 +1168,16 @@ public class OCRPipeline {
     return pages;
   }
 
-  private void addTextRegionTaskV2(PageV2 page, ObjectDetectionResult region, Mat src, MatManager matManager) {
+  private void addTextRegionTaskV2(PageV2 page, ObjectDetectionResult region, Mat src, MatManager matManager,
+                                    List<float[]> inlineFormulaBoxes) {
     int layoutIndex = page.layoutRegionResults.size();
     page.layoutRegionResults.add(null);
-    page.textTasks.add(new RegionTaskV2(page, region, layoutIndex,
-        cloneCropV2(matManager, src, region.coordinate())));
+    Mat cropped = cloneCropV2(matManager, src, region.coordinate());
+    // Mask inline formula areas to prevent garbled text recognition
+    if (!FORMULA_LABELS.contains(region.label())) {
+      maskInlineFormulas(cropped, region.coordinate(), inlineFormulaBoxes);
+    }
+    page.textTasks.add(new RegionTaskV2(page, region, layoutIndex, cropped));
   }
 
   private Mat cloneCropV2(MatManager matManager, Mat src, float[] coordinate) {
